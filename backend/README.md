@@ -39,8 +39,25 @@ Standard error envelope:
 |--------|------|------|-------------|
 | POST | `/auth/register` | Public | Create a new Account + first admin user, returns tokens |
 | POST | `/auth/login` | Public | Email + password login, returns tokens |
-| POST | `/auth/refresh` | Public | Exchange a refresh token for a new token pair |
+| POST | `/auth/refresh` | Cookie/Body | Rotate tokens — reads the `refreshToken` httpOnly cookie, or a body token |
+| POST | `/auth/logout` | Public | Revokes the current session + clears the cookie (idempotent) |
 | GET | `/auth/me` | Bearer | Current authenticated user's profile |
+| GET | `/auth/sessions` | Bearer | List the caller's active sessions (devices) |
+| DELETE | `/auth/sessions/:id` | Bearer | Revoke one of the caller's own sessions |
+| POST | `/auth/logout-all` | Bearer | Revoke all the caller's sessions except the current one |
+
+> **Token model:** the **access token** is a short-lived JWT kept in memory and
+> carries `{ sub, accountId, role, sid }`. The **refresh token** is opaque
+> (`sessionId.secret`) and DB-backed: each one is a `Session` document storing
+> only the **SHA-256 hash** of its secret (a DB leak exposes no usable token),
+> plus device metadata and a `familyId` rotation lineage.
+>
+> `register`/`login` set the refresh token as an `httpOnly`, `Secure` (prod),
+> `SameSite` cookie scoped to `/api/v1/auth`, and also return it in the body for
+> API/mobile clients. Every `/auth/refresh` **rotates** the token: the old
+> session is revoked and a child is minted in the same family. Replaying an
+> already-rotated token triggers **reuse detection** — the entire family is
+> revoked (suspected theft). A TTL index purges expired sessions automatically.
 
 **POST `/auth/register`** — start here, no token needed.
 
@@ -135,6 +152,79 @@ Example: `GET /users?page=1&limit=10&role=manager&search=jane`
 ```
 
 **DELETE `/users/:id`** — no body. Returns `204 No Content`.
+
+### Owners (`/owners`)
+
+All routes require `Authorization: Bearer <accessToken>`. Writes are restricted to **admin / manager**.
+
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| POST | `/owners` | admin, manager | Create a property owner |
+| GET | `/owners` | any | List owners (`?page&limit&sort&search`) |
+| GET | `/owners/:id` | any | Get one owner |
+| PATCH | `/owners/:id` | admin, manager | Update an owner |
+| DELETE | `/owners/:id` | admin, manager | Delete (409 if still referenced by a property) |
+
+### Properties (`/properties`)
+
+Writes restricted to **admin / manager**. Soft-deleted (`isDeleted`); deleting a property cascades a soft-delete to its rooms.
+
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| POST | `/properties` | admin, manager | Create a property (`ownerId` must exist in your account) |
+| GET | `/properties` | any | List (`?page&limit&sort&status&ownerId&search`), owner populated |
+| GET | `/properties/:id` | any | Get one property |
+| PATCH | `/properties/:id` | admin, manager | Update |
+| DELETE | `/properties/:id` | admin, manager | Soft-delete (+ its rooms) |
+
+### Rooms (`/properties/:propertyId/rooms`)
+
+Nested under a property; scoped through it (a room has no `accountId`). Writes restricted to **admin / manager**. `rentAmount` is stored as `Decimal128` and returned as a string. `Property.totalRooms` auto-syncs on create/delete.
+
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| POST | `/properties/:propertyId/rooms` | admin, manager | Add a room |
+| GET | `/properties/:propertyId/rooms` | any | List rooms (`?page&limit&sort&status`) |
+| GET | `/properties/:propertyId/rooms/:id` | any | Get one room |
+| PATCH | `/properties/:propertyId/rooms/:id` | admin, manager | Update |
+| DELETE | `/properties/:propertyId/rooms/:id` | admin, manager | Soft-delete |
+
+### Lettings — Leads / Viewings / Applicants / Listings
+
+Phase-2 lettings. Create/update/delete allowed for **admin / manager / agent**; reads open to any authenticated user. Money fields (`holdingDeposit`, `rentAdvertised`) are `Decimal128`, returned as strings.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| CRUD | `/leads` | accountId-scoped; `assignedTo` defaults to the creating agent. Filters: `status,source,assignedTo,search` |
+| CRUD | `/viewings` | accountId-scoped; `agentId` defaults to creator. Filters: `status,from,to`; `scheduledAt` required on create |
+| CRUD | `/applicants` | accountId-scoped. Filters: `referenceStatus,onboardingStatus` |
+| CRUD | `/listings` | scoped via room→property→account; create requires a `roomId` you own. Filter: `status` |
+
+Each supports `POST /` , `GET /` (paginated), `GET /:id`, `PATCH /:id`, `DELETE /:id`.
+
+### Maintenance (`/maintenance`)
+
+Scoped by `accountId`. Create/update allowed for **admin / manager / agent**; delete for **admin / manager**. `cost` is `Decimal128`, returned as a string.
+
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| POST | `/maintenance` | admin, manager, agent | Raise a request (`reportedBy` from token) |
+| GET | `/maintenance` | any | List (`?page&limit&sort&status&priority&propertyId`), property populated |
+| GET | `/maintenance/:id` | any | Get one |
+| PATCH | `/maintenance/:id` | admin, manager, agent | Update |
+| DELETE | `/maintenance/:id` | admin, manager | Delete |
+
+### Compliance (`/compliance`)
+
+Scoped via the parent property (a certificate has no `accountId`). Writes restricted to **admin / manager**. `status` (`valid`/`expiring`/`expired`) is auto-derived from `expiryDate` (30-day window).
+
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| POST | `/compliance` | admin, manager | Add a certificate (`propertyId` must be in your account) |
+| GET | `/compliance` | any | List (`?page&limit&sort&propertyId&certType&status&due`); `due=soon\|expired` |
+| GET | `/compliance/:id` | any | Get one |
+| PATCH | `/compliance/:id` | admin, manager | Update |
+| DELETE | `/compliance/:id` | admin, manager | Delete |
 
 ### Common status codes
 

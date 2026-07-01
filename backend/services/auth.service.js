@@ -4,7 +4,8 @@ const bcrypt = require('bcryptjs');
 const { Account, User } = require('../models');
 const ApiError = require('../utils/ApiError');
 const env = require('../config/env');
-const { issueTokens, verifyRefreshToken } = require('../utils/token');
+const { signAccessToken } = require('../utils/token');
+const sessionService = require('./session.service');
 
 function sanitize(userDoc) {
   const obj = userDoc.toObject ? userDoc.toObject() : userDoc;
@@ -12,12 +13,25 @@ function sanitize(userDoc) {
   return obj;
 }
 
+/** Issue an access token + a fresh rotating refresh-token session for a user. */
+async function issueFor(user, ctx = {}) {
+  const { session, token: refreshToken } = await sessionService.createSession({
+    accountId: user.accountId,
+    userId: user._id,
+    userAgent: ctx.userAgent,
+    ip: ctx.ip,
+  });
+  return { accessToken: signAccessToken(user, session._id), refreshToken };
+}
+
 /**
- * Public sign-up. Creates a brand-new Account and its first admin User,
- * then returns the user plus a fresh token pair.
- * @param {object} data - { accountName, accountType, name, email, password }
+ * Public sign-up. Creates a brand-new Account and its first user (the
+ * account-owning admin unless a role is supplied), then returns the user plus
+ * a fresh token pair.
+ * @param {object} data - { accountName, accountType, name, email, password, role }
+ * @param {object} ctx  - { userAgent, ip }
  */
-async function register(data) {
+async function register(data, ctx) {
   const existing = await User.findOne({ email: data.email });
   if (existing) throw ApiError.conflict('A user with this email already exists');
 
@@ -34,18 +48,19 @@ async function register(data) {
     name: data.name,
     email: data.email,
     passwordHash,
-    role: 'admin', // first user owns the account
+    role: data.role || 'admin', // first user owns the account; defaults to admin
     status: 'active',
     lastLogin: new Date(),
   });
 
-  return { account, user: sanitize(user), tokens: issueTokens(user) };
+  return { account, user: sanitize(user), tokens: await issueFor(user, ctx) };
 }
 
 /**
  * Email + password login. Returns the user and a fresh token pair.
+ * @param {object} ctx - { userAgent, ip }
  */
-async function login(email, password) {
+async function login(email, password, ctx) {
   // passwordHash has select:false on the model, so request it explicitly.
   const user = await User.findOne({ email }).select('+passwordHash');
   if (!user || !user.passwordHash) throw ApiError.unauthorized('Invalid credentials');
@@ -58,24 +73,23 @@ async function login(email, password) {
   user.lastLogin = new Date();
   await user.save();
 
-  return { user: sanitize(user), tokens: issueTokens(user) };
+  return { user: sanitize(user), tokens: await issueFor(user, ctx) };
 }
 
 /**
- * Exchange a valid refresh token for a new token pair.
+ * Rotate a refresh token: validates + rotates the session (with reuse
+ * detection) and mints a new access token. Returns a fresh token pair.
+ * @param {string} refreshToken - opaque token from cookie or body
+ * @param {object} ctx - { userAgent, ip }
  */
-async function refresh(refreshToken) {
-  let decoded;
-  try {
-    decoded = verifyRefreshToken(refreshToken);
-  } catch (err) {
-    throw ApiError.unauthorized('Invalid or expired refresh token');
-  }
-
-  const user = await User.findById(decoded.sub);
-  if (!user || user.status === 'disabled') throw ApiError.unauthorized('User no longer active');
-
-  return { tokens: issueTokens(user) };
+async function refresh(refreshToken, ctx) {
+  const { user, session, token } = await sessionService.rotate(refreshToken, ctx);
+  return {
+    tokens: {
+      accessToken: signAccessToken(user, session._id),
+      refreshToken: token,
+    },
+  };
 }
 
 module.exports = { register, login, refresh };

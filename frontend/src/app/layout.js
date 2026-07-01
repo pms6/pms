@@ -1,6 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "./Context/AuthContext";
+import { ToastContainer } from "./Shared/Nexttoast";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,6 +27,13 @@ export default function RootLayout({ children }) {
       <body className="min-h-full flex flex-col">
         <AuthProvider>
         {children}
+          <ToastContainer 
+            theme="dark"
+            position="top-right"
+            autoClose={5000}
+            closeOnClick
+            pauseOnHover={false} 
+          />
         </AuthProvider>
       </body>
     </html>

@@ -24,9 +24,20 @@ router.get('/', (_req, res) =>
 
 // Phase 1 — Core platform
 router.use('/auth', require('./auth.routes'));
-// router.use('/accounts', require('./account.routes'));
+router.use('/accounts', require('./account.routes'));
 router.use('/users', require('./user.routes'));
-// router.use('/properties', require('./property.routes'));
-// router.use('/rooms', require('./room.routes'));
+router.use('/dashboard', require('./dashboard.routes'));
+router.use('/owners', require('./owner.routes'));
+router.use('/properties', require('./property.routes')); // mounts nested /:propertyId/rooms
+
+// Phase 2 — Lettings
+router.use('/leads', require('./lead.routes'));
+router.use('/viewings', require('./viewing.routes'));
+router.use('/applicants', require('./applicant.routes'));
+router.use('/listings', require('./roomListing.routes'));
+
+// Phase 4 — Operations & compliance (started early for the manager dashboard)
+router.use('/maintenance', require('./maintenance.routes'));
+router.use('/compliance', require('./compliance.routes'));
 
 module.exports = router;

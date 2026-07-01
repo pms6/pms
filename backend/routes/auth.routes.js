@@ -14,8 +14,14 @@ const router = express.Router();
 router.post('/register', validate(schema.register), ctrl.register);
 router.post('/login', validate(schema.login), ctrl.login);
 router.post('/refresh', validate(schema.refresh), ctrl.refresh);
+router.post('/logout', ctrl.logout);
 
 // Protected — requires a valid access token.
 router.get('/me', authenticate, accountScope, ctrl.me);
+
+// Session management (the caller's own devices).
+router.get('/sessions', authenticate, ctrl.listSessions);
+router.delete('/sessions/:id', authenticate, validate(schema.revokeSession), ctrl.revokeSession);
+router.post('/logout-all', authenticate, ctrl.logoutAll);
 
 module.exports = router;

@@ -6,7 +6,7 @@ const ApiError = require('../utils/ApiError');
 
 /**
  * Verify the JWT access token and attach the decoded principal to req.user.
- * Expected payload: { sub: userId, accountId, role }.
+ * Expected payload: { sub: userId, accountId, role, sid }.
  */
 function authenticate(req, _res, next) {
   const header = req.headers.authorization || '';
@@ -22,6 +22,7 @@ function authenticate(req, _res, next) {
       id: payload.sub,
       accountId: payload.accountId,
       role: payload.role,
+      sid: payload.sid, // originating session id (for the active-sessions view)
     };
     return next();
   } catch (err) {

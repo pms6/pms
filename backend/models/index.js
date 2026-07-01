@@ -12,6 +12,7 @@ module.exports = {
   User: require('./User'),
   Owner: require('./Owner'),
   Notification: require('./Notification'),
+  Session: require('./Session'), // auth infra: refresh-token sessions
 
   // Property & Structure
   Property: require('./Property'),

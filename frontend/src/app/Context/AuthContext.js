@@ -1,4 +1,4 @@
-"use client"
+"use client";
 import { createContext, useContext, useEffect, useState } from "react";
 import api, { setAccessToken, setRefreshHandler } from "../api/api";
 
@@ -6,73 +6,77 @@ const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [refreshToken, setRefreshToken] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // LOGIN
+  // LOGIN — access token kept in memory; refresh token set as httpOnly cookie
+  // by the server, so we never touch it from JS.
   const login = async (email, password) => {
     const res = await api.post("/auth/login", { email, password });
-
     const { user, tokens } = res.data.data;
-
     setUser(user);
     setAccessToken(tokens.accessToken);
-    setRefreshToken(tokens.refreshToken);
-
-    return user; // <-- return logged-in user
+    return user;
   };
 
   // REGISTER
   const register = async (payload) => {
     const res = await api.post("/auth/register", payload);
-
     const { user, tokens } = res.data.data;
-
     setUser(user);
     setAccessToken(tokens.accessToken);
-    setRefreshToken(tokens.refreshToken);
+    return user;
   };
 
-  // LOGOUT
-  const logout = () => {
+  // LOGOUT — clears the refresh cookie server-side, then the in-memory state.
+  const logout = async () => {
+    try {
+      await api.post("/auth/logout");
+    } catch {
+      // ignore network/log-out errors; clear local state regardless
+    }
     setUser(null);
     setAccessToken(null);
-    setRefreshToken(null);
   };
 
-  // REFRESH LOGIC (matches backend)
+  // REFRESH — the cookie rides along automatically (withCredentials), so no
+  // token is needed in the body. Returns the new access token for the
+  // axios interceptor to retry the original request.
   const refresh = async () => {
-    if (!refreshToken) throw new Error("No refresh token");
-
-    const res = await api.post("/auth/refresh", {
-      refreshToken,
-    });
-
+    const res = await api.post("/auth/refresh");
     const { tokens } = res.data.data;
-
     setAccessToken(tokens.accessToken);
-    setRefreshToken(tokens.refreshToken || refreshToken);
-
     return tokens.accessToken;
   };
 
-  // LOAD USER
+  // LOAD CURRENT USER (assumes a valid access token is in memory).
   const loadMe = async () => {
-    try {
-      const res = await api.get("/auth/me");
-      setUser(res.data.data);
-    } catch (err) {
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
+    const res = await api.get("/auth/me");
+    setUser(res.data.data);
   };
 
-  // setup refresh handler for interceptor
+  // Make refresh available to the response interceptor once.
   useEffect(() => {
     setRefreshHandler(refresh);
-    loadMe();
-  }, [refreshToken]);
+  }, []);
+
+  // Boot: try to restore the session from the refresh cookie. If there is no
+  // valid cookie, /auth/refresh 401s and we simply stay logged out.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        await refresh();
+        if (active) await loadMe();
+      } catch {
+        if (active) setUser(null);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <AuthContext.Provider
@@ -81,6 +85,7 @@ export const AuthProvider = ({ children }) => {
         login,
         register,
         logout,
+        refresh,
         loading,
         isAuthenticated: !!user,
       }}

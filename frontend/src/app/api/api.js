@@ -2,6 +2,7 @@ import axios from "axios";
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL,
+  withCredentials: true, // send/receive the httpOnly refresh cookie
 });
 
 let accessToken = null;
@@ -23,20 +24,26 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// auto refresh
+// Endpoints that must never trigger the auto-refresh retry (avoids loops:
+// a failing /auth/refresh would otherwise call the refresh handler forever).
+const NO_REFRESH = ["/auth/refresh", "/auth/login", "/auth/logout"];
+
+// auto refresh on 401
 api.interceptors.response.use(
   (res) => res,
   async (err) => {
     const original = err.config;
+    const isAuthEndpoint = NO_REFRESH.some((p) => (original?.url || "").includes(p));
 
-    if (err.response?.status === 401 && !original._retry && refreshHandler) {
+    if (err.response?.status === 401 && !original._retry && !isAuthEndpoint && refreshHandler) {
       original._retry = true;
-
-      const newToken = await refreshHandler();
-
-      original.headers.Authorization = `Bearer ${newToken}`;
-
-      return api(original);
+      try {
+        const newToken = await refreshHandler();
+        original.headers.Authorization = `Bearer ${newToken}`;
+        return api(original);
+      } catch (refreshErr) {
+        return Promise.reject(refreshErr);
+      }
     }
 
     return Promise.reject(err);

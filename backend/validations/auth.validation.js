@@ -9,6 +9,7 @@ const register = z.object({
     name: z.string().trim().min(1, 'Name is required'),
     email: z.string().trim().toLowerCase().email('Invalid email'),
     password: z.string().min(8, 'Password must be at least 8 characters'),
+    role: z.enum(['admin', 'manager', 'agent', 'finance', 'tenant']).optional(),
   }),
 });
 
@@ -20,9 +21,17 @@ const login = z.object({
 });
 
 const refresh = z.object({
+  // Optional: web clients send the refresh token via the httpOnly cookie,
+  // API/mobile clients may send it in the body instead.
   body: z.object({
-    refreshToken: z.string().min(1, 'refreshToken is required'),
+    refreshToken: z.string().min(1).optional(),
   }),
 });
 
-module.exports = { register, login, refresh };
+const revokeSession = z.object({
+  params: z.object({
+    id: z.string().regex(/^[a-f\d]{24}$/i, 'Invalid session id'),
+  }),
+});
+
+module.exports = { register, login, refresh, revokeSession };

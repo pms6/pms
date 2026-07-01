@@ -9,6 +9,7 @@ const maintenanceRequestSchema = new mongoose.Schema(
     roomId: { type: mongoose.Schema.Types.ObjectId, ref: 'Room' },
     reportedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     supplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier' },
+    title: { type: String, trim: true },
     category: { type: String },
     priority: { type: String, enum: ['low', 'med', 'high', 'urgent'], default: 'med' },
     status: {

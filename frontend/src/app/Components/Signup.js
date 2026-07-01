@@ -8,7 +8,7 @@ export default function SignUpForm({ onSwitch }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("manager"); 
+  const [role, setRole] = useState("manager");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -21,12 +21,31 @@ export default function SignUpForm({ onSwitch }) {
     setError("");
 
     try {
-      // 1. Fire the dedicated register function from your AuthContext
-      // This automatically uses Axios under the hood, hits '/auth/register', and saves tokens!
-      await register({ accountName, name, email, password, role });
+      // 1. Fire the dedicated register function from your AuthContext.
+      // Sign-up creates a NEW account; the chosen role is applied to the first
+      // user (the backend defaults to "admin" if none is supplied).
+      const user = await register({ accountName, name, email, password, role });
 
-      // 2. Redirect on absolute success
-      router.push("/dashboard"); 
+      // 2. Redirect to the dashboard matching the created user's role.
+      switch (user.role) {
+        case "admin":
+          router.push("/admin/dashboard");
+          break;
+        case "manager":
+          router.push("/manager/dashboard");
+          break;
+        case "agent":
+          router.push("/agent/dashboard");
+          break;
+        case "finance":
+          router.push("/finance/dashboard");
+          break;
+        case "tenant":
+          router.push("/tenant/dashboard");
+          break;
+        default:
+          router.push("/");
+      }
     } catch (err) {
       // 3. Properly pull errors from Axios response shape
       const message = err.response?.data?.message || err.message || "Registration failed.";
