@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, CreditCard, Wrench, Home, ShieldCheck, BookOpen, Users, User } from "lucide-react";
+import { LayoutDashboard, CreditCard, Wrench, Home, ShieldCheck, BookOpen, Users, User, CalendarDays } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 
 const NAV = [
@@ -8,6 +8,16 @@ const NAV = [
     href: "/tenant/dashboard",
     label: "Dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    href: "/tenant/onboarding",
+    label: "Onboarding",
+    icon: CreditCard,
+  },
+  {
+    href: "/tenant/viewing",
+    label: "Viewings",
+    icon: CalendarDays,
   },
   {
     href: "/tenant/room",
