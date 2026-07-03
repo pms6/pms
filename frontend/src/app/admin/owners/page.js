@@ -159,11 +159,21 @@ export default function AdminOwners() {
   const list = owners.filter((o) => o.name.toLowerCase().includes(q.toLowerCase()) || (o.email || "").toLowerCase().includes(q.toLowerCase()));
   const totalIncome = owners.reduce((s, o) => s + o.monthlyIncome, 0);
 
+  // Mutate the shared `owners` store (not just local state) so newly added
+  // owners appear in other screens too (e.g. the Add Property owner dropdown).
   const save = (owner) => {
-    setOwners((prev) => (prev.some((o) => o.id === owner.id) ? prev.map((o) => (o.id === owner.id ? owner : o)) : [owner, ...prev]));
+    const idx = seedOwners.findIndex((o) => o.id === owner.id);
+    if (idx >= 0) seedOwners[idx] = owner;
+    else seedOwners.unshift(owner);
+    setOwners([...seedOwners]);
     setModal(null);
   };
-  const remove = (o) => { if (confirm(`Delete owner "${o.name}"?`)) setOwners((prev) => prev.filter((x) => x.id !== o.id)); };
+  const remove = (o) => {
+    if (!confirm(`Delete owner "${o.name}"?`)) return;
+    const idx = seedOwners.findIndex((x) => x.id === o.id);
+    if (idx >= 0) seedOwners.splice(idx, 1);
+    setOwners([...seedOwners]);
+  };
 
   return (
     <div className="space-y-5">

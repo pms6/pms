@@ -217,7 +217,7 @@ export default function AdminPropertyDetail() {
   if (!property) {
     return (
       <div className="space-y-4">
-        <Link href="/admin/properties" className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]"><ArrowLeft size={16} /> Back</Link>
+        <Link href="/agent/properties" className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]"><ArrowLeft size={16} /> Back</Link>
         <p className="text-gray-400">Property not found.</p>
       </div>
     );
@@ -242,7 +242,7 @@ export default function AdminPropertyDetail() {
 
   return (
     <div className="space-y-5">
-      <Link href="/admin/properties" className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]">
+      <Link href="/agent/properties" className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]">
         <ArrowLeft size={16} /> Back to properties
       </Link>
 

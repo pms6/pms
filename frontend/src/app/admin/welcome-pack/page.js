@@ -1,4 +1,5 @@
 import React from 'react';
+import { welcomePack } from '../_data/dummy';
 
 const WelcomePack = () => {
   return (
@@ -19,10 +20,12 @@ const WelcomePack = () => {
       <div className="mb-10">
         <h2 className="text-lg font-bold mb-2">Quick Info</h2>
         <p className="text-sm mb-4">Store simple format information such as useful telephone numbers and codes, available for tenants to see.</p>
-        <div className="flex justify-between border-b pb-2 mb-4">
-          <span>Dahlia Properties 24/7: 07123 456789</span>
-          <span className="text-blue-600 text-sm cursor-pointer underline">Edit | Delete</span>
-        </div>
+        {welcomePack.quickInfo.map((q) => (
+          <div key={q.id} className="flex justify-between border-b pb-2 mb-4">
+            <span>{q.label}: {q.value}</span>
+            <span className="text-blue-600 text-sm cursor-pointer underline">Edit | Delete</span>
+          </div>
+        ))}
         <button className="bg-sky-600 text-white px-4 py-1.5 rounded text-sm font-semibold">Add another item</button>
       </div>
 
@@ -30,15 +33,20 @@ const WelcomePack = () => {
       <div className="mb-10">
         <h2 className="text-lg font-bold mb-2">Info Cards</h2>
         <p className="text-sm mb-4">Store cards with more information, rich text, files, images, and videos like a digital information pack, available for tenants to see.</p>
-        <div className="border rounded-lg p-4 w-80 shadow-sm">
-          <h3 className="font-bold mb-2">Defrosting a freezer</h3>
-          <p className="text-sm mb-3">You will probably need to defrost the freezers every 3-6 months as the ice builds up. Attached is a handy guide for the Hotpoint freezers we use.</p>
-          <div className="bg-gray-200 h-24 mb-3 flex items-center justify-center text-xs">Video Thumbnail</div>
-          <div className="flex gap-2">
-            <button className="bg-sky-600 text-white px-3 py-1 rounded text-xs">Show more</button>
-            <button className="border px-3 py-1 rounded text-xs">Edit</button>
-            <button className="border px-3 py-1 rounded text-xs">Delete</button>
-          </div>
+        <div className="flex flex-wrap gap-4">
+          {welcomePack.infoCards.map((c) => (
+            <div key={c.id} className="border rounded-lg p-4 w-80 shadow-sm">
+              <h3 className="font-bold mb-2">{c.title}</h3>
+              <p className="text-sm mb-3">{c.description}</p>
+              {c.video && <div className="bg-gray-200 h-24 mb-3 flex items-center justify-center text-xs">Video Thumbnail</div>}
+              {c.files?.length > 0 && <p className="text-xs text-gray-400 mb-3">📎 {c.files.join(", ")}</p>}
+              <div className="flex gap-2">
+                <button className="bg-sky-600 text-white px-3 py-1 rounded text-xs">Show more</button>
+                <button className="border px-3 py-1 rounded text-xs">Edit</button>
+                <button className="border px-3 py-1 rounded text-xs">Delete</button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

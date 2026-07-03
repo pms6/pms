@@ -331,7 +331,7 @@ export default function AdminProperties() {
             : p.letting?.tenant ? [p.letting.tenant] : [];
           const tenantLabel = tenants.length === 1 ? tenants[0] : tenants.length > 1 ? `${tenants.length} tenants` : null;
           return (
-            <Link key={p.id} href={`/admin/properties/${p.id}`} className="group bg-white border border-gray-100 rounded-2xl overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all">
+            <Link key={p.id} href={`/agent/properties/${p.id}`} className="group bg-white border border-gray-100 rounded-2xl overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all">
               <div className="relative h-44 bg-gradient-to-br from-[#0F253B] to-[#1c3e5e]">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.image} alt={p.name} className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />

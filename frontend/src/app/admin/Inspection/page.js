@@ -6,9 +6,9 @@ import {
   Filter,
   ClipboardCheck,
 } from "lucide-react";
+import { inspections } from "../_data/dummy";
 
 export default function InspectionsPage() {
-  const inspections = [];
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">

@@ -3,12 +3,7 @@
 import { useState } from "react";
 import { Save, Check } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
-
-const PLANS = [
-  { name: "Free", price: "£0", features: ["Up to 5 rooms", "Core features"], current: false },
-  { name: "Pro", price: "£29", features: ["Unlimited rooms", "Compliance alerts", "Stripe rent"], current: true },
-  { name: "Enterprise", price: "Custom", features: ["Multi-branch", "Priority support", "API access"], current: false },
-];
+import { subscriptionPlans as PLANS } from "../_data/dummy";
 
 export default function AdminSettings() {
   const [form, setForm] = useState({

@@ -3,10 +3,10 @@
 import { useState } from "react";
 import {
   Check, User, Briefcase, ShieldCheck, FileText, Users2, Wallet, Home,
-  Mail, Phone, ChevronRight,
+  Mail, Phone, ChevronRight, Plus, X,
 } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
-import { onboarding, ONBOARDING_STAGES, money } from "../_data/dummy";
+import { onboarding, ONBOARDING_STAGES, properties, money } from "../_data/dummy";
 
 const STATUS_TONE = {
   verified: "green", passed: "green", approved: "green", protected: "green", complete: "green",
@@ -62,22 +62,114 @@ function Field({ label, value }) {
   );
 }
 
+function NewOnboardingModal({ onClose, onCreate }) {
+  const [form, setForm] = useState({
+    name: "", email: "", phone: "", property: "", room: "",
+    rent: "", deposit: "", holdingDeposit: "", startDate: "", termMonths: "12",
+  });
+  const [error, setError] = useState("");
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const num = (x) => Number(x) || 0;
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) { setError("Applicant name is required"); return; }
+    onCreate({
+      id: `o${Date.now()}`,
+      name: form.name, avatarSeed: form.name, email: form.email, phone: form.phone,
+      dob: "", nationality: "", currentAddress: "",
+      stageIndex: 0,
+      holdingDeposit: num(form.holdingDeposit),
+      employment: { employer: "", jobTitle: "", type: "", annualIncome: 0, startDate: "" },
+      rightToRent: { status: "pending", docType: "", docNumber: "", expiry: "", shareCode: "" },
+      references: { previousLandlord: "pending", employer: "pending", credit: "pending" },
+      guarantor: { name: "", relationship: "", annualIncome: 0, address: "", phone: "", status: "not_required" },
+      tenancy: { property: form.property || "—", room: form.room || "—", rent: num(form.rent), frequency: "monthly", deposit: num(form.deposit), startDate: form.startDate, termMonths: num(form.termMonths) || 12 },
+      depositScheme: { provider: "DPS", status: "not_started", ref: "—" },
+      documents: [],
+    });
+  };
+
+  const field = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
+  const labelCls = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-xl font-bold text-[#0F253B]">New Applicant</h3>
+          <button onClick={onClose} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
+        </div>
+        {error && <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">{error}</div>}
+        <form onSubmit={submit} className="space-y-4">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C]">Applicant</p>
+          <div><label className={labelCls}>Full Name</label><input className={field} value={form.name} onChange={set("name")} placeholder="Jane Doe" required /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={labelCls}>Email</label><input type="email" className={field} value={form.email} onChange={set("email")} /></div>
+            <div><label className={labelCls}>Phone</label><input className={field} value={form.phone} onChange={set("phone")} /></div>
+          </div>
+
+          <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C] pt-1">Tenancy</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Property</label>
+              <select className={field} value={form.property} onChange={set("property")}>
+                <option value="">Select…</option>
+                {properties.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+              </select>
+            </div>
+            <div><label className={labelCls}>Room</label><input className={field} value={form.room} onChange={set("room")} placeholder="Room 3" /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={labelCls}>Monthly Rent (£)</label><input type="number" min="0" className={field} value={form.rent} onChange={set("rent")} placeholder="650" /></div>
+            <div><label className={labelCls}>Deposit (£)</label><input type="number" min="0" className={field} value={form.deposit} onChange={set("deposit")} placeholder="750" /></div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div><label className={labelCls}>Holding (£)</label><input type="number" min="0" className={field} value={form.holdingDeposit} onChange={set("holdingDeposit")} placeholder="250" /></div>
+            <div><label className={labelCls}>Start Date</label><input type="date" className={field} value={form.startDate} onChange={set("startDate")} /></div>
+            <div><label className={labelCls}>Term (mo)</label><input type="number" min="0" className={field} value={form.termMonths} onChange={set("termMonths")} /></div>
+          </div>
+
+          <button type="submit" className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98]">Start Onboarding</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminOnboarding() {
-  const [selectedId, setSelectedId] = useState(onboarding[0].id);
-  const a = onboarding.find((x) => x.id === selectedId);
-  const progress = Math.round((a.stageIndex / (ONBOARDING_STAGES.length - 1)) * 100);
+  const [items, setItems] = useState(onboarding);
+  const [selectedId, setSelectedId] = useState(onboarding[0]?.id);
+  const [showAdd, setShowAdd] = useState(false);
+  const a = items.find((x) => x.id === selectedId) || items[0];
+  const progress = a ? Math.round((a.stageIndex / (ONBOARDING_STAGES.length - 1)) * 100) : 0;
+
+  const create = (obj) => {
+    onboarding.unshift(obj); // sync to shared store
+    setItems([...onboarding]);
+    setSelectedId(obj.id);
+    setShowAdd(false);
+  };
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Onboarding" subtitle="Move applicants from offer to move-in" />
+      <PageHeader
+        title="Onboarding"
+        subtitle="Move applicants from offer to move-in"
+        action={
+          <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
+            <Plus size={18} /> New Applicant
+          </button>
+        }
+      />
 
       {/* Pipeline summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: "In progress", value: onboarding.filter((o) => o.stageIndex < 6).length, tone: "bg-blue-50 text-blue-600" },
-          { label: "Referencing", value: onboarding.filter((o) => o.stageIndex === 1).length, tone: "bg-amber-50 text-amber-600" },
-          { label: "Ready to move-in", value: onboarding.filter((o) => o.stageIndex >= 5).length, tone: "bg-emerald-50 text-emerald-600" },
-          { label: "Total applicants", value: onboarding.length, tone: "bg-orange-50 text-[#F47C3C]" },
+          { label: "In progress", value: items.filter((o) => o.stageIndex < 6).length, tone: "bg-blue-50 text-blue-600" },
+          { label: "Referencing", value: items.filter((o) => o.stageIndex === 1).length, tone: "bg-amber-50 text-amber-600" },
+          { label: "Ready to move-in", value: items.filter((o) => o.stageIndex >= 5).length, tone: "bg-emerald-50 text-emerald-600" },
+          { label: "Total applicants", value: items.length, tone: "bg-orange-50 text-[#F47C3C]" },
         ].map((s, i) => (
           <div key={i} className="bg-white border border-gray-100 rounded-2xl p-4">
             <p className="text-2xl font-bold text-[#0F253B]">{s.value}</p>
@@ -89,7 +181,7 @@ export default function AdminOnboarding() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Master list */}
         <div className="lg:col-span-1 space-y-2">
-          {onboarding.map((o) => {
+          {items.map((o) => {
             const p = Math.round((o.stageIndex / (ONBOARDING_STAGES.length - 1)) * 100);
             const active = o.id === selectedId;
             return (
@@ -165,7 +257,7 @@ export default function AdminOnboarding() {
               <Field label="Type" value={a.employment.type} />
               <Field label="Annual income" value={money(a.employment.annualIncome)} />
               <Field label="Started" value={a.employment.startDate} />
-              <Field label="Rent : income" value={`${Math.round((a.tenancy.rent * 12 / a.employment.annualIncome) * 100) || 0}%`} />
+              <Field label="Rent : income" value={`${a.employment.annualIncome ? Math.round((a.tenancy.rent * 12 / a.employment.annualIncome) * 100) : 0}%`} />
             </div>
           </Section>
 
@@ -221,6 +313,7 @@ export default function AdminOnboarding() {
 
           {/* Documents */}
           <Section icon={FileText} title="Documents">
+            {a.documents.length === 0 && <p className="text-sm text-gray-400 font-medium">No documents uploaded yet.</p>}
             <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {a.documents.map((d) => (
                 <li key={d.name} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
@@ -236,6 +329,8 @@ export default function AdminOnboarding() {
           </Section>
         </div>
       </div>
+
+      {showAdd && <NewOnboardingModal onClose={() => setShowAdd(false)} onCreate={create} />}
     </div>
   );
 }
