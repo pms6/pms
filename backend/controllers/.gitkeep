@@ -1,2 +1,0 @@
-# Thin HTTP handlers. One file per module, e.g. property.controller.js
-# Pattern: parse req -> call service -> ApiResponse.ok(res, data)

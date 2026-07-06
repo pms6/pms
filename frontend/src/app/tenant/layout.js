@@ -1,9 +1,20 @@
 "use client";
 
-import { LayoutDashboard, CreditCard, Wrench, Home, ShieldCheck, BookOpen, Users, User, CalendarDays } from "lucide-react";
+import { useAuth } from "@/app/Context/AuthContext";
+import {
+  LayoutDashboard,
+  CreditCard,
+  Wrench,
+  Home,
+  ShieldCheck,
+  BookOpen,
+  Users,
+  User,
+  CalendarDays,
+} from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 
-const NAV = [
+const ALL_NAV = [
   {
     href: "/tenant/dashboard",
     label: "Dashboard",
@@ -57,8 +68,23 @@ const NAV = [
 ];
 
 export default function TenantLayout({ children }) {
+  const { profile } = useAuth();
+
+  const hasOrganization = !!profile?.organizationId;
+
+  const nav = hasOrganization
+    ? ALL_NAV
+    : ALL_NAV.filter((item) =>
+        [
+          "/tenant/dashboard",
+          "/tenant/onboarding",
+          "/tenant/viewing",
+          "/tenant/profile",
+        ].includes(item.href)
+      );
+
   return (
-    <RoleShell role="tenant" portalLabel="Tenant" nav={NAV}>
+    <RoleShell role="tenant" portalLabel="Tenant" nav={nav}>
       {children}
     </RoleShell>
   );

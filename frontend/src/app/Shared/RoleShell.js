@@ -12,7 +12,7 @@ export default function RoleShell({
   nav = [],
   children,
 }) {
-  const { user, loading, logout } = useAuth();
+  const { user, profile, loading, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
@@ -24,7 +24,12 @@ export default function RoleShell({
     if (!user) {
       router.replace("/");
     } else if (user.role !== role) {
-      router.replace(`/${user.role}/dashboard`);
+      const dashboard =
+        user.role === "organization"
+          ? "/admin/dashboard"
+          : "/tenant/dashboard";
+
+      router.replace(dashboard);
     }
   }, [loading, user, role, router]);
 

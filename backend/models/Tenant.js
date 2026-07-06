@@ -1,18 +1,44 @@
-'use strict';
-
-const mongoose = require('mongoose');
+// models/TenantProfile.js
+import mongoose from "mongoose";
 
 const tenantSchema = new mongoose.Schema(
   {
-    accountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', required: true, index: true },
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    rightToRentId: { type: mongoose.Schema.Types.ObjectId, ref: 'RightToRent' },
-    name: { type: String, required: true, trim: true },
-    email: { type: String, lowercase: true, trim: true },
-    phone: { type: String },
-    status: { type: String, enum: ['active', 'former', 'prospect'], default: 'prospect' },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Organization",
+      default: null,
+    },
+
+    firstName: String,
+    lastName: String,
+    birthdate: Date,
+    gender: {
+      type: String,
+      enum: ["MALE", "FEMALE", "OTHER", "PREFER_NOT_SAY"],
+    },
+
+    profileImage: String,
+
+    about: String,
+
+    occupationType: {
+      type: String,
+      enum: ["PROFESSIONAL", "STUDENT"],
+    },
+
+    jobTitle: String,
+
+    interests: [String],
+
+    budget: Number,
+    moveInDate: Date,
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model('Tenant', tenantSchema);
+export default mongoose.model("Tenant", tenantSchema);

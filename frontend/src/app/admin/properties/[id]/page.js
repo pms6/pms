@@ -3,9 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, MapPin, UserRound, Plus, Pencil, Trash2, BedDouble, PoundSterling, Users, X, CalendarClock, Wrench, ClipboardCheck, ShieldCheck, Star } from "lucide-react";
+import { ArrowLeft, MapPin, UserRound, Plus, Pencil, Trash2, BedDouble, PoundSterling, Users, X, CalendarClock, Wrench, ClipboardCheck, ShieldCheck, Star, ChevronRight } from "lucide-react";
 import { Badge } from "../../../Shared/ui";
 import TenantSelect from "../../_components/TenantSelect";
+import TenancyPanel from "../../_components/TenancyPanel";
+import RoomManagementPanel from "../../_components/RoomManagementPanel";
 import { properties, RENTAL_TYPES, GUARANTOR_REQ, LETTING_STATUS, LETTING_STATUS_TONE, viewings, maintenance, inspections, deposits, reviews, money } from "../../_data/dummy";
 
 const typeTone = (v) => RENTAL_TYPES.find((t) => t.v === v)?.tone || "orange";
@@ -123,7 +125,7 @@ function MiniList({ icon: Icon, title, items, empty, render }) {
   );
 }
 
-function RoomDetail({ room, property, onEdit }) {
+function RoomDetail({ room, property, onEdit, onManage }) {
   const roomViewings = viewings.filter((v) => matchesRoom(v, property, room));
   const roomMaintenance = maintenance.filter((m) => matchesRoom(m, property, room));
   const roomInspections = inspections.filter((i) => matchesRoom(i, property, room));
@@ -145,7 +147,10 @@ function RoomDetail({ room, property, onEdit }) {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Selected Room</p>
                 <h2 className="text-xl font-bold text-[#0F253B]">{room.name}</h2>
               </div>
-              <button onClick={onEdit} className="p-2 text-gray-400 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg" title="Edit room"><Pencil size={17} /></button>
+              <div className="flex items-center gap-1.5">
+                <button onClick={onManage} className="px-3 py-1.5 bg-[#0F253B] hover:bg-[#1c3e5e] text-white text-xs font-bold rounded-lg">Manage</button>
+                <button onClick={onEdit} className="p-2 text-gray-400 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg" title="Edit room"><Pencil size={17} /></button>
+              </div>
             </div>
             <p className="text-2xl font-bold text-[#0F253B] mt-4">{room.rent ? money(room.rent) : "-"}<span className="text-xs font-medium text-gray-400">/mo</span></p>
             {room.tenant && <p className="text-sm text-[#0F253B] font-semibold mt-2 flex items-center gap-1.5"><UserRound size={14} className="text-[#F47C3C]" />{room.tenant}</p>}
@@ -213,6 +218,8 @@ export default function AdminPropertyDetail() {
   const [rooms, setRooms] = useState(property ? property.rooms : []);
   const [modal, setModal] = useState(null);
   const [selectedRoomId, setSelectedRoomId] = useState(null);
+  const [tenancy, setTenancy] = useState(null);
+  const [manageRoom, setManageRoom] = useState(null);
 
   if (!property) {
     return (
@@ -239,6 +246,14 @@ export default function AdminPropertyDetail() {
     }
   };
   const selectedRoom = rooms.find((r) => r.id === selectedRoomId);
+
+  // Active tenancies for this property (occupied rooms, or an occupied single let).
+  const activeTenancies = isHMO
+    ? rooms.filter((r) => r.status === "Occupied" && r.tenant).map((r) => ({ tenant: r.tenant, unit: r.name, rent: r.rent }))
+    : property.type === "Single Let" && property.letting?.status === "Occupied" && property.letting?.tenant
+    ? [{ tenant: property.letting.tenant, unit: "Whole property", rent: property.letting.rent }]
+    : [];
+  const tenantInitials = (n) => n.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
   return (
     <div className="space-y-5">
@@ -321,7 +336,7 @@ export default function AdminPropertyDetail() {
               ))}
             </div>
           )}
-          {selectedRoom && <RoomDetail room={selectedRoom} property={property} onEdit={() => setModal(selectedRoom)} />}
+          {selectedRoom && <RoomDetail room={selectedRoom} property={property} onEdit={() => setModal(selectedRoom)} onManage={() => setManageRoom(selectedRoom)} />}
         </>
       ) : (
         /* Non-HMO → letting / settings summary */
@@ -351,8 +366,39 @@ export default function AdminPropertyDetail() {
         </div>
       )}
 
+      {/* Active Tenancies — open the full tenancy panel */}
+      {activeTenancies.length > 0 && (
+        <div>
+          <h2 className="text-lg font-bold text-[#0F253B] mb-3">Active Tenancies <span className="text-gray-300 font-medium">({activeTenancies.length})</span></h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {activeTenancies.map((t, i) => (
+              <button
+                key={i}
+                onClick={() => setTenancy({ ...t, property: property.name })}
+                className="text-left bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3 hover:shadow-md hover:-translate-y-0.5 transition-all"
+              >
+                <div className="w-11 h-11 rounded-full bg-[#0F253B] text-white flex items-center justify-center text-sm font-bold shrink-0">{tenantInitials(t.tenant)}</div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-[#0F253B] truncate">{t.tenant}</p>
+                  <p className="text-xs text-gray-400 font-medium truncate">{t.unit} · {money(t.rent)}/mo</p>
+                </div>
+                <span className="flex items-center gap-0.5 text-xs font-bold text-[#F47C3C] shrink-0">View <ChevronRight size={14} /></span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {modal !== null && (
         <RoomModal initial={modal.id ? modal : null} onClose={() => setModal(null)} onSave={saveRoom} />
+      )}
+
+      {tenancy && (
+        <TenancyPanel tenancy={tenancy} propertyName={property.name} onClose={() => setTenancy(null)} />
+      )}
+
+      {manageRoom && (
+        <RoomManagementPanel room={manageRoom} property={property} onEdit={() => setModal(manageRoom)} onClose={() => setManageRoom(null)} />
       )}
     </div>
   );

@@ -10,6 +10,7 @@ import {
   DoorOpen,
   Wallet,
   Wrench,
+  HardHat,
   Banknote,
   BarChart3,
   MessageSquare,
@@ -36,6 +37,7 @@ const NAV = [
   { href: "/admin/finances", label: "Finances", icon: Banknote },
   { href: "/admin/deposits", label: "Deposits", icon: ShieldCheck },
   { href: "/admin/maintenance", label: "Maintenance", icon: Wrench },
+  { href: "/admin/suppliers", label: "Suppliers", icon: HardHat },
   { href: "/admin/reports", label: "Reports", icon: BarChart3 },
   { href: "/admin/feedback", label: "Feedback", icon: MessageSquare },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardCheck },
@@ -45,7 +47,7 @@ const NAV = [
 
 export default function AdminLayout({ children }) {
   return (
-    <RoleShell role="admin" portalLabel="Admin" nav={NAV}>
+    <RoleShell role="organization" portalLabel="organization" nav={NAV}>
       {children}
     </RoleShell>
   );

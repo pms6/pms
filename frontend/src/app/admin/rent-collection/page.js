@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PoundSterling, AlertCircle, Wallet, TrendingUp, Download } from "lucide-react";
 import { PageHeader, Card, Badge } from "../../Shared/ui";
+import RentCollectionPanel from "../_components/RentCollectionPanel";
 import { rentCharges, rentSummary, money } from "../_data/dummy";
 
 const STATUS_TONE = { paid: "green", due: "amber", overdue: "red", partial: "blue" };
@@ -22,6 +23,7 @@ function Kpi({ icon: Icon, label, value, tone }) {
 
 export default function AdminRentCollection() {
   const [filter, setFilter] = useState("");
+  const [panel, setPanel] = useState(null);
   const rows = filter ? rentCharges.filter((r) => r.status === filter) : rentCharges;
 
   return (
@@ -87,11 +89,14 @@ export default function AdminRentCollection() {
                   <td className="px-5 py-3 text-gray-500">{r.method}</td>
                   <td className="px-5 py-3"><Badge tone={STATUS_TONE[r.status] || "gray"}>{r.status}</Badge></td>
                   <td className="px-5 py-3 text-right">
-                    {r.status === "paid" ? (
-                      <span className="text-xs text-gray-300 font-medium">Paid {r.paidDate ? new Date(r.paidDate).toLocaleDateString("en-GB") : ""}</span>
-                    ) : (
-                      <button className="text-xs font-bold text-[#F47C3C] hover:underline">Send reminder</button>
-                    )}
+                    <div className="flex items-center justify-end gap-3">
+                      {r.status === "paid" ? (
+                        <span className="text-xs text-gray-300 font-medium">Paid {r.paidDate ? new Date(r.paidDate).toLocaleDateString("en-GB") : ""}</span>
+                      ) : (
+                        <button className="text-xs font-bold text-gray-400 hover:text-[#0F253B]">Send reminder</button>
+                      )}
+                      <button onClick={() => setPanel(r)} className="text-xs font-bold text-[#F47C3C] hover:underline">View</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -99,6 +104,8 @@ export default function AdminRentCollection() {
           </table>
         </div>
       </div>
+
+      {panel && <RentCollectionPanel charge={panel} onClose={() => setPanel(null)} />}
     </div>
   );
 }

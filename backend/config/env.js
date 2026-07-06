@@ -1,46 +1,68 @@
-'use strict';
+import dotenv from "dotenv";
 
-require('dotenv').config();
+dotenv.config();
 
-function required(key, fallback) {
+const required = (key, fallback) => {
   const value = process.env[key] ?? fallback;
+
   if (value === undefined) {
     throw new Error(`Missing required environment variable: ${key}`);
   }
+
   return value;
-}
+};
 
 const env = {
-  nodeEnv: process.env.NODE_ENV || 'development',
-  isProd: (process.env.NODE_ENV || 'development') === 'production',
-  port: parseInt(process.env.PORT || '5000', 10),
-  apiPrefix: process.env.API_PREFIX || '/api/v1',
-  corsOrigin: process.env.CORS_ORIGIN || '*',
+  nodeEnv: process.env.NODE_ENV || "development",
+  isProd: (process.env.NODE_ENV || "development") === "production",
 
-  mongoUri: required('MONGO_URI', 'mongodb://127.0.0.1:27017/pms'),
+  port: Number(process.env.PORT || 5000),
+
+  apiPrefix: process.env.API_PREFIX || "/api/v1",
+
+  corsOrigin: process.env.CORS_ORIGIN || "*",
+
+  mongoUri: required(
+    "MONGO_URI",
+    "mongodb://127.0.0.1:27017/pms"
+  ),
 
   jwt: {
-    accessSecret: required('JWT_ACCESS_SECRET', 'dev-access-secret'),
-    refreshSecret: required('JWT_REFRESH_SECRET', 'dev-refresh-secret'),
-    accessExpires: process.env.JWT_ACCESS_EXPIRES || '15m',
-    refreshExpires: process.env.JWT_REFRESH_EXPIRES || '7d',
+    accessSecret: required(
+      "JWT_ACCESS_SECRET",
+      "dev-access-secret"
+    ),
+    refreshSecret: required(
+      "JWT_REFRESH_SECRET",
+      "dev-refresh-secret"
+    ),
+    accessExpires: process.env.JWT_ACCESS_EXPIRES || "15m",
+    refreshExpires: process.env.JWT_REFRESH_EXPIRES || "7d",
   },
-  bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS || '12', 10),
+
+  bcryptSaltRounds: Number(
+    process.env.BCRYPT_SALT_ROUNDS || 12
+  ),
 
   stripe: {
-    secretKey: process.env.STRIPE_SECRET_KEY || '',
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+    secretKey: process.env.STRIPE_SECRET_KEY || "",
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
   },
+
   cloudinary: {
-    cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
-    apiKey: process.env.CLOUDINARY_API_KEY || '',
-    apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
+    apiKey: process.env.CLOUDINARY_API_KEY || "",
+    apiSecret: process.env.CLOUDINARY_API_SECRET || "",
   },
+
   mail: {
-    provider: process.env.MAIL_PROVIDER || 'sendgrid',
-    apiKey: process.env.MAIL_API_KEY || '',
-    from: process.env.MAIL_FROM || 'PMS <no-reply@example.com>',
+    provider: process.env.MAIL_PROVIDER || "gmail",
+    host: process.env.MAIL_HOST || "smtp.gmail.com",
+    port: Number(process.env.MAIL_PORT || 587),
+    user: process.env.MAIL_USER || "",
+    password: process.env.MAIL_PASSWORD || "",
+    from: process.env.MAIL_FROM || "PMS <no-reply@example.com>",
   },
 };
 
-module.exports = env;
+export default env;

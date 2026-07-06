@@ -1,2 +1,0 @@
-# Business logic. One file per module, e.g. property.service.js
-# All tenant-scoped queries MUST filter by accountId.

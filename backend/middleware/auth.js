@@ -1,33 +1,38 @@
-'use strict';
+import jwt from "jsonwebtoken";
+import User from "../models/User.js";
+import env from "../config/env.js";
 
-const jwt = require('jsonwebtoken');
-const env = require('../config/env');
-const ApiError = require('../utils/ApiError');
-
-/**
- * Verify the JWT access token and attach the decoded principal to req.user.
- * Expected payload: { sub: userId, accountId, role, sid }.
- */
-function authenticate(req, _res, next) {
-  const header = req.headers.authorization || '';
-  const [scheme, token] = header.split(' ');
-
-  if (scheme !== 'Bearer' || !token) {
-    return next(ApiError.unauthorized('Missing or malformed Authorization header'));
-  }
-
+export const protect = async (req, res, next) => {
   try {
-    const payload = jwt.verify(token, env.jwt.accessSecret);
-    req.user = {
-      id: payload.sub,
-      accountId: payload.accountId,
-      role: payload.role,
-      sid: payload.sid, // originating session id (for the active-sessions view)
-    };
-    return next();
-  } catch (err) {
-    return next(ApiError.unauthorized('Invalid or expired token'));
-  }
-}
+    // 1. Get token from cookies
+    const token = req.cookies.token;
 
-module.exports = { authenticate };
+    if (!token) {
+      return res.status(401).json({ message: "Not authorized, no token provided" });
+    }
+
+    // 2. Verify token — must use the SAME secret sendTokenResponse signs with.
+    const decoded = jwt.verify(token, env.jwt.accessSecret);
+
+    // 3. Attach user to request (excluding password)
+    req.user = await User.findById(decoded.id).select("-password");
+    
+    if (!req.user) {
+      return res.status(401).json({ message: "User not found" });
+    }
+
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: "Not authorized, token invalid or expired" });
+  }
+};
+
+// Role authorization middleware factory
+export const authorize = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ message: `Role (${req.user.role}) is not authorized to access this resource` });
+    }
+    next();
+  };
+};

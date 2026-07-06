@@ -1,30 +1,25 @@
-'use strict';
+import mongoose from "mongoose";
+import env from "./env.js";
 
-const mongoose = require('mongoose');
-const env = require('./env');
-const logger = require('../utils/logger');
+mongoose.set("strictQuery", true);
 
-mongoose.set('strictQuery', true);
-
-/**
- * Establish the MongoDB connection. Call once at boot (server.js).
- */
-async function connectDB() {
+export const connectDB = async () => {
   try {
     const conn = await mongoose.connect(env.mongoUri, {
-      autoIndex: !env.isProd, // build indexes automatically in dev only
+      dbName: "pms",
+      autoIndex: !env.isProd,
     });
-    logger.info(`MongoDB connected: ${conn.connection.host}/${conn.connection.name}`);
-    return conn;
-  } catch (err) {
-    logger.error(`MongoDB connection error: ${err.message}`);
-    throw err;
+
+    console.log(
+      `✅ MongoDB Connected: ${conn.connection.host}/${conn.connection.name}`
+    );
+  } catch (error) {
+    console.error("❌ MongoDB Connection Failed:", error.message);
+    process.exit(1);
   }
-}
+};
 
-async function disconnectDB() {
+export const disconnectDB = async () => {
   await mongoose.connection.close();
-  logger.info('MongoDB disconnected');
-}
-
-module.exports = { connectDB, disconnectDB };
+  console.log("MongoDB Disconnected");
+};

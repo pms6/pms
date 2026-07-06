@@ -1,22 +1,23 @@
-'use strict';
-
-const mongoose = require('mongoose');
+// models/User.js
+import mongoose from "mongoose";
 
 const userSchema = new mongoose.Schema(
   {
-    accountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', required: true, index: true },
-    name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    passwordHash: { type: String, select: false },
+    email: { type: String, unique: true },
+    password: String,
+
+    isVerified: { type: Boolean, default: false },
+
     role: {
       type: String,
-      enum: ['admin', 'manager', 'agent', 'finance', 'tenant'],
-      default: 'manager',
+      enum: ["Pending", "Tenant", "Organization"],
+      default: "Pending",
     },
-    status: { type: String, enum: ['active', 'invited', 'disabled'], default: 'invited' },
-    lastLogin: { type: Date },
+
+    otp: String,
+    otpExpire: Date,
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model('User', userSchema);
+export default mongoose.model("User", userSchema);

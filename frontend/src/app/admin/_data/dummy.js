@@ -664,4 +664,46 @@ export const tenants = [
   { id: "t12", name: "Mo Farah", email: "mo.f@email.com", phone: "07700 900555", status: "Available" },
 ];
 
+export const SPECIALISMS = ["Builder", "Cleaner", "Electrician", "Handyman", "Plumber", "Gas Engineer"];
+export const SUPPLIER_PERMISSIONS = ["Quote Submission", "Invoice Submission", "Date Proposal", "Job Completion"];
+
+export const suppliers = [
+  {
+    id: "sp1", company: "Leeds Heating Co.", contactForename: "John", contactSurname: "Smith",
+    email: "john@leedsheating.co.uk", phone: "0113 555 0101", preferred: true,
+    specialisms: ["Gas Engineer", "Plumber"], tags: ["Gas Safe", "Vetted"], unpaidInvoices: 1, archived: false,
+    notes: "Reliable for boiler work, 24/7 emergency cover.",
+    documents: ["Gas Safe Certificate.pdf", "Public Liability Insurance.pdf"],
+    permissions: { "Quote Submission": false, "Invoice Submission": true, "Date Proposal": true, "Job Completion": false },
+  },
+  {
+    id: "sp2", company: "AquaFix Plumbing", contactForename: "Mia", contactSurname: "Waters",
+    email: "hello@aquafix.co.uk", phone: "0113 555 0202", preferred: false,
+    specialisms: ["Plumber"], tags: ["Vetted"], unpaidInvoices: 0, archived: false,
+    notes: "", documents: ["Insurance.pdf"],
+    permissions: { "Quote Submission": false, "Invoice Submission": false, "Date Proposal": false, "Job Completion": false },
+  },
+  {
+    id: "sp3", company: "FreshWalls Ltd", contactForename: "Tom", contactSurname: "Green",
+    email: "tom@freshwalls.co.uk", phone: "0113 555 0303", preferred: true,
+    specialisms: ["Builder", "Handyman"], tags: ["Preferred"], unpaidInvoices: 0, archived: false,
+    notes: "Great for damp and general repairs.", documents: [],
+    permissions: { "Quote Submission": true, "Invoice Submission": false, "Date Proposal": true, "Job Completion": true },
+  },
+  {
+    id: "sp4", company: "SafeGuard Electrical", contactForename: "Priya", contactSurname: "Rao",
+    email: "priya@safeguard.co.uk", phone: "0113 555 0404", preferred: true,
+    specialisms: ["Electrician"], tags: ["NICEIC", "Vetted"], unpaidInvoices: 2, archived: false,
+    notes: "EICR and alarm testing.", documents: ["NICEIC Cert.pdf", "Insurance.pdf"],
+    permissions: { "Quote Submission": false, "Invoice Submission": true, "Date Proposal": false, "Job Completion": false },
+  },
+  {
+    id: "sp5", company: "BrightClean", contactForename: "Ana", contactSurname: "Sol",
+    email: "ana@brightclean.co.uk", phone: "0113 555 0505", preferred: false,
+    specialisms: ["Cleaner"], tags: [], unpaidInvoices: 0, archived: true,
+    notes: "End-of-tenancy cleans.", documents: [],
+    permissions: { "Quote Submission": false, "Invoice Submission": false, "Date Proposal": false, "Job Completion": false },
+  },
+];
+
 export const money = (n) => `£${Number(n).toLocaleString("en-GB")}`;

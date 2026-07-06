@@ -1,91 +1,205 @@
-'use strict';
+import User from "../models/User.js";
+import Tenant from "../models/Tenant.js";
+import Organization from "../models/Organization.js";
+import bcrypt from "bcrypt";
+import env from "../config/env.js";
+import sendTokenResponse from "../utils/sendTokenResponse.js";
+import { sendEmail } from "../utils/sendEmail.js";
 
-const asyncHandler = require('../utils/asyncHandler');
-const { ok, created, noContent } = require('../utils/ApiResponse');
-const ApiError = require('../utils/ApiError');
-const { getUserById } = require('../services/user.service');
-const authService = require('../services/auth.service');
-const sessionService = require('../services/session.service');
-const { setRefreshCookie, clearRefreshCookie, readRefreshCookie } = require('../utils/cookies');
+// @desc    Register user & Send Real OTP via Email
+// @route   POST /api/v1/auth/register
+export const register = async (req, res) => {
+  try {
+    const { email, password, targetRole } = req.body;
 
-/** Pull device/context metadata off the request for session records. */
-function ctxOf(req) {
-  return { userAgent: req.headers['user-agent'], ip: req.ip };
-}
+    if (!email || !password || !targetRole) {
+      return res.status(400).json({ message: "Please provide all required fields" });
+    }
 
-/** POST /auth/register */
-const register = asyncHandler(async (req, res) => {
-  const result = await authService.register(req.body, ctxOf(req));
-  setRefreshCookie(res, result.tokens.refreshToken);
-  return created(res, result, 'Account registered');
-});
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({ message: "User already exists" });
+    }
 
-/** POST /auth/login */
-const login = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-  const result = await authService.login(email, password, ctxOf(req));
-  setRefreshCookie(res, result.tokens.refreshToken);
-  return ok(res, result, 'Logged in');
-});
+    // Corrected: Uses dynamic salt rounds from env configuration (default 12)
+    const salt = await bcrypt.genSalt(env.bcryptSaltRounds);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
-/**
- * POST /auth/refresh
- * Prefers the httpOnly cookie (web clients); falls back to a body token for
- * API/mobile clients. Rotates the session and the cookie.
- */
-const refresh = asyncHandler(async (req, res) => {
-  const token = readRefreshCookie(req) || req.body.refreshToken;
-  if (!token) throw ApiError.unauthorized('No refresh token provided');
+    const mockOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpire = new Date(Date.now() + 10 * 60 * 1000);
 
-  const result = await authService.refresh(token, ctxOf(req));
-  setRefreshCookie(res, result.tokens.refreshToken);
-  return ok(res, result, 'Token refreshed');
-});
+    const user = await User.create({
+      email,
+      password: hashedPassword,
+      otp: mockOtp,
+      otpExpire,
+    });
 
-/** POST /auth/logout — revokes the current session and clears the cookie. */
-const logout = asyncHandler(async (req, res) => {
-  const token = readRefreshCookie(req) || req.body.refreshToken;
-  if (token) await sessionService.revokeByToken(token, 'logout');
-  clearRefreshCookie(res);
-  return ok(res, null, 'Logged out');
-});
+    // Corrected: Dispatches an actual HTML transactional email
+    try {
+      await sendEmail({
+        email: user.email,
+        subject: "Your Account Verification Code",
+        html: `
+          <div style="font-family: sans-serif; padding: 20px; max-width: 500px; border: 1px solid #e0e0e0; border-radius: 8px;">
+            <h2 style="color: #333;">Welcome!</h2>
+            <p>Please use the verification code below to activate your account profile:</p>
+            <h1 style="color: #4A90E2; letter-spacing: 4px; background: #f4f6f8; padding: 10px; text-align: center; border-radius: 4px;">${mockOtp}</h1>
+            <p style="font-size: 12px; color: #666;">This code will expire in 10 minutes.</p>
+          </div>
+        `,
+      });
+    } catch (mailError) {
+      // Clean up newly created user record if email transmission fails completely
+      await User.findByIdAndDelete(user._id);
+      return res.status(500).json({ message: "Verification email failed to send. Process aborted." });
+    }
 
-/** GET /auth/me — the authenticated user's own profile */
-const me = asyncHandler(async (req, res) => {
-  const user = await getUserById(req.accountId, req.user.id);
-  return ok(res, user, 'Current user');
-});
+    res.status(201).json({
+      success: true,
+      message: "Registration successful. Please check your email for the verification OTP.",
+      targetRole 
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
-/** GET /auth/sessions — the caller's active sessions (devices) */
-const listSessions = asyncHandler(async (req, res) => {
-  const sessions = await sessionService.listForUser(req.user.id, req.user.sid);
-  return ok(res, sessions, 'Active sessions');
-});
+// @desc    Verify OTP and Create specific Profile
+// @route   POST /api/v1/auth/verify-otp
+export const verifyOtp = async (req, res) => {
+  try {
+    const { email, otp, targetRole } = req.body;
 
-/** DELETE /auth/sessions/:id — revoke one of the caller's own sessions */
-const revokeSession = asyncHandler(async (req, res) => {
-  await sessionService.revokeById(req.user.id, req.params.id, 'admin');
-  return noContent(res);
-});
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
-/**
- * POST /auth/logout-all — revoke every session for the caller except the
- * current one, so the active device stays signed in.
- */
-const logoutAll = asyncHandler(async (req, res) => {
-  const revoked = await sessionService.revokeAllForUser(req.user.id, {
-    exceptSessionId: req.user.sid,
+    if (user.otp !== otp || new Date() > user.otpExpire) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    user.isVerified = true;
+    user.role = targetRole; 
+    user.otp = undefined;
+    user.otpExpire = undefined;
+    await user.save();
+
+    if (targetRole === "Tenant") {
+      await Tenant.create({ userId: user._id });
+    } else if (targetRole === "Organization") {
+      await Organization.create({ userId: user._id });
+    }
+
+    sendTokenResponse(user, 200, res);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Login User
+// @route   POST /api/v1/auth/login
+export const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Please provide email and password" });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    if (!user.isVerified) {
+      return res.status(403).json({ message: "Account is not verified yet. Please complete OTP verification." });
+    }
+
+    sendTokenResponse(user, 200, res);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Logout / Clear Cookie
+// @route   POST /api/v1/auth/logout
+export const logout = async (req, res) => {
+  res.cookie("token", "none", {
+    expires: new Date(Date.now() + 10 * 1000),
+    httpOnly: true,
   });
-  return ok(res, { revoked }, 'Other sessions revoked');
-});
 
-module.exports = {
-  register,
-  login,
-  refresh,
-  logout,
-  me,
-  listSessions,
-  revokeSession,
-  logoutAll,
+  res.status(200).json({ success: true, message: "Logged out successfully" });
+};
+
+// @desc    Get logged in user and respective Profile details
+// @route   GET /api/v1/auth/me
+export const getMe = async (req, res) => {
+  try {
+    let profileData = null;
+
+    if (req.user.role === "Tenant") {
+      profileData = await Tenant.findOne({ userId: req.user._id });
+    } else if (req.user.role === "Organization") {
+      profileData = await Organization.findOne({ userId: req.user._id });
+    }
+
+    res.status(200).json({
+      success: true,
+      user: req.user,
+      profile: profileData,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Complete / update the tenant personal profile (COHO account setup)
+// @route   PATCH /api/v1/auth/profile
+// @access  Private (Tenant)
+export const updateProfile = async (req, res) => {
+  try {
+    if (req.user.role !== "Tenant") {
+      return res
+        .status(403)
+        .json({ message: "Only tenant profiles can be updated via this endpoint" });
+    }
+
+    const {
+      firstName,
+      lastName,
+      birthdate,
+      gender,
+      profileImage,
+      about,
+      organizationId,
+    } = req.body;
+
+    // Only set the fields that were actually provided (partial update).
+    const updates = {};
+    if (firstName !== undefined) updates.firstName = firstName;
+    if (lastName !== undefined) updates.lastName = lastName;
+    if (birthdate !== undefined) updates.birthdate = birthdate;
+    if (gender !== undefined) updates.gender = gender;
+    if (profileImage !== undefined) updates.profileImage = profileImage;
+    if (about !== undefined) updates.about = about;
+    if (organizationId !== undefined) updates.organizationId = organizationId;
+
+    const profile = await Tenant.findOneAndUpdate(
+      { userId: req.user._id },
+      { $set: updates },
+      { new: true, runValidators: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    res.status(200).json({ success: true, profile });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 };
