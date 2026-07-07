@@ -1,5 +1,7 @@
+// middleware/auth.js
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import Organization from "../models/Organization.js";
 import env from "../config/env.js";
 
 export const protect = async (req, res, next) => {
@@ -11,28 +13,35 @@ export const protect = async (req, res, next) => {
       return res.status(401).json({ message: "Not authorized, no token provided" });
     }
 
-    // 2. Verify token — must use the SAME secret sendTokenResponse signs with.
+    // 2. Verify token
     const decoded = jwt.verify(token, env.jwt.accessSecret);
 
-    // 3. Attach user to request (excluding password)
+    // 3. Attach user to request
     req.user = await User.findById(decoded.id).select("-password");
     
     if (!req.user) {
       return res.status(401).json({ message: "User not found" });
     }
 
+    // 4. If user is Organization, fetch their organizationId
+    if (req.user.role === "Organization") {
+      const organization = await Organization.findOne({ userId: req.user._id });
+      if (organization) {
+        req.user.organizationId = organization._id;
+      }
+    }
+
+    // 5. If user is Tenant, fetch their organizationId (if they belong to one)
+    if (req.user.role === "Tenant") {
+      const tenant = await Tenant.findOne({ userId: req.user._id });
+      if (tenant && tenant.organizationId) {
+        req.user.organizationId = tenant.organizationId;
+      }
+    }
+
     next();
   } catch (error) {
+    console.error("Auth error:", error);
     return res.status(401).json({ message: "Not authorized, token invalid or expired" });
   }
-};
-
-// Role authorization middleware factory
-export const authorize = (...roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ message: `Role (${req.user.role}) is not authorized to access this resource` });
-    }
-    next();
-  };
 };

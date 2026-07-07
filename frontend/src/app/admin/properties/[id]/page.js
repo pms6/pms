@@ -1,55 +1,206 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, MapPin, UserRound, Plus, Pencil, Trash2, BedDouble, PoundSterling, Users, X, CalendarClock, Wrench, ClipboardCheck, ShieldCheck, Star, ChevronRight } from "lucide-react";
+import { ArrowLeft, MapPin, UserRound, Plus, Pencil, Trash2, BedDouble, PoundSterling, Users, X, CalendarClock, Wrench, ClipboardCheck, ShieldCheck, Star, ChevronRight, Loader2 } from "lucide-react";
 import { Badge } from "../../../Shared/ui";
 import TenantSelect from "../../_components/TenantSelect";
 import TenancyPanel from "../../_components/TenancyPanel";
 import RoomManagementPanel from "../../_components/RoomManagementPanel";
-import { properties, RENTAL_TYPES, GUARANTOR_REQ, LETTING_STATUS, LETTING_STATUS_TONE, viewings, maintenance, inspections, deposits, reviews, money } from "../../_data/dummy";
+import { RENTAL_TYPES, GUARANTOR_REQ, LETTING_STATUS, LETTING_STATUS_TONE, viewings, maintenance, inspections, deposits, reviews, money } from "../../_data/dummy";
+import api from "@/app/api/api";
 
-const typeTone = (v) => RENTAL_TYPES.find((t) => t.v === v)?.tone || "orange";
+// API Service for Property Details
+const apiService = {
+  async getPropertyById(id) {
+    try {
+      const response = await api.get(`/properties/${id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Get property error:', error);
+      throw error.response?.data || error;
+    }
+  },
+
+  async getRoomsByProperty(propertyId) {
+    try {
+      const response = await api.get(`/rooms/property/${propertyId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Get rooms error:', error);
+      throw error.response?.data || error;
+    }
+  },
+
+  async createRoom(roomData) {
+    try {
+      const response = await api.post('/rooms', roomData);
+      return response.data;
+    } catch (error) {
+      console.error('Create room error:', error);
+      throw error.response?.data || error;
+    }
+  },
+
+  async updateRoom(id, roomData) {
+    try {
+      const response = await api.put(`/rooms/${id}`, roomData);
+      return response.data;
+    } catch (error) {
+      console.error('Update room error:', error);
+      throw error.response?.data || error;
+    }
+  },
+
+  async deleteRoom(id) {
+    try {
+      const response = await api.delete(`/rooms/${id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Delete room error:', error);
+      throw error.response?.data || error;
+    }
+  },
+
+  async updateRoomStatus(id, status) {
+    try {
+      const response = await api.patch(`/rooms/${id}/status`, { status });
+      return response.data;
+    } catch (error) {
+      console.error('Update room status error:', error);
+      throw error.response?.data || error;
+    }
+  }
+};
+
+// Helper to get display name for rental type
+const getRentalTypeDisplay = (type) => {
+  const map = {
+    "HMO": "HMO",
+    "SINGLE_LET": "Single Let",
+    "SHORT_TERM": "Short-term Let",
+    "BLOCK": "Block"
+  };
+  return map[type] || type;
+};
+
+// Helper to get display name for tenant type
+const getTenantTypeDisplay = (type) => {
+  const map = {
+    "ANY": "Any",
+    "PROFESSIONAL": "Professionals",
+    "STUDENT": "Students",
+    "SOCIAL": "Social"
+  };
+  return map[type] || type;
+};
+
+const typeTone = (v) => {
+  const found = RENTAL_TYPES.find((t) => t.v === v);
+  return found?.tone || "orange";
+};
+
 const FIELD = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
 const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
 
-function RoomModal({ initial, onClose, onSave }) {
+// Room Modal Component (updated to match backend schema)
+function RoomModal({ initial, propertyId, onClose, onSave }) {
   const isEdit = Boolean(initial);
   const [form, setForm] = useState({
-    name: initial?.name || "",
-    rent: initial?.rent ?? "",
-    moneyHeld: initial?.moneyHeld ?? "",
-    guarantor: initial?.guarantor || "Not Required",
-    status: initial?.status || "Available",
-    tenant: initial?.tenant || "",
-    availableFrom: initial?.availableFrom || "",
+    title: initial?.title || "",
+    roomName: initial?.roomName || "",
+    roomNumber: initial?.roomNumber || "",
+    description: initial?.description || "",
+    monthlyRent: initial?.monthlyRent ?? "",
+    securityDeposit: initial?.securityDeposit ?? "",
+    holdingDeposit: initial?.holdingDeposit ?? "",
+    status: initial?.status || "AVAILABLE",
+    availableFrom: initial?.availableFrom ? new Date(initial.availableFrom).toISOString().split('T')[0] : "",
     floor: initial?.floor || "",
-    furnished: initial?.furnished || "Furnished",
-    billsIncluded: initial?.billsIncluded || "Yes",
+    furnished: initial?.furnished !== undefined ? initial.furnished : true,
+    billsIncluded: initial?.billsIncluded || { gas: false, electricity: false, water: false, internet: false },
+    roomType: initial?.roomType || "STANDARD",
+    occupancy: initial?.occupancy || "SINGLE",
     notes: initial?.notes || "",
   });
   const [error, setError] = useState("");
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const [loading, setLoading] = useState(false);
 
-  const submit = (e) => {
+  const set = (k) => (e) => {
+    const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    setForm({ ...form, [k]: value });
+  };
+
+  const submit = async (e) => {
     e.preventDefault();
-    if (!form.name.trim()) { setError("Room name is required"); return; }
-    onSave({
-      id: initial?.id || `r${Date.now()}`,
-      name: form.name.trim(),
-      rent: Number(form.rent) || 0,
-      moneyHeld: Number(form.moneyHeld) || 0,
-      guarantor: form.guarantor,
-      status: form.status,
-      tenant: form.status === "Occupied" ? form.tenant : null,
-      availableFrom: form.availableFrom,
-      floor: form.floor,
-      furnished: form.furnished,
-      billsIncluded: form.billsIncluded,
-      notes: form.notes.trim(),
-      image: initial?.image,
-    });
+    if (!form.roomName.trim()) { 
+      setError("Room name is required"); 
+      return; 
+    }
+    if (!form.monthlyRent || Number(form.monthlyRent) <= 0) {
+      setError("Monthly rent is required and must be greater than 0");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const roomData = {
+        propertyId,
+        title: form.title || form.roomName,
+        roomName: form.roomName.trim(),
+        roomNumber: form.roomNumber || undefined,
+        description: form.description || undefined,
+        roomType: form.roomType,
+        occupancy: form.occupancy,
+        furnished: form.furnished,
+        floor: form.floor || undefined,
+        monthlyRent: Number(form.monthlyRent),
+        securityDeposit: form.securityDeposit ? Number(form.securityDeposit) : undefined,
+        holdingDeposit: form.holdingDeposit ? Number(form.holdingDeposit) : undefined,
+        billsIncluded: form.billsIncluded,
+        status: form.status,
+        availableFrom: form.availableFrom || undefined,
+        notes: form.notes || undefined,
+      };
+
+      let response;
+      if (isEdit && initial._id) {
+        response = await apiService.updateRoom(initial._id, roomData);
+      } else {
+        response = await apiService.createRoom(roomData);
+      }
+
+      // Transform response to match frontend room structure
+      const savedRoom = {
+        id: response.data._id,
+        _id: response.data._id,
+        name: response.data.roomName,
+        title: response.data.title,
+        rent: response.data.monthlyRent,
+        moneyHeld: response.data.securityDeposit || 0,
+        status: response.data.status,
+        tenant: response.data.currentTenant?.name || null,
+        availableFrom: response.data.availableFrom,
+        floor: response.data.floor,
+        furnished: response.data.furnished,
+        billsIncluded: response.data.billsIncluded,
+        notes: response.data.notes,
+        image: response.data.images?.[0] || null,
+        roomType: response.data.roomType,
+        occupancy: response.data.occupancy,
+        securityDeposit: response.data.securityDeposit,
+        holdingDeposit: response.data.holdingDeposit,
+        roomNumber: response.data.roomNumber,
+        _apiData: response.data
+      };
+
+      onSave(savedRoom);
+    } catch (err) {
+      setError(err.message || 'Failed to save room');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -61,58 +212,125 @@ function RoomModal({ initial, onClose, onSave }) {
         </div>
         {error && <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">{error}</div>}
         <form onSubmit={submit} className="space-y-4">
-          <div><label className={LABEL}>Room Name</label><input className={FIELD} value={form.name} onChange={set("name")} placeholder="Room 1" required /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={LABEL}>Monthly Rent (£)</label><input type="number" min="0" className={FIELD} value={form.rent} onChange={set("rent")} placeholder="650" /></div>
-            <div><label className={LABEL}>Tenant Money Held (£)</label><input type="number" min="0" className={FIELD} value={form.moneyHeld} onChange={set("moneyHeld")} placeholder="750" /></div>
+          <div>
+            <label className={LABEL}>Room Name *</label>
+            <input className={FIELD} value={form.roomName} onChange={set("roomName")} placeholder="Room 1" required />
+          </div>
+          <div>
+            <label className={LABEL}>Room Title (optional)</label>
+            <input className={FIELD} value={form.title} onChange={set("title")} placeholder="e.g., Spacious Double Room" />
+          </div>
+          <div>
+            <label className={LABEL}>Room Number (optional)</label>
+            <input className={FIELD} value={form.roomNumber} onChange={set("roomNumber")} placeholder="e.g., 101, A1" />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={LABEL}>Guarantor Requirement</label><select className={FIELD} value={form.guarantor} onChange={set("guarantor")}>{GUARANTOR_REQ.map((g) => <option key={g} value={g}>{g}</option>)}</select></div>
-            <div><label className={LABEL}>Room Status</label><select className={FIELD} value={form.status} onChange={set("status")}>{LETTING_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
+            <div>
+              <label className={LABEL}>Monthly Rent (£) *</label>
+              <input type="number" min="0" step="0.01" className={FIELD} value={form.monthlyRent} onChange={set("monthlyRent")} placeholder="650" required />
+            </div>
+            <div>
+              <label className={LABEL}>Security Deposit (£)</label>
+              <input type="number" min="0" step="0.01" className={FIELD} value={form.securityDeposit} onChange={set("securityDeposit")} placeholder="750" />
+            </div>
           </div>
-          {form.status === "Occupied" && (
-            <TenantSelect label="Assign Tenant" value={form.tenant} onChange={(name) => setForm({ ...form, tenant: name })} />
-          )}
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={LABEL}>Available From</label><input type="date" className={FIELD} value={form.availableFrom} onChange={set("availableFrom")} /></div>
-            <div><label className={LABEL}>Floor</label><input className={FIELD} value={form.floor} onChange={set("floor")} placeholder="First" /></div>
+            <div>
+              <label className={LABEL}>Room Type</label>
+              <select className={FIELD} value={form.roomType} onChange={set("roomType")}>
+                <option value="STANDARD">Standard</option>
+                <option value="ENSUITE">Ensuite</option>
+                <option value="STUDIO">Studio</option>
+                <option value="MASTER">Master</option>
+                <option value="DOUBLE">Double</option>
+                <option value="SINGLE">Single</option>
+              </select>
+            </div>
+            <div>
+              <label className={LABEL}>Occupancy</label>
+              <select className={FIELD} value={form.occupancy} onChange={set("occupancy")}>
+                <option value="SINGLE">Single</option>
+                <option value="DOUBLE">Double</option>
+                <option value="TWIN">Twin</option>
+                <option value="FAMILY">Family</option>
+              </select>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={LABEL}>Furnished</label><select className={FIELD} value={form.furnished} onChange={set("furnished")}><option>Furnished</option><option>Part Furnished</option><option>Unfurnished</option></select></div>
-            <div><label className={LABEL}>Bills Included</label><select className={FIELD} value={form.billsIncluded} onChange={set("billsIncluded")}><option>Yes</option><option>No</option><option>Some Bills</option></select></div>
+            <div>
+              <label className={LABEL}>Status</label>
+              <select className={FIELD} value={form.status} onChange={set("status")}>
+                <option value="AVAILABLE">Available</option>
+                <option value="AVAILABLE_SOON">Available Soon</option>
+                <option value="RESERVED">Reserved</option>
+                <option value="OCCUPIED">Occupied</option>
+                <option value="MAINTENANCE">Maintenance</option>
+              </select>
+            </div>
+            <div>
+              <label className={LABEL}>Available From</label>
+              <input type="date" className={FIELD} value={form.availableFrom} onChange={set("availableFrom")} />
+            </div>
           </div>
-          <div><label className={LABEL}>Room Notes</label><textarea className={`${FIELD} min-h-24 resize-none`} value={form.notes} onChange={set("notes")} placeholder="Add room features, access notes, or viewing instructions" /></div>
-          <button type="submit" className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98]">{isEdit ? "Save Room" : "Add Room"}</button>
+          <div>
+            <label className={LABEL}>Floor</label>
+            <input className={FIELD} value={form.floor} onChange={set("floor")} placeholder="e.g., First, 2" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={LABEL}>Furnished</label>
+              <select className={FIELD} value={form.furnished ? "true" : "false"} onChange={(e) => setForm({ ...form, furnished: e.target.value === "true" })}>
+                <option value="true">Furnished</option>
+                <option value="false">Unfurnished</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className={LABEL}>Bills Included</label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={form.billsIncluded.gas} onChange={(e) => setForm({ ...form, billsIncluded: { ...form.billsIncluded, gas: e.target.checked } })} />
+                Gas
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={form.billsIncluded.electricity} onChange={(e) => setForm({ ...form, billsIncluded: { ...form.billsIncluded, electricity: e.target.checked } })} />
+                Electricity
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={form.billsIncluded.water} onChange={(e) => setForm({ ...form, billsIncluded: { ...form.billsIncluded, water: e.target.checked } })} />
+                Water
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={form.billsIncluded.internet} onChange={(e) => setForm({ ...form, billsIncluded: { ...form.billsIncluded, internet: e.target.checked } })} />
+                Internet
+              </label>
+            </div>
+          </div>
+          <div>
+            <label className={LABEL}>Room Notes</label>
+            <textarea className={`${FIELD} min-h-24 resize-none`} value={form.notes} onChange={set("notes")} placeholder="Add room features, access notes, or viewing instructions" />
+          </div>
+          <button type="submit" disabled={loading} className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+            {loading && <Loader2 size={18} className="animate-spin" />}
+            {loading ? 'Saving...' : isEdit ? 'Save Room' : 'Add Room'}
+          </button>
         </form>
       </div>
     </div>
   );
 }
 
+// Info Component
 function Info({ label, value }) {
   return (
     <div>
       <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">{label}</p>
-      <p className="text-sm font-bold text-[#0F253B] mt-0.5">{value}</p>
+      <p className="text-sm font-bold text-[#0F253B] mt-0.5">{value || "—"}</p>
     </div>
   );
 }
 
-const roomPropertyAliases = (property) => {
-  const aliases = [property.name, property.addressLine1].filter(Boolean);
-  if (property.name.includes("Elm")) aliases.push("Elm Court HMO");
-  if (property.name.includes("Maple")) aliases.push("Maple House");
-  if (property.name.includes("Riverside")) aliases.push("Riverside Apartments");
-  return aliases.map((v) => v.toLowerCase());
-};
-
-const matchesRoom = (item, property, room) => {
-  const aliases = roomPropertyAliases(property);
-  const propertyName = String(item.property || "").toLowerCase();
-  const roomName = String(item.room || item.unit || "").toLowerCase();
-  return aliases.includes(propertyName) && roomName === room.name.toLowerCase();
-};
-
+// MiniList Component
 function MiniList({ icon: Icon, title, items, empty, render }) {
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-5">
@@ -125,21 +343,32 @@ function MiniList({ icon: Icon, title, items, empty, render }) {
   );
 }
 
+// RoomDetail Component
 function RoomDetail({ room, property, onEdit, onManage }) {
-  const roomViewings = viewings.filter((v) => matchesRoom(v, property, room));
-  const roomMaintenance = maintenance.filter((m) => matchesRoom(m, property, room));
-  const roomInspections = inspections.filter((i) => matchesRoom(i, property, room));
-  const roomDeposits = deposits.filter((d) => matchesRoom(d, property, room));
-  const roomReviews = reviews.filter((r) => matchesRoom(r, property, room));
+  // Use dummy data for viewings, maintenance, etc. or fetch from API
+  const roomViewings = viewings.filter((v) => v.room === room.name);
+  const roomMaintenance = maintenance.filter((m) => m.room === room.name);
+  const roomInspections = inspections.filter((i) => i.room === room.name);
+  const roomDeposits = deposits.filter((d) => d.room === room.name);
+  const roomReviews = reviews.filter((r) => r.room === room.name);
+
+  const statusTone = {
+    "AVAILABLE": "green",
+    "AVAILABLE_SOON": "blue",
+    "RESERVED": "amber",
+    "OCCUPIED": "purple",
+    "MAINTENANCE": "red"
+  };
 
   return (
     <div className="bg-gray-50 border border-gray-100 rounded-3xl p-4 sm:p-5 space-y-5">
       <div className="flex flex-col lg:flex-row gap-5">
         <div className="lg:w-80 bg-white border border-gray-100 rounded-2xl overflow-hidden shrink-0">
           <div className="relative h-44 bg-gray-100">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             {room.image && <img src={room.image} alt={room.name} className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
-            <div className="absolute top-3 right-3"><Badge tone={LETTING_STATUS_TONE[room.status] || "gray"}>{room.status}</Badge></div>
+            <div className="absolute top-3 right-3">
+              <Badge tone={statusTone[room.status] || "gray"}>{room.status}</Badge>
+            </div>
           </div>
           <div className="p-5">
             <div className="flex items-start justify-between gap-3">
@@ -161,15 +390,15 @@ function RoomDetail({ room, property, onEdit, onManage }) {
         <div className="flex-1 bg-white border border-gray-100 rounded-2xl p-5">
           <div className="flex items-center justify-between gap-3 mb-4">
             <h3 className="font-bold text-[#0F253B]">Room Details</h3>
-            <Badge tone="gray">{property.tenantType}</Badge>
+            <Badge tone="gray">{getTenantTypeDisplay(property.tenantType)}</Badge>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <Info label="Tenant Money Held" value={money(room.moneyHeld || 0)} />
-            <Info label="Guarantor" value={room.guarantor || "Not Required"} />
+            <Info label="Security Deposit" value={room.securityDeposit ? money(room.securityDeposit) : "Not set"} />
+            <Info label="Room Type" value={room.roomType || "Standard"} />
+            <Info label="Occupancy" value={room.occupancy || "Single"} />
             <Info label="Available From" value={room.availableFrom || "Not set"} />
             <Info label="Floor" value={room.floor || "Not set"} />
-            <Info label="Furnished" value={room.furnished || "Furnished"} />
-            <Info label="Bills Included" value={room.billsIncluded || "Yes"} />
+            <Info label="Furnished" value={room.furnished ? "Yes" : "No"} />
           </div>
         </div>
       </div>
@@ -214,46 +443,186 @@ function RoomDetail({ room, property, onEdit, onManage }) {
 
 export default function AdminPropertyDetail() {
   const { id } = useParams();
-  const property = properties.find((p) => p.id === id);
-  const [rooms, setRooms] = useState(property ? property.rooms : []);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [property, setProperty] = useState(null);
+  const [rooms, setRooms] = useState([]);
   const [modal, setModal] = useState(null);
   const [selectedRoomId, setSelectedRoomId] = useState(null);
   const [tenancy, setTenancy] = useState(null);
   const [manageRoom, setManageRoom] = useState(null);
 
-  if (!property) {
+  // Fetch property and rooms on mount
+  useEffect(() => {
+    if (id) {
+      fetchPropertyData();
+    }
+  }, [id]);
+
+  const fetchPropertyData = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      // Fetch property details
+      const propertyResponse = await apiService.getPropertyById(id);
+      const propertyData = propertyResponse.data;
+
+      // Transform property data to match frontend structure
+      const transformedProperty = {
+        id: propertyData._id,
+        _id: propertyData._id,
+        name: propertyData.name,
+        type: propertyData.rentalType,
+        tenantType: propertyData.tenantType || "ANY",
+        owner: propertyData.ownerName || "Unassigned",
+        addressLine1: propertyData.address?.line1 || propertyData.name,
+        area: propertyData.address?.city || "",
+        city: propertyData.address?.city || "",
+        postcode: propertyData.address?.postcode || "",
+        image: propertyData.coverImage || `https://via.placeholder.com/400x300?text=${encodeURIComponent(propertyData.name)}`,
+        status: propertyData.status,
+        description: propertyData.description,
+        letting: propertyData.letting || null,
+        block: propertyData.block || null,
+        _apiData: propertyData
+      };
+
+      setProperty(transformedProperty);
+
+      // Fetch rooms for this property
+      try {
+        const roomsResponse = await apiService.getRoomsByProperty(id);
+        const roomsData = roomsResponse.data || [];
+        
+        // Transform rooms to match frontend structure
+        const transformedRooms = roomsData.map(room => ({
+          id: room._id,
+          _id: room._id,
+          name: room.roomName,
+          title: room.title,
+          rent: room.monthlyRent,
+          moneyHeld: room.securityDeposit || 0,
+          status: room.status,
+          tenant: room.currentTenant?.name || null,
+          availableFrom: room.availableFrom,
+          floor: room.floor,
+          furnished: room.furnished,
+          billsIncluded: room.billsIncluded,
+          notes: room.notes,
+          image: room.images?.[0] || null,
+          roomType: room.roomType,
+          occupancy: room.occupancy,
+          securityDeposit: room.securityDeposit,
+          holdingDeposit: room.holdingDeposit,
+          roomNumber: room.roomNumber,
+          _apiData: room
+        }));
+        
+        setRooms(transformedRooms);
+      } catch (roomErr) {
+        console.error('Error fetching rooms:', roomErr);
+        // Don't fail completely if rooms fail
+      }
+
+    } catch (err) {
+      console.error('Error fetching property:', err);
+      setError(err.message || 'Failed to load property');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveRoom = (room) => {
+    setRooms((prev) => {
+      const existing = prev.some((r) => r.id === room.id);
+      if (existing) {
+        return prev.map((r) => (r.id === room.id ? room : r));
+      }
+      return [...prev, room];
+    });
+    setSelectedRoomId(room.id);
+    setModal(null);
+  };
+
+  const removeRoom = async (room) => {
+    if (!confirm(`Delete ${room.name}?`)) return;
+    
+    try {
+      await apiService.deleteRoom(room.id);
+      setRooms((prev) => prev.filter((r) => r.id !== room.id));
+      if (selectedRoomId === room.id) setSelectedRoomId(null);
+    } catch (err) {
+      alert(`Failed to delete room: ${err.message}`);
+    }
+  };
+
+  const selectedRoom = rooms.find((r) => r.id === selectedRoomId);
+
+  if (loading) {
     return (
       <div className="space-y-4">
-        <Link href="/admin/properties" className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]"><ArrowLeft size={16} /> Back</Link>
-        <p className="text-gray-400">Property not found.</p>
+        <Link href="/admin/properties" className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]">
+          <ArrowLeft size={16} /> Back to properties
+        </Link>
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="w-12 h-12 border-4 border-[#F47C3C] border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p className="mt-4 text-gray-600 font-medium">Loading property details...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !property) {
+    return (
+      <div className="space-y-4">
+        <Link href="/admin/properties" className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]">
+          <ArrowLeft size={16} /> Back to properties
+        </Link>
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center">
+          <p className="text-red-700 font-bold">{error || "Property not found."}</p>
+          <button 
+            onClick={fetchPropertyData} 
+            className="mt-4 px-4 py-2 bg-red-100 hover:bg-red-200 rounded-lg text-sm font-bold"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
 
   const isHMO = property.type === "HMO";
-  const income = rooms.filter((r) => r.status === "Occupied").reduce((s, r) => s + r.rent, 0);
-  const occupied = rooms.filter((r) => r.status === "Occupied").length;
+  const income = rooms.filter((r) => r.status === "OCCUPIED").reduce((s, r) => s + r.rent, 0);
+  const occupied = rooms.filter((r) => r.status === "OCCUPIED").length;
 
-  const saveRoom = (room) => {
-    setRooms((prev) => (prev.some((r) => r.id === room.id) ? prev.map((r) => (r.id === room.id ? room : r)) : [...prev, room]));
-    setSelectedRoomId(room.id);
-    setModal(null);
-  };
-  const removeRoom = (room) => {
-    if (confirm(`Delete ${room.name}?`)) {
-      setRooms((prev) => prev.filter((r) => r.id !== room.id));
-      if (selectedRoomId === room.id) setSelectedRoomId(null);
-    }
-  };
-  const selectedRoom = rooms.find((r) => r.id === selectedRoomId);
-
-  // Active tenancies for this property (occupied rooms, or an occupied single let).
+  // Active tenancies for this property
   const activeTenancies = isHMO
-    ? rooms.filter((r) => r.status === "Occupied" && r.tenant).map((r) => ({ tenant: r.tenant, unit: r.name, rent: r.rent }))
-    : property.type === "Single Let" && property.letting?.status === "Occupied" && property.letting?.tenant
+    ? rooms.filter((r) => r.status === "OCCUPIED" && r.tenant).map((r) => ({ tenant: r.tenant, unit: r.name, rent: r.rent }))
+    : property.type === "SINGLE_LET" && property.letting?.status === "OCCUPIED" && property.letting?.tenant
     ? [{ tenant: property.letting.tenant, unit: "Whole property", rent: property.letting.rent }]
     : [];
-  const tenantInitials = (n) => n.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+
+  const tenantInitials = (n) => n ? n.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase() : "?";
+
+  // Status display mapping
+  const statusDisplay = {
+    "AVAILABLE": "Available",
+    "AVAILABLE_SOON": "Available Soon",
+    "RESERVED": "Reserved",
+    "OCCUPIED": "Occupied",
+    "MAINTENANCE": "Maintenance"
+  };
+
+  const statusTone = {
+    "AVAILABLE": "green",
+    "AVAILABLE_SOON": "blue",
+    "RESERVED": "amber",
+    "OCCUPIED": "purple",
+    "MAINTENANCE": "red"
+  };
 
   return (
     <div className="space-y-5">
@@ -263,13 +632,12 @@ export default function AdminPropertyDetail() {
 
       {/* Cover */}
       <div className="relative rounded-3xl overflow-hidden h-56 bg-gradient-to-br from-[#0F253B] to-[#1c3e5e]">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={property.image} alt={property.name} className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
         <div className="absolute bottom-0 inset-x-0 p-6">
           <div className="flex items-center gap-2 mb-2">
-            <Badge tone={typeTone(property.type)}>{property.type}</Badge>
-            <Badge tone="gray">{property.tenantType}</Badge>
+            <Badge tone={typeTone(property.type)}>{getRentalTypeDisplay(property.type)}</Badge>
+            <Badge tone="gray">{getTenantTypeDisplay(property.tenantType)}</Badge>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-white">{property.name}</h1>
           <p className="text-white/80 text-sm flex items-center gap-1.5 mt-1"><MapPin size={14} />{[property.area, property.city].filter(Boolean).join(", ") || "No area"}</p>
@@ -280,9 +648,9 @@ export default function AdminPropertyDetail() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { icon: BedDouble, label: isHMO ? "Rooms" : "Units", value: isHMO ? `${occupied}/${rooms.length}` : "1" },
-          { icon: PoundSterling, label: "Monthly income", value: money(isHMO ? income : property.letting?.status === "Occupied" ? property.letting.rent : 0) },
+          { icon: PoundSterling, label: "Monthly income", value: money(isHMO ? income : property.letting?.status === "OCCUPIED" ? property.letting.rent : 0) },
           { icon: UserRound, label: "Owner", value: property.owner, small: true },
-          { icon: Users, label: "Tenant type", value: property.tenantType, small: true },
+          { icon: Users, label: "Tenant type", value: getTenantTypeDisplay(property.tenantType), small: true },
         ].map((s, i) => (
           <div key={i} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-orange-50 text-[#F47C3C] flex items-center justify-center shrink-0"><s.icon size={18} /></div>
@@ -318,14 +686,15 @@ export default function AdminPropertyDetail() {
                   className={`bg-white border rounded-2xl overflow-hidden cursor-pointer transition-all hover:-translate-y-0.5 hover:shadow-md ${selectedRoomId === r.id ? "border-[#F47C3C] ring-2 ring-orange-100" : "border-gray-100"}`}
                 >
                   <div className="relative h-32 bg-gray-100">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     {r.image && <img src={r.image} alt={r.name} className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
-                    <div className="absolute top-2 right-2"><Badge tone={LETTING_STATUS_TONE[r.status] || "gray"}>{r.status}</Badge></div>
+                    <div className="absolute top-2 right-2">
+                      <Badge tone={statusTone[r.status] || "gray"}>{statusDisplay[r.status] || r.status}</Badge>
+                    </div>
                   </div>
                   <div className="p-4">
                     <p className="font-bold text-[#0F253B]">{r.name}</p>
                     <p className="text-lg font-bold text-[#0F253B] mt-1">{r.rent ? money(r.rent) : "—"}<span className="text-xs font-medium text-gray-400">/mo</span></p>
-                    <p className="text-xs text-gray-400 font-medium mt-1">Held {money(r.moneyHeld || 0)} · {r.guarantor}</p>
+                    <p className="text-xs text-gray-400 font-medium mt-1">Held {money(r.moneyHeld || 0)}</p>
                     {r.tenant && <p className="text-xs text-[#0F253B] font-semibold mt-1 flex items-center gap-1"><UserRound size={12} className="text-[#F47C3C]" />{r.tenant}</p>}
                     <div className="mt-3 flex justify-end gap-1">
                       <button onClick={(e) => { e.stopPropagation(); setModal(r); }} className="p-2 text-gray-400 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg"><Pencil size={15} /></button>
@@ -342,7 +711,7 @@ export default function AdminPropertyDetail() {
         /* Non-HMO → letting / settings summary */
         <div className="bg-white border border-gray-100 rounded-2xl p-6">
           <h2 className="text-lg font-bold text-[#0F253B] mb-4">Letting Details</h2>
-          {property.type === "Single Let" && property.letting && (
+          {property.type === "SINGLE_LET" && property.letting && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <Info label="Monthly Rent" value={money(property.letting.rent)} />
               <Info label="Tenant Money Held" value={money(property.letting.moneyHeld)} />
@@ -353,20 +722,20 @@ export default function AdminPropertyDetail() {
               </div>
             </div>
           )}
-          {property.type === "Short-term Let" && (
-            <p className="text-sm text-gray-500 font-medium">Short-term let — booked by night/week. Tenant type: <b className="text-[#0F253B]">{property.tenantType}</b>.</p>
+          {property.type === "SHORT_TERM" && (
+            <p className="text-sm text-gray-500 font-medium">Short-term let — booked by night/week. Tenant type: <b className="text-[#0F253B]">{getTenantTypeDisplay(property.tenantType)}</b>.</p>
           )}
-          {property.type === "Block" && property.block && (
+          {property.type === "BLOCK" && property.block && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               <Info label="Payment Term" value={`${property.block.paymentTermDays} days`} />
               <Info label="Hide Tenant Rent" value={property.block.hideTenantRent} />
-              <Info label="Tenant Type" value={property.tenantType} />
+              <Info label="Tenant Type" value={getTenantTypeDisplay(property.tenantType)} />
             </div>
           )}
         </div>
       )}
 
-      {/* Active Tenancies — open the full tenancy panel */}
+      {/* Active Tenancies */}
       {activeTenancies.length > 0 && (
         <div>
           <h2 className="text-lg font-bold text-[#0F253B] mb-3">Active Tenancies <span className="text-gray-300 font-medium">({activeTenancies.length})</span></h2>
@@ -390,7 +759,12 @@ export default function AdminPropertyDetail() {
       )}
 
       {modal !== null && (
-        <RoomModal initial={modal.id ? modal : null} onClose={() => setModal(null)} onSave={saveRoom} />
+        <RoomModal 
+          initial={modal.id ? modal : null} 
+          propertyId={property.id}
+          onClose={() => setModal(null)} 
+          onSave={saveRoom} 
+        />
       )}
 
       {tenancy && (

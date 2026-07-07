@@ -43,7 +43,7 @@ export const RENTAL_TYPES = [
   { v: "Block", desc: "A block of units managed together", tone: "amber" },
 ];
 
-export const TENANT_TYPES = ["Any", "Professionals", "Students", "Social"];
+export const TENANT_TYPES = ["ANY", "PROFESSIONAL", "STUDENT", "SOCIAL"];
 export const GUARANTOR_REQ = ["Not Required", "Sometimes Required", "Always Required"];
 export const LETTING_STATUS = ["Available", "Available Soon", "Occupied"];
 export const LETTING_STATUS_TONE = { Available: "green", "Available Soon": "amber", Occupied: "orange" };

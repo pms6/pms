@@ -1,6 +1,8 @@
 import express from "express";
 
 import authRoutes from "./auth.route.js";
+import propertyRoutes from "./property.route.js";
+import roomRoutes from "./room.route.js";
 
 const router = express.Router();
 
@@ -14,6 +16,8 @@ router.get("/", (_req, res) => {
 
 // Phase 1 — Core platform
 router.use("/auth", authRoutes);
+router.use("/properties", propertyRoutes);
+router.use("/rooms", roomRoutes);
 
 
 export default router;
