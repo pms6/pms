@@ -22,7 +22,7 @@ const roomSchema = new mongoose.Schema(
 
     currentTenant: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "TenantProfile",
+      ref: "Tenant",
       default: null,
     },
 
@@ -54,19 +54,20 @@ const roomSchema = new mongoose.Schema(
     roomType: {
       type: String,
       enum: [
-        "single",
-        "double",
-        "ensuite",
-        "ensuite_double",
-        "studio",
+        "STANDARD",
+        "ENSUITE",
+        "STUDIO",
+        "MASTER",
+        "DOUBLE",
+        "SINGLE",
       ],
-      default: "single",
+      default: "STANDARD",
     },
 
     occupancy: {
       type: String,
-      enum: ["single", "double"],
-      default: "single",
+      enum: ["SINGLE", "DOUBLE", "TWIN", "FAMILY"],
+      default: "SINGLE",
     },
 
     furnished: {
@@ -111,6 +112,10 @@ const roomSchema = new mongoose.Schema(
         default: true,
       },
       wifi: {
+        type: Boolean,
+        default: true,
+      },
+      internet: {
         type: Boolean,
         default: true,
       },

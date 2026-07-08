@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, X, Mail, Phone, PoundSterling } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, X, Mail, Phone, PoundSterling, Trash2, Loader2 } from "lucide-react";
 import { PageHeader } from "../../Shared/ui";
-import { leads as seedLeads, LEAD_STAGES, properties } from "../_data/dummy";
+import { LEAD_STAGES } from "../_data/dummy";
+import api from "../../api/api";
 
 const COLUMNS = [
   { key: "new", label: "New", tone: "bg-blue-500" },
@@ -13,15 +14,42 @@ const COLUMNS = [
   { key: "lost", label: "Lost", tone: "bg-gray-400" },
 ];
 
+const SOURCES = ["Rightmove", "Zoopla", "SpareRoom", "OpenRent", "Website", "Referral"];
+
 function initials(name) {
-  return name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
+  return (name || "?").split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
 }
 
-function LeadModal({ onClose, onCreate }) {
-  const [form, setForm] = useState({ name: "", email: "", phone: "", source: "Rightmove", interestedIn: "", budget: "", status: "new" });
+function LeadModal({ onClose, onCreated, properties }) {
+  const [form, setForm] = useState({ name: "", email: "", phone: "", source: "Rightmove", interestedIn: "", budget: "", status: "new", assignedTo: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const field = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium";
   const labelCls = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const res = await api.post("/leads", {
+        name: form.name,
+        email: form.email || undefined,
+        phone: form.phone || undefined,
+        source: form.source,
+        interestedIn: form.interestedIn || undefined,
+        budget: Number(form.budget) || 0,
+        status: form.status,
+        assignedTo: form.assignedTo || undefined,
+      });
+      onCreated(res.data.data);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to create lead");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -30,7 +58,8 @@ function LeadModal({ onClose, onCreate }) {
           <h3 className="text-xl font-bold text-[#0F253B]">New Lead</h3>
           <button onClick={onClose} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); onCreate({ ...form, id: `l${Date.now()}`, budget: Number(form.budget) || 0, assignedTo: "Ella Moore", createdAt: "today" }); }} className="space-y-4">
+        {error && <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">{error}</div>}
+        <form onSubmit={submit} className="space-y-4">
           <div><label className={labelCls}>Name</label><input className={field} value={form.name} onChange={set("name")} required /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className={labelCls}>Email</label><input className={field} value={form.email} onChange={set("email")} /></div>
@@ -39,7 +68,7 @@ function LeadModal({ onClose, onCreate }) {
           <div className="grid grid-cols-2 gap-3">
             <div><label className={labelCls}>Source</label>
               <select className={field} value={form.source} onChange={set("source")}>
-                {["Rightmove", "Zoopla", "SpareRoom", "OpenRent", "Website", "Referral"].map((s) => <option key={s}>{s}</option>)}
+                {SOURCES.map((s) => <option key={s}>{s}</option>)}
               </select>
             </div>
             <div><label className={labelCls}>Budget (£)</label><input className={field} value={form.budget} onChange={set("budget")} placeholder="650" /></div>
@@ -47,15 +76,21 @@ function LeadModal({ onClose, onCreate }) {
           <div><label className={labelCls}>Interested in</label>
             <select className={field} value={form.interestedIn} onChange={set("interestedIn")}>
               <option value="">— Any —</option>
-              {properties.map((p) => <option key={p.id}>{p.name}</option>)}
+              {properties.map((p) => <option key={p._id} value={p.name}>{p.name}</option>)}
             </select>
           </div>
-          <div><label className={labelCls}>Stage</label>
-            <select className={field} value={form.status} onChange={set("status")}>
-              {LEAD_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={labelCls}>Assigned To</label><input className={field} value={form.assignedTo} onChange={set("assignedTo")} placeholder="e.g. Ella Moore" /></div>
+            <div><label className={labelCls}>Stage</label>
+              <select className={field} value={form.status} onChange={set("status")}>
+                {LEAD_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
           </div>
-          <button type="submit" className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98]">Add Lead</button>
+          <button type="submit" disabled={saving} className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2">
+            {saving && <Loader2 size={18} className="animate-spin" />}
+            {saving ? "Adding..." : "Add Lead"}
+          </button>
         </form>
       </div>
     </div>
@@ -63,8 +98,64 @@ function LeadModal({ onClose, onCreate }) {
 }
 
 export default function AdminLeads() {
-  const [leads, setLeads] = useState(seedLeads);
+  const [leads, setLeads] = useState([]);
+  const [properties, setProperties] = useState([]);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [draggingId, setDraggingId] = useState(null);
+  const [dragOverCol, setDragOverCol] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [leadsRes, propsRes] = await Promise.all([
+        api.get("/leads"),
+        api.get("/properties", { params: { limit: 100 } }),
+      ]);
+      setLeads(leadsRes.data.data);
+      setProperties(propsRes.data.data || []);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to load leads");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const changeStatus = async (lead, status) => {
+    const prev = lead.status;
+    // Optimistic update
+    setLeads((ls) => ls.map((l) => (l._id === lead._id ? { ...l, status } : l)));
+    try {
+      await api.patch(`/leads/${lead._id}/status`, { status });
+    } catch (err) {
+      // Revert on failure
+      setLeads((ls) => ls.map((l) => (l._id === lead._id ? { ...l, status: prev } : l)));
+      alert(err.response?.data?.message || "Failed to move lead");
+    }
+  };
+
+  const handleDrop = (colKey) => {
+    const lead = leads.find((l) => l._id === draggingId);
+    setDragOverCol(null);
+    setDraggingId(null);
+    if (lead && lead.status !== colKey) changeStatus(lead, colKey);
+  };
+
+  const removeLead = async (lead) => {
+    if (!confirm(`Delete lead "${lead.name}"?`)) return;
+    const snapshot = leads;
+    setLeads((ls) => ls.filter((l) => l._id !== lead._id));
+    try {
+      await api.delete(`/leads/${lead._id}`);
+    } catch (err) {
+      setLeads(snapshot);
+      alert(err.response?.data?.message || "Failed to delete lead");
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -78,47 +169,72 @@ export default function AdminLeads() {
         }
       />
 
-      <div className="flex gap-4 overflow-x-auto pb-4">
-        {COLUMNS.map((col) => {
-          const cards = leads.filter((l) => l.status === col.key);
-          return (
-            <div key={col.key} className="w-72 shrink-0">
-              <div className="flex items-center justify-between mb-3 px-1">
-                <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full ${col.tone}`} />
-                  <span className="text-sm font-bold text-[#0F253B]">{col.label}</span>
-                </div>
-                <span className="text-xs font-bold text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">{cards.length}</span>
-              </div>
-              <div className="space-y-3">
-                {cards.map((l) => (
-                  <div key={l.id} className="bg-white border border-gray-100 rounded-2xl p-4 hover:shadow-md transition-all">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-[#0F253B] text-white flex items-center justify-center text-xs font-bold shrink-0">{initials(l.name)}</div>
-                      <div className="min-w-0">
-                        <p className="font-bold text-[#0F253B] text-sm truncate">{l.name}</p>
-                        <p className="text-[11px] text-gray-400 font-medium">{l.source}</p>
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-500 font-medium mt-3 truncate">{l.interestedIn || "Any property"}</p>
-                    <div className="flex items-center gap-3 mt-2 text-[11px] text-gray-400 font-medium">
-                      {l.budget > 0 && <span className="flex items-center gap-1"><PoundSterling size={11} />{l.budget}/mo</span>}
-                    </div>
-                    <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-50 text-gray-300">
-                      {l.email && <Mail size={14} className="hover:text-[#F47C3C] cursor-pointer" />}
-                      {l.phone && <Phone size={14} className="hover:text-[#F47C3C] cursor-pointer" />}
-                      <span className="ml-auto text-[10px] font-bold text-gray-400">{l.assignedTo}</span>
-                    </div>
-                  </div>
-                ))}
-                {cards.length === 0 && <div className="text-center text-xs text-gray-300 font-medium py-6 border-2 border-dashed border-gray-100 rounded-2xl">Empty</div>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {error && <div className="p-4 bg-red-50 border-l-4 border-red-500 text-red-700 text-sm font-bold rounded">{error}</div>}
 
-      {open && <LeadModal onClose={() => setOpen(false)} onCreate={(lead) => { setLeads([lead, ...leads]); setOpen(false); }} />}
+      {loading ? (
+        <div className="flex items-center justify-center py-32"><div className="w-8 h-8 border-2 border-[#F47C3C]/30 border-t-[#F47C3C] rounded-full animate-spin" /></div>
+      ) : (
+        <div className="flex gap-4 overflow-x-auto pb-4">
+          {COLUMNS.map((col) => {
+            const cards = leads.filter((l) => l.status === col.key);
+            return (
+              <div key={col.key} className="w-72 shrink-0">
+                <div className="flex items-center justify-between mb-3 px-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${col.tone}`} />
+                    <span className="text-sm font-bold text-[#0F253B]">{col.label}</span>
+                  </div>
+                  <span className="text-xs font-bold text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">{cards.length}</span>
+                </div>
+                <div
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragOverCol !== col.key) setDragOverCol(col.key); }}
+                  onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverCol(null); }}
+                  onDrop={() => handleDrop(col.key)}
+                  className={`space-y-3 min-h-[100px] rounded-2xl transition-all ${dragOverCol === col.key ? "ring-2 ring-[#F47C3C]/50 bg-orange-50/40" : ""}`}
+                >
+                  {cards.map((l) => (
+                    <div
+                      key={l._id}
+                      draggable
+                      onDragStart={(e) => { setDraggingId(l._id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", l._id); }}
+                      onDragEnd={() => { setDraggingId(null); setDragOverCol(null); }}
+                      className={`bg-white border border-gray-100 rounded-2xl p-4 hover:shadow-md transition-all group cursor-grab active:cursor-grabbing ${draggingId === l._id ? "opacity-40 ring-2 ring-[#F47C3C]/40" : ""}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-[#0F253B] text-white flex items-center justify-center text-xs font-bold shrink-0">{initials(l.name)}</div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-[#0F253B] text-sm truncate">{l.name}</p>
+                          <p className="text-[11px] text-gray-400 font-medium">{l.source}</p>
+                        </div>
+                        <button onClick={() => removeLead(l)} className="text-gray-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all shrink-0"><Trash2 size={15} /></button>
+                      </div>
+                      <p className="text-xs text-gray-500 font-medium mt-3 truncate">{l.interestedIn || "Any property"}</p>
+                      <div className="flex items-center gap-3 mt-2 text-[11px] text-gray-400 font-medium">
+                        {l.budget > 0 && <span className="flex items-center gap-1"><PoundSterling size={11} />{l.budget}/mo</span>}
+                      </div>
+                      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-50 text-gray-300">
+                        {l.email && <a href={`mailto:${l.email}`} title={l.email}><Mail size={14} className="hover:text-[#F47C3C] cursor-pointer" /></a>}
+                        {l.phone && <a href={`tel:${l.phone}`} title={l.phone}><Phone size={14} className="hover:text-[#F47C3C] cursor-pointer" /></a>}
+                        {l.assignedTo && <span className="ml-auto text-[10px] font-bold text-gray-400 truncate">{l.assignedTo}</span>}
+                      </div>
+                      <select
+                        value={l.status}
+                        onChange={(e) => changeStatus(l, e.target.value)}
+                        className="mt-3 w-full text-[11px] font-bold text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-[#F47C3C] outline-none cursor-pointer capitalize"
+                      >
+                        {LEAD_STAGES.map((s) => <option key={s} value={s}>Move to: {s}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                  {cards.length === 0 && <div className="text-center text-xs text-gray-300 font-medium py-6 border-2 border-dashed border-gray-100 rounded-2xl">Empty</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {open && <LeadModal properties={properties} onClose={() => setOpen(false)} onCreated={(lead) => { setLeads((ls) => [lead, ...ls]); setOpen(false); }} />}
     </div>
   );
 }

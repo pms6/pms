@@ -1,6 +1,8 @@
+// controllers/auth.controller.js
 import User from "../models/User.js";
 import Tenant from "../models/Tenant.js";
 import Organization from "../models/Organization.js";
+import OrganizationMember from "../models/OrganizationMember.js"; // ✅ CORRECT import (uppercase)
 import bcrypt from "bcrypt";
 import env from "../config/env.js";
 import sendTokenResponse from "../utils/sendTokenResponse.js";
@@ -21,7 +23,6 @@ export const register = async (req, res) => {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    // Corrected: Uses dynamic salt rounds from env configuration (default 12)
     const salt = await bcrypt.genSalt(env.bcryptSaltRounds);
     const hashedPassword = await bcrypt.hash(password, salt);
 
@@ -35,7 +36,6 @@ export const register = async (req, res) => {
       otpExpire,
     });
 
-    // Corrected: Dispatches an actual HTML transactional email
     try {
       await sendEmail({
         email: user.email,
@@ -50,7 +50,6 @@ export const register = async (req, res) => {
         `,
       });
     } catch (mailError) {
-      // Clean up newly created user record if email transmission fails completely
       await User.findByIdAndDelete(user._id);
       return res.status(500).json({ message: "Verification email failed to send. Process aborted." });
     }
@@ -86,14 +85,30 @@ export const verifyOtp = async (req, res) => {
     user.otpExpire = undefined;
     await user.save();
 
+    let profileData = null;
+
     if (targetRole === "Tenant") {
-      await Tenant.create({ userId: user._id });
+      profileData = await Tenant.create({ userId: user._id });
     } else if (targetRole === "Organization") {
-      await Organization.create({ userId: user._id });
+      // Create the organization
+      profileData = await Organization.create({ 
+        userId: user._id,
+        name: `${user.email.split('@')[0]}'s Organization`
+      });
+      
+      // ✅ Create OrganizationMember record for the owner
+      await OrganizationMember.create({
+        organizationId: profileData._id,
+        userId: user._id,
+        role: "OWNER",
+        status: "ACTIVE"
+      });
     }
 
-    sendTokenResponse(user, 200, res);
+    // Send token response with organization data
+    await sendTokenResponse(user, 200, res);
   } catch (error) {
+    console.error("Error in verifyOtp:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -122,7 +137,7 @@ export const login = async (req, res) => {
       return res.status(403).json({ message: "Account is not verified yet. Please complete OTP verification." });
     }
 
-    sendTokenResponse(user, 200, res);
+    await sendTokenResponse(user, 200, res);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -144,24 +159,65 @@ export const logout = async (req, res) => {
 export const getMe = async (req, res) => {
   try {
     let profileData = null;
+    let organizationRole = null;
+    let organizationId = null;
+    let organizationName = null;
+    let memberStatus = null;
 
     if (req.user.role === "Tenant") {
       profileData = await Tenant.findOne({ userId: req.user._id });
     } else if (req.user.role === "Organization") {
+      // Get the organization profile
       profileData = await Organization.findOne({ userId: req.user._id });
+      
+      // ✅ Check if user has an OrganizationMember record
+      const member = await OrganizationMember.findOne({ 
+        userId: req.user._id
+      }).populate('organizationId');
+      
+      if (member) {
+        // User is a member (could be OWNER, MANAGER, AGENT, FINANCE)
+        organizationRole = member.role;
+        organizationId = member.organizationId?._id || profileData?._id;
+        organizationName = member.organizationId?.name || profileData?.name;
+        memberStatus = member.status;
+      } else if (profileData) {
+        // User is an organization owner but no member record yet (legacy)
+        // Create one for them
+        const newMember = await OrganizationMember.create({
+          organizationId: profileData._id,
+          userId: req.user._id,
+          role: "OWNER",
+          status: "ACTIVE"
+        });
+        organizationRole = "OWNER";
+        organizationId = profileData._id;
+        organizationName = profileData.name;
+        memberStatus = "ACTIVE";
+      }
     }
 
+    // Create user object with organization role
+    const userResponse = req.user.toObject ? req.user.toObject() : req.user;
+    
     res.status(200).json({
       success: true,
-      user: req.user,
+      user: {
+        ...userResponse,
+        organizationRole: organizationRole || null,
+        organizationId: organizationId || null,
+        organizationName: organizationName || null,
+        memberStatus: memberStatus || null
+      },
       profile: profileData,
     });
   } catch (error) {
+    console.error("Error in getMe:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Complete / update the tenant personal profile (COHO account setup)
+// @desc    Complete / update the tenant personal profile
 // @route   PATCH /api/v1/auth/profile
 // @access  Private (Tenant)
 export const updateProfile = async (req, res) => {
@@ -182,7 +238,6 @@ export const updateProfile = async (req, res) => {
       organizationId,
     } = req.body;
 
-    // Only set the fields that were actually provided (partial update).
     const updates = {};
     if (firstName !== undefined) updates.firstName = firstName;
     if (lastName !== undefined) updates.lastName = lastName;

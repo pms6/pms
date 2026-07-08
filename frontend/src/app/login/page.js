@@ -161,7 +161,7 @@ export default function TenantLoginPage() {
 
           <p className="mt-8 text-center text-xs text-gray-400 font-medium">
             Don&apos;t have an account?{" "}
-            <Link href="/tenant-signup" className="text-[#F47C3C] font-bold hover:underline">
+            <Link href="/signup" className="text-[#F47C3C] font-bold hover:underline">
               Create one
             </Link>
           </p>

@@ -128,6 +128,24 @@ export const createRoom = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
+
+    // Surface Mongoose validation errors (e.g. invalid enum value) so the
+    // client sees the real reason instead of a generic 500.
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: Object.values(error.errors).map((e) => e.message).join(", "),
+      });
+    }
+
+    // Duplicate unique key (slug / listingCode)
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: `Duplicate value for ${Object.keys(error.keyValue).join(", ")}.`,
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: "Failed to create room.",
@@ -392,6 +410,14 @@ export const updateRoom = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: Object.values(error.errors).map((e) => e.message).join(", "),
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: "Failed to update room.",

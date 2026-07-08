@@ -1,15 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, MapPin, UserRound, Plus, Pencil, Trash2, BedDouble, PoundSterling, Users, X, CalendarClock, Wrench, ClipboardCheck, ShieldCheck, Star, ChevronRight, Loader2 } from "lucide-react";
+import { ArrowLeft, MapPin, UserRound, Plus, Pencil, Trash2, BedDouble, PoundSterling, Users, X, CalendarClock, Wrench, ClipboardCheck, ShieldCheck, Star, ChevronRight, Loader2, UploadCloud } from "lucide-react";
 import { Badge } from "../../../Shared/ui";
 import TenantSelect from "../../_components/TenantSelect";
 import TenancyPanel from "../../_components/TenancyPanel";
 import RoomManagementPanel from "../../_components/RoomManagementPanel";
 import { RENTAL_TYPES, GUARANTOR_REQ, LETTING_STATUS, LETTING_STATUS_TONE, viewings, maintenance, inspections, deposits, reviews, money } from "../../_data/dummy";
 import api from "@/app/api/api";
+import uploadToCloudinary from "@/app/utils/uploadToCloudinary";
 
 // API Service for Property Details
 const apiService = {
@@ -124,12 +125,49 @@ function RoomModal({ initial, propertyId, onClose, onSave }) {
     occupancy: initial?.occupancy || "SINGLE",
     notes: initial?.notes || "",
   });
+  const [images, setImages] = useState(initial?.images || []);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef(null);
 
   const set = (k) => (e) => {
     const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
     setForm({ ...form, [k]: value });
+  };
+
+  // Upload selected files to Cloudinary and append them as { url, alt } objects
+  // (matching the Room model's images schema).
+  const handleImageUpload = async (files) => {
+    if (!files || files.length === 0) return;
+    setUploadingImages(true);
+    setError("");
+    try {
+      const uploaded = [];
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith("image/")) continue;
+        if (file.size > 10 * 1024 * 1024) {
+          setError(`File ${file.name} exceeds 10MB limit`);
+          continue;
+        }
+        const result = await uploadToCloudinary(file);
+        uploaded.push({ url: result.url, alt: file.name });
+      }
+      if (uploaded.length) setImages((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      setError(err.message || "Failed to upload images");
+    } finally {
+      setUploadingImages(false);
+    }
+  };
+
+  const removeImage = (index) => setImages((prev) => prev.filter((_, i) => i !== index));
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    handleImageUpload(e.dataTransfer.files);
   };
 
   const submit = async (e) => {
@@ -162,6 +200,7 @@ function RoomModal({ initial, propertyId, onClose, onSave }) {
         status: form.status,
         availableFrom: form.availableFrom || undefined,
         notes: form.notes || undefined,
+        images,
       };
 
       let response;
@@ -186,7 +225,8 @@ function RoomModal({ initial, propertyId, onClose, onSave }) {
         furnished: response.data.furnished,
         billsIncluded: response.data.billsIncluded,
         notes: response.data.notes,
-        image: response.data.images?.[0] || null,
+        image: response.data.images?.[0]?.url || null,
+        images: response.data.images || [],
         roomType: response.data.roomType,
         occupancy: response.data.occupancy,
         securityDeposit: response.data.securityDeposit,
@@ -310,9 +350,55 @@ function RoomModal({ initial, propertyId, onClose, onSave }) {
             <label className={LABEL}>Room Notes</label>
             <textarea className={`${FIELD} min-h-24 resize-none`} value={form.notes} onChange={set("notes")} placeholder="Add room features, access notes, or viewing instructions" />
           </div>
-          <button type="submit" disabled={loading} className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-            {loading && <Loader2 size={18} className="animate-spin" />}
-            {loading ? 'Saving...' : isEdit ? 'Save Room' : 'Add Room'}
+
+          {/* Room Images (Cloudinary upload) */}
+          <div>
+            <label className={LABEL}>Room Images {uploadingImages && <Loader2 size={14} className="inline animate-spin ml-2" />}</label>
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              onClick={() => inputRef.current?.click()}
+              className={`border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all ${dragging ? "border-[#F47C3C] bg-orange-50" : "border-gray-200 hover:border-[#F47C3C] hover:bg-gray-50"}`}
+            >
+              <div className="w-10 h-10 mx-auto rounded-xl bg-orange-50 text-[#F47C3C] flex items-center justify-center mb-2">
+                {uploadingImages ? <Loader2 size={20} className="animate-spin" /> : <UploadCloud size={20} />}
+              </div>
+              <p className="text-sm font-bold text-[#0F253B]">Drag &amp; drop images</p>
+              <p className="text-xs text-gray-400 font-medium">or click to browse (max 10MB each)</p>
+              <input
+                ref={inputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => handleImageUpload(e.target.files)}
+                disabled={uploadingImages}
+              />
+            </div>
+
+            {images.length > 0 && (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-3">
+                {images.map((im, i) => (
+                  <div key={im.url || i} className="relative group aspect-square rounded-xl overflow-hidden border border-gray-100">
+                    <img src={im.url} alt={im.alt || `room-${i}`} className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); removeImage(i); }}
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X size={12} />
+                    </button>
+                    {i === 0 && <span className="absolute bottom-1 left-1 text-[9px] font-bold bg-[#0F253B] text-white px-1.5 py-0.5 rounded">Cover</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button type="submit" disabled={loading || uploadingImages} className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+            {(loading || uploadingImages) && <Loader2 size={18} className="animate-spin" />}
+            {loading ? 'Saving...' : uploadingImages ? 'Uploading Images...' : isEdit ? 'Save Room' : 'Add Room'}
           </button>
         </form>
       </div>
@@ -510,7 +596,8 @@ export default function AdminPropertyDetail() {
           furnished: room.furnished,
           billsIncluded: room.billsIncluded,
           notes: room.notes,
-          image: room.images?.[0] || null,
+          image: room.images?.[0]?.url || null,
+          images: room.images || [],
           roomType: room.roomType,
           occupancy: room.occupancy,
           securityDeposit: room.securityDeposit,
@@ -760,7 +847,7 @@ export default function AdminPropertyDetail() {
 
       {modal !== null && (
         <RoomModal 
-          initial={modal.id ? modal : null} 
+          initial={modal.id ? (modal._apiData || modal) : null} 
           propertyId={property.id}
           onClose={() => setModal(null)} 
           onSave={saveRoom} 
