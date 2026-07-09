@@ -1,7 +1,7 @@
 "use client";
 
-import PropertyRoomsManager from "../../../Components/PropertyRoomsManager";
+import PropertyDetailBoard from "../../../Components/PropertyDetailBoard";
 
 export default function ManagerPropertyDetail() {
-  return <PropertyRoomsManager basePath="/manager/properties" />;
+  return <PropertyDetailBoard basePath="/manager/properties" />;
 }

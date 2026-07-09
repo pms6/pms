@@ -5,10 +5,19 @@ import Room from "../models/Room.js";
 /**
  * Generate Property Code
  * Example: PROP-000001
+ *
+ * Derives the next number from the HIGHEST existing code, not the document
+ * count — otherwise deleting a property makes count+1 collide with a code that
+ * still exists (propertyCode is unique), throwing a duplicate-key error.
  */
 const generatePropertyCode = async () => {
-  const count = await Property.countDocuments();
-  return `PROP-${String(count + 1).padStart(6, "0")}`;
+  const last = await Property.findOne({ propertyCode: /^PROP-\d+$/ })
+    .sort({ propertyCode: -1 })
+    .select("propertyCode")
+    .lean();
+
+  const lastNum = last ? parseInt(last.propertyCode.slice(5), 10) || 0 : 0;
+  return `PROP-${String(lastNum + 1).padStart(6, "0")}`;
 };
 
 /**
@@ -44,13 +53,27 @@ export const createProperty = async (req, res) => {
       });
     }
 
-    // Create property with all fields from req.body plus additional fields
-    const property = await Property.create({
-      organizationId,
-      createdBy,
-      propertyCode: await generatePropertyCode(),
-      ...propertyData, // This includes all fields from req.body
-    });
+    // Create with a retry loop: if two properties race and generate the same
+    // propertyCode, regenerate and try again a few times before giving up.
+    // propertyCode is set AFTER the spread so a client-supplied value can't
+    // override (or collide with) the generated one.
+    let property;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        property = await Property.create({
+          organizationId,
+          createdBy,
+          ...propertyData, // all fields from req.body
+          propertyCode: await generatePropertyCode(),
+        });
+        break;
+      } catch (err) {
+        const isCodeDup =
+          err.code === 11000 && err.keyPattern && err.keyPattern.propertyCode;
+        if (isCodeDup && attempt < 4) continue; // collided — retry
+        throw err;
+      }
+    }
 
     return res.status(201).json({
       success: true,
@@ -59,6 +82,15 @@ export const createProperty = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
+
+    // Duplicate unique key (e.g. propertyCode, or a unique name index)
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: `Duplicate value for ${Object.keys(error.keyValue || {}).join(", ")}.`,
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: "Failed to create property.",

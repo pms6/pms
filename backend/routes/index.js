@@ -5,6 +5,8 @@ import propertyRoutes from "./property.route.js";
 import roomRoutes from "./room.route.js";
 import leadRoutes from "./lead.route.js";
 import memberRoutes from "./member.route.js";
+import ownerRoutes from "./owner.route.js";
+import viewingRoutes from "./viewing.Route.js";
 
 const router = express.Router();
 
@@ -22,6 +24,7 @@ router.use("/properties", propertyRoutes);
 router.use("/rooms", roomRoutes);
 router.use("/leads", leadRoutes);
 router.use("/members", memberRoutes);
-
+router.use("/owners", ownerRoutes);
+router.use("/viewings", viewingRoutes);
 
 export default router;

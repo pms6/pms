@@ -5,10 +5,19 @@ import Property from "../models/Property.js";
 /**
  * Generate Room Code
  * Example: RM-000001
+ *
+ * Derives the next number from the HIGHEST existing code, not the document
+ * count — otherwise deleting a room makes count+1 collide with a code that
+ * still exists (listingCode is unique), throwing a duplicate-key error.
  */
 const generateRoomCode = async () => {
-  const count = await Room.countDocuments();
-  return `RM-${String(count + 1).padStart(6, "0")}`;
+  const last = await Room.findOne({ listingCode: /^RM-\d+$/ })
+    .sort({ listingCode: -1 })
+    .select("listingCode")
+    .lean();
+
+  const lastNum = last ? parseInt(last.listingCode.slice(3), 10) || 0 : 0;
+  return `RM-${String(lastNum + 1).padStart(6, "0")}`;
 };
 
 /**
@@ -73,9 +82,6 @@ export const createRoom = async (req, res) => {
       });
     }
 
-    // Generate listing code if not provided
-    const listingCode = await generateRoomCode();
-
     // Generate slug if not provided
     const finalSlug = slug || title
       .toLowerCase()
@@ -86,7 +92,7 @@ export const createRoom = async (req, res) => {
     const existingSlug = await Room.findOne({ slug: finalSlug });
     const uniqueSlug = existingSlug ? `${finalSlug}-${Date.now()}` : finalSlug;
 
-    const room = await Room.create({
+    const basePayload = {
       organizationId,
       propertyId,
       createdBy,
@@ -117,9 +123,24 @@ export const createRoom = async (req, res) => {
       featured: featured || false,
       isPublished: isPublished !== undefined ? isPublished : true,
       slug: uniqueSlug,
-      listingCode,
       notes,
-    });
+    };
+
+    // Create with a retry loop: if two rooms race and generate the same
+    // listingCode, regenerate and try again a few times before giving up.
+    let room;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const listingCode = await generateRoomCode();
+      try {
+        room = await Room.create({ ...basePayload, listingCode });
+        break;
+      } catch (err) {
+        const isListingCodeDup =
+          err.code === 11000 && err.keyPattern && err.keyPattern.listingCode;
+        if (isListingCodeDup && attempt < 4) continue; // collided — retry
+        throw err;
+      }
+    }
 
     return res.status(201).json({
       success: true,

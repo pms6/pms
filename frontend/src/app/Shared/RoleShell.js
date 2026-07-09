@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { LogOut, Building2, X, Menu } from "lucide-react";
 import { useAuth } from "../Context/AuthContext";
+import { getEffectiveRole, dashboardPathFor } from "../utils/roles";
 
 export default function RoleShell({
   role,
@@ -17,28 +18,26 @@ export default function RoleShell({
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
 
-  // Role guard
+  // Role guard — compares the user's EFFECTIVE role (which accounts for the
+  // organization team sub-role) against the area this shell protects.
+  const effectiveRole = getEffectiveRole(user);
+
   useEffect(() => {
     if (loading) return;
 
     if (!user) {
       router.replace("/");
-    } else if (user.role !== role) {
-      const dashboard =
-        user.role === "organization"
-          ? "/admin/dashboard"
-          : "/tenant/dashboard";
-
-      router.replace(dashboard);
+    } else if (effectiveRole !== role) {
+      router.replace(dashboardPathFor(user));
     }
-  }, [loading, user, role, router]);
+  }, [loading, user, role, effectiveRole, router]);
 
   const handleLogout = async () => {
     await logout();
     router.replace("/");
   };
 
-  if (loading || !user || user.role !== role) {
+  if (loading || !user || effectiveRole !== role) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
         <div className="w-8 h-8 border-2 border-[#F47C3C]/30 border-t-[#F47C3C] rounded-full animate-spin" />
@@ -148,7 +147,7 @@ export default function RoleShell({
                 {user.name}
               </p>
               <p className="text-[10px] uppercase tracking-widest text-gray-400">
-                {user.role}
+                {user.organizationRole || user.role}
               </p>
             </div>
 

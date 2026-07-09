@@ -1,10 +1,19 @@
 // controllers/member.controller.js
+import mongoose from "mongoose";
 import OrganizationMember from "../models/OrganizationMember.js";
 import User from "../models/User.js";
 import Organization from "../models/Organization.js";
 import bcrypt from "bcrypt";
 import env from "../config/env.js";
 import { sendEmail } from "../utils/sendEmail.js";
+
+// Only OWNER/MANAGER may manage the team (invite/update/activate/suspend/delete).
+const canManageTeam = (req) =>
+    ["OWNER", "MANAGER"].includes(req.user?.organizationRole);
+
+// The caller's own organization (set by the `protect` middleware).
+const callerOrgId = (req) =>
+    req.user?.organizationId ? String(req.user.organizationId) : null;
 
 // Generate random password
 const generatePassword = () => {
@@ -20,7 +29,25 @@ export const MemberController = {
     // 1. Invite new member
     invite: async (req, res) => {
         try {
-            const { organizationId, email, role, name } = req.body;
+            const { email, role, name } = req.body;
+
+            // Only OWNER/MANAGER may invite.
+            if (!canManageTeam(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized to manage team members"
+                });
+            }
+
+            // Tenant isolation: always invite into the CALLER's org — never
+            // trust an organizationId from the request body.
+            const organizationId = callerOrgId(req);
+            if (!organizationId) {
+                return res.status(403).json({
+                    success: false,
+                    message: "You are not a member of any organization"
+                });
+            }
 
             // Validate organization exists
             const organization = await Organization.findById(organizationId);
@@ -131,18 +158,35 @@ export const MemberController = {
     // 2. Get all members of an organization
     getAll: async (req, res) => {
         try {
-            const members = await OrganizationMember.find({ 
-                organizationId: req.params.organizationId 
+            const { organizationId } = req.params;
+
+            if (!mongoose.isValidObjectId(organizationId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid organization id"
+                });
+            }
+
+            // Tenant isolation: you may only list members of YOUR org.
+            if (!callerOrgId(req) || organizationId !== callerOrgId(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized for this organization"
+                });
+            }
+
+            const members = await OrganizationMember.find({
+                organizationId
             }).populate("userId", "email");
-            
-            res.status(200).json({ 
+
+            res.status(200).json({
                 success: true,
-                data: members 
+                data: members
             });
         } catch (error) {
-            res.status(500).json({ 
+            res.status(500).json({
                 success: false,
-                message: error.message 
+                message: error.message
             });
         }
     },
@@ -150,28 +194,39 @@ export const MemberController = {
     // 3. Update member (role or status)
     update: async (req, res) => {
         try {
+            if (!canManageTeam(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized to manage team members"
+                });
+            }
+
             const { role, status } = req.body;
-            
-            const updateData = {};
-            if (role) updateData.role = role;
-            if (status) updateData.status = status;
-            
-            const member = await OrganizationMember.findByIdAndUpdate(
-                req.params.memberId,
-                updateData,
-                { new: true }
-            ).populate("userId", "email");
-            
+
+            const member = await OrganizationMember.findById(req.params.memberId);
             if (!member) {
                 return res.status(404).json({
                     success: false,
                     message: "Member not found"
                 });
             }
-            
-            res.status(200).json({ 
+
+            // Tenant isolation: the target must be in the caller's org.
+            if (String(member.organizationId) !== callerOrgId(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized for this member"
+                });
+            }
+
+            if (role) member.role = role;
+            if (status) member.status = status;
+            await member.save();
+            await member.populate("userId", "email");
+
+            res.status(200).json({
                 success: true,
-                data: member 
+                data: member
             });
         } catch (error) {
             res.status(500).json({ 
@@ -184,6 +239,13 @@ export const MemberController = {
     // 4. Activate member (change status from INVITED to ACTIVE)
     activate: async (req, res) => {
         try {
+            if (!canManageTeam(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized to manage team members"
+                });
+            }
+
             const { memberId } = req.params;
 
             const member = await OrganizationMember.findById(memberId);
@@ -191,6 +253,14 @@ export const MemberController = {
                 return res.status(404).json({
                     success: false,
                     message: "Member not found"
+                });
+            }
+
+            // Tenant isolation: the target must be in the caller's org.
+            if (String(member.organizationId) !== callerOrgId(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized for this member"
                 });
             }
 
@@ -250,6 +320,13 @@ export const MemberController = {
     // 5. Suspend member
     suspend: async (req, res) => {
         try {
+            if (!canManageTeam(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized to manage team members"
+                });
+            }
+
             const { memberId } = req.params;
 
             const member = await OrganizationMember.findById(memberId);
@@ -257,6 +334,30 @@ export const MemberController = {
                 return res.status(404).json({
                     success: false,
                     message: "Member not found"
+                });
+            }
+
+            // Tenant isolation: the target must be in the caller's org.
+            if (String(member.organizationId) !== callerOrgId(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized for this member"
+                });
+            }
+
+            // You cannot suspend your own account.
+            if (String(member.userId) === String(req.user._id)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "You cannot suspend your own account"
+                });
+            }
+
+            // The organization owner cannot be suspended.
+            if (member.role === "OWNER") {
+                return res.status(400).json({
+                    success: false,
+                    message: "The organization owner cannot be suspended"
                 });
             }
 
@@ -288,18 +389,51 @@ export const MemberController = {
     // 6. Delete member
     delete: async (req, res) => {
         try {
-            const member = await OrganizationMember.findByIdAndDelete(req.params.memberId);
-            
+            if (!canManageTeam(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized to manage team members"
+                });
+            }
+
+            const member = await OrganizationMember.findById(req.params.memberId);
+
             if (!member) {
                 return res.status(404).json({
                     success: false,
                     message: "Member not found"
                 });
             }
-            
-            res.status(200).json({ 
+
+            // Tenant isolation: the target must be in the caller's org.
+            if (String(member.organizationId) !== callerOrgId(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized for this member"
+                });
+            }
+
+            // You cannot delete your own account.
+            if (String(member.userId) === String(req.user._id)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "You cannot delete your own account"
+                });
+            }
+
+            // The organization owner cannot be deleted.
+            if (member.role === "OWNER") {
+                return res.status(400).json({
+                    success: false,
+                    message: "The organization owner cannot be removed"
+                });
+            }
+
+            await member.deleteOne();
+
+            res.status(200).json({
                 success: true,
-                message: "Member removed successfully" 
+                message: "Member removed successfully"
             });
         } catch (error) {
             res.status(500).json({ 

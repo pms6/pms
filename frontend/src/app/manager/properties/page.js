@@ -1,7 +1,7 @@
 "use client";
 
-import PropertiesManager from "../../Components/PropertiesManager";
+import PropertiesBoard from "../../Components/PropertiesBoard";
 
 export default function ManagerProperties() {
-  return <PropertiesManager basePath="/manager/properties" />;
+  return <PropertiesBoard basePath="/manager/properties" />;
 }

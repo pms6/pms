@@ -137,6 +137,17 @@ export const login = async (req, res) => {
       return res.status(403).json({ message: "Account is not verified yet. Please complete OTP verification." });
     }
 
+    // Auto-activate an invited team member on their first login.
+    // An organization member is created as INVITED when invited; logging in
+    // with the emailed credentials flips them to ACTIVE (no admin step needed).
+    // Only INVITED members are touched — SUSPENDED members are NOT reactivated.
+    if (user.role === "Organization") {
+      await OrganizationMember.updateOne(
+        { userId: user._id, status: "INVITED" },
+        { $set: { status: "ACTIVE" } }
+      );
+    }
+
     await sendTokenResponse(user, 200, res);
   } catch (error) {
     res.status(500).json({ message: error.message });

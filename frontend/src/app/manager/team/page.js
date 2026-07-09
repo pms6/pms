@@ -1,7 +1,7 @@
 "use client";
 
-import TeamManager from "../../Components/TeamManager";
+import TeamBoard from "../../Components/TeamBoard";
 
 export default function ManagerTeam() {
-  return <TeamManager />;
+  return <TeamBoard />;
 }

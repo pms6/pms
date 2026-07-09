@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import React, { useRef, useState, useEffect } from 'react'
 import { useAuth } from '../Context/AuthContext';
+import { dashboardPathFor } from '../utils/roles';
 
 const Header = () => {
 
@@ -17,10 +18,9 @@ const Header = () => {
         router.push("/");
     };
 
-    const dashboardPath =
-        user?.role === "organization"
-            ? "/admin/dashboard"
-            : "/tenant/dashboard";
+    // Route the "Dashboard" link to the correct area for the user's role
+    // (OWNER→admin, MANAGER→manager, AGENT→agent, FINANCE→finance, tenant→tenant).
+    const dashboardPath = user ? dashboardPathFor(user) : "/";
 
     /* ------------------------------------------------------------------ */
     /* Auth: avatar + signed-in user menu                                  */
@@ -189,13 +189,9 @@ const Header = () => {
                   </div>
                 </div>
                 <Link
-                    href={
-                    user?.role === "organization"
-                        ? "/admin/dashboard"
-                        : "/tenant/dashboard"
-                    }
+                    href={dashboardPath}
                     className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-semibold text-[#0F253B] hover:bg-gray-50 transition"
-                    onClick={() => setMenuOpen(false)}
+                    onClick={() => setOpen(false)}
                 >
                     <LayoutDashboard size={16} />
                     Dashboard
