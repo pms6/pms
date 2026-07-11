@@ -7,6 +7,8 @@ import leadRoutes from "./lead.route.js";
 import memberRoutes from "./member.route.js";
 import ownerRoutes from "./owner.route.js";
 import viewingRoutes from "./viewing.Route.js";
+import onboardingRoutes from "./onboarding.route.js";
+import inspectionRoutes from "./inspection.Route.js"
 
 const router = express.Router();
 
@@ -26,5 +28,7 @@ router.use("/leads", leadRoutes);
 router.use("/members", memberRoutes);
 router.use("/owners", ownerRoutes);
 router.use("/viewings", viewingRoutes);
+router.use("/onboarding", onboardingRoutes);
+router.use("/inspections", inspectionRoutes);
 
 export default router;

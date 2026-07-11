@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Plus, Upload, Download, Search, X, Star, Eye, Pencil, Archive, FileText, Paperclip, Check } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
-import { suppliers as seed, SPECIALISMS, SUPPLIER_PERMISSIONS } from "../_data/dummy";
+import { SPECIALISMS, SUPPLIER_PERMISSIONS } from "../_data/dummy";
+import api from "../../api/api";
 
 const FIELD = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
 const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
@@ -33,18 +34,27 @@ function SupplierModal({ initial, onClose, onSave }) {
   const addDocs = (e) => { const names = Array.from(e.target.files || []).map((x) => x.name); if (names.length) setForm((f) => ({ ...f, documents: [...f.documents, ...names] })); };
   const removeDoc = (n) => setForm((f) => ({ ...f, documents: f.documents.filter((x) => x !== n) }));
 
-  const submit = (e) => {
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
     e.preventDefault();
     if (!form.company.trim()) { setError("Company name is required"); return; }
-    onSave({
-      id: initial?.id || `sp${Date.now()}`,
-      company: form.company, contactForename: form.contactForename, contactSurname: form.contactSurname,
-      email: form.email, phone: form.phone, preferred: form.preferred, notes: form.notes,
-      documents: form.documents, specialisms: form.specialisms,
-      tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
-      permissions: form.permissions,
-      unpaidInvoices: initial?.unpaidInvoices || 0, archived: initial?.archived || false,
-    });
+    setSaving(true);
+    setError("");
+    try {
+      await onSave({
+        company: form.company, contactForename: form.contactForename, contactSurname: form.contactSurname,
+        email: form.email, phone: form.phone, preferred: form.preferred, notes: form.notes,
+        documents: form.documents, specialisms: form.specialisms,
+        tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
+        permissions: form.permissions,
+        unpaidInvoices: initial?.unpaidInvoices || 0, archived: initial?.archived || false,
+      });
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to save supplier");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const allSpecs = [...new Set([...SPECIALISMS, ...form.specialisms])];
@@ -114,7 +124,7 @@ function SupplierModal({ initial, onClose, onSave }) {
 
           <div><label className={LABEL}>Tags (comma separated)</label><input className={FIELD} value={form.tags} onChange={set("tags")} placeholder="Vetted, Gas Safe" /></div>
 
-          <button type="submit" className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98]">{isEdit ? "Save Supplier" : "Create Supplier"}</button>
+          <button type="submit" disabled={saving} className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all active:scale-[0.98]">{saving ? "Saving…" : isEdit ? "Save Supplier" : "Create Supplier"}</button>
         </form>
       </div>
     </div>
@@ -122,12 +132,29 @@ function SupplierModal({ initial, onClose, onSave }) {
 }
 
 export default function AdminSuppliers() {
-  const [list, setList] = useState(seed);
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [specF, setSpecF] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [unpaidOnly, setUnpaidOnly] = useState(false);
   const [modal, setModal] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.get("/suppliers");
+      setList(res.data.data || []);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to load suppliers");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const rows = list.filter((s) => {
     const t = q.toLowerCase();
@@ -139,11 +166,33 @@ export default function AdminSuppliers() {
     );
   });
 
-  const save = (sup) => {
-    setList((prev) => (prev.some((s) => s.id === sup.id) ? prev.map((s) => (s.id === sup.id ? sup : s)) : [sup, ...prev]));
+  // Returns a promise so the modal can surface errors / keep itself open on failure.
+  const save = async (payload) => {
+    const editingId = modal?._id;
+    if (editingId) {
+      const res = await api.put(`/suppliers/${editingId}`, payload);
+      const updated = res.data.data;
+      setList((prev) => prev.map((s) => (s._id === updated._id ? updated : s)));
+    } else {
+      const res = await api.post("/suppliers", payload);
+      setList((prev) => [res.data.data, ...prev]);
+    }
     setModal(null);
   };
-  const archive = (s) => { if (confirm(`${s.archived ? "Restore" : "Archive"} ${s.company}?`)) setList((prev) => prev.map((x) => (x.id === s.id ? { ...x, archived: !x.archived } : x))); };
+
+  const archive = async (s) => {
+    if (!confirm(`${s.archived ? "Restore" : "Archive"} ${s.company}?`)) return;
+    const snapshot = list;
+    setList((prev) => prev.map((x) => (x._id === s._id ? { ...x, archived: !x.archived } : x)));
+    try {
+      const res = await api.patch(`/suppliers/${s._id}/archive`);
+      const updated = res.data.data;
+      setList((prev) => prev.map((x) => (x._id === updated._id ? updated : x)));
+    } catch (err) {
+      setList(snapshot);
+      alert(err.response?.data?.message || "Failed to update supplier");
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -158,6 +207,10 @@ export default function AdminSuppliers() {
           </div>
         }
       />
+
+      {error && (
+        <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">{error}</div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
@@ -188,11 +241,13 @@ export default function AdminSuppliers() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
+              {loading ? (
+                <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-400">Loading suppliers…</td></tr>
+              ) : rows.length === 0 ? (
                 <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-400">No suppliers match these filters</td></tr>
               ) : (
                 rows.map((s) => (
-                  <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                  <tr key={s._id} className="border-b border-gray-50 hover:bg-gray-50/50">
                     <td className="px-5 py-3">
                       <p className="font-bold text-[#0F253B] flex items-center gap-1.5">{s.company}{s.preferred && <Star size={13} className="text-[#F47C3C] fill-[#F47C3C]" />}</p>
                       <p className="text-[11px] text-gray-400">{s.email}{s.unpaidInvoices > 0 && <span className="ml-2 text-red-600 font-bold">{s.unpaidInvoices} unpaid</span>}</p>
@@ -216,7 +271,7 @@ export default function AdminSuppliers() {
         </div>
       </div>
 
-      {modal !== null && <SupplierModal initial={modal.id ? modal : null} onClose={() => setModal(null)} onSave={save} />}
+      {modal !== null && <SupplierModal initial={modal._id ? modal : null} onClose={() => setModal(null)} onSave={save} />}
     </div>
   );
 }

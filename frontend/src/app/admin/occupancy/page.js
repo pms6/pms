@@ -1,34 +1,91 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { DoorOpen, Users, UserPlus, Repeat, RefreshCw, Download, Send, Eye, X } from "lucide-react";
-import { PageHeader, Card, Badge } from "../../Shared/ui";
-import { occupancy, occupancyOverview, TENANCY_STATUS, TENANCY_STATUS_TONE, properties, money } from "../_data/dummy";
+import { PageHeader, Badge } from "../../Shared/ui";
+import { TENANCY_STATUS, TENANCY_STATUS_TONE, money } from "../_data/dummy";
+import api from "../../api/api";
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-GB") : "—");
 
 export default function AdminOccupancy() {
+  const [items, setItems] = useState([]);
+  const [stats, setStats] = useState({ units: 0, occupants: 0, onboardings: 0, tenancyChanges: 0, renewals: 0 });
+  const [propertyNames, setPropertyNames] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
   const [propF, setPropF] = useState("");
   const [statusF, setStatusF] = useState("");
   const [view, setView] = useState(null);
+  const [inviting, setInviting] = useState(false);
 
-  const pendingOnboarding = occupancy.filter((o) => !o.onboarded).length;
-  const propertyNames = properties.map((p) => p.name);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [tenRes, statsRes, propsRes] = await Promise.all([
+        api.get("/tenancies"),
+        api.get("/tenancies/stats"),
+        api.get("/properties", { params: { limit: 100 } }),
+      ]);
+      setItems(tenRes.data.data || []);
+      setStats(statsRes.data.data || { units: 0, occupants: 0, onboardings: 0, tenancyChanges: 0, renewals: 0 });
+      setPropertyNames((propsRes.data.data || []).map((p) => p.name));
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to load occupancy");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const list = occupancy.filter((o) => (!propF || o.property === propF) && (!statusF || o.status === statusF));
+  useEffect(() => { load(); }, [load]);
+
+  const pendingOnboarding = items.filter((o) => !o.onboarded).length;
+
+  const list = items.filter((o) => (!propF || o.property === propF) && (!statusF || o.status === statusF));
 
   const overview = [
-    { icon: DoorOpen, label: "Units", value: occupancyOverview.units },
-    { icon: Users, label: "Occupants", value: occupancyOverview.occupants },
+    { icon: DoorOpen, label: "Units", value: stats.units },
+    { icon: Users, label: "Occupants", value: stats.occupants },
     { icon: UserPlus, label: "Onboardings", value: pendingOnboarding },
-    { icon: Repeat, label: "Tenancy Changes", value: occupancyOverview.tenancyChanges },
-    { icon: RefreshCw, label: "Renewals", value: occupancyOverview.renewals },
+    { icon: Repeat, label: "Tenancy Changes", value: stats.tenancyChanges },
+    { icon: RefreshCw, label: "Renewals", value: stats.renewals },
   ];
 
   const statusChips = [
-    { key: "", label: "All Occupants", count: occupancy.length, tone: "gray" },
-    ...TENANCY_STATUS.map((s) => ({ key: s, label: s, count: occupancy.filter((o) => o.status === s).length, tone: TENANCY_STATUS_TONE[s] })),
+    { key: "", label: "All Occupants", count: items.length, tone: "gray" },
+    ...TENANCY_STATUS.map((s) => ({ key: s, label: s, count: items.filter((o) => o.status === s).length, tone: TENANCY_STATUS_TONE[s] })),
   ];
+
+  const inviteAll = async () => {
+    if (pendingOnboarding === 0) return;
+    if (!confirm(`Invite ${pendingOnboarding} tenant(s) to onboard?`)) return;
+    setInviting(true);
+    try {
+      const res = await api.post("/tenancies/invite-all");
+      alert(res.data?.message || "Invites sent.");
+      setItems((xs) => xs.map((x) => (x.onboarded ? x : { ...x, invitedAt: new Date().toISOString() })));
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to send invites");
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const inviteOne = async (tenancy) => {
+    try {
+      const res = await api.patch(`/tenancies/${tenancy._id}/invite`);
+      alert(res.data?.message || "Invite sent.");
+      const updated = res.data?.data;
+      if (updated) {
+        setItems((xs) => xs.map((x) => (x._id === updated._id ? updated : x)));
+        setView((v) => (v && v._id === updated._id ? updated : v));
+      }
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to send invite");
+    }
+  };
 
   const exportBtn = (label) => (
     <button key={label} onClick={() => alert(`${label} (demo)`)} className="flex items-center gap-2 px-3.5 py-2.5 bg-white border border-gray-100 hover:bg-gray-50 text-[#0F253B] font-bold text-xs rounded-xl transition-all">
@@ -42,18 +99,22 @@ export default function AdminOccupancy() {
         title="Occupancy"
         subtitle="Occupancy status of all properties, units and tenants"
         action={
-          <button onClick={() => alert(`Invite ${pendingOnboarding} tenant(s) to onboard (demo)`)} className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
+          <button onClick={inviteAll} disabled={inviting || pendingOnboarding === 0} className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
             <Send size={18} /> Invite All Tenants
           </button>
         }
       />
+
+      {error && (
+        <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">{error}</div>
+      )}
 
       {/* Overview */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         {overview.map((s) => (
           <div key={s.label} className="bg-white border border-gray-100 rounded-2xl p-4">
             <div className="w-10 h-10 rounded-xl bg-orange-50 text-[#F47C3C] flex items-center justify-center mb-3"><s.icon size={18} /></div>
-            <p className="text-2xl font-bold text-[#0F253B]">{s.value}</p>
+            <p className="text-2xl font-bold text-[#0F253B]">{loading ? "—" : s.value}</p>
             <p className="text-[11px] font-bold uppercase tracking-widest text-gray-400 mt-0.5">{s.label}</p>
           </div>
         ))}
@@ -98,11 +159,13 @@ export default function AdminOccupancy() {
               </tr>
             </thead>
             <tbody>
-              {list.length === 0 ? (
+              {loading ? (
+                <tr><td colSpan={8} className="px-5 py-10 text-center text-gray-400">Loading tenancies…</td></tr>
+              ) : list.length === 0 ? (
                 <tr><td colSpan={8} className="px-5 py-10 text-center text-gray-400">No tenancies match these filters</td></tr>
               ) : (
                 list.map((o) => (
-                  <tr key={o.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                  <tr key={o._id} className="border-b border-gray-50 hover:bg-gray-50/50">
                     <td className="px-5 py-3">
                       <p className="font-bold text-[#0F253B]">{o.property}</p>
                       <p className="text-[11px] text-gray-400">{o.unit}</p>
@@ -155,14 +218,14 @@ export default function AdminOccupancy() {
                 ["Fixed Term End", view.fixedTermEnd ? fmtDate(view.fixedTermEnd) : "—"],
                 ["Periodic Start", view.periodicStart ? fmtDate(view.periodicStart) : "—"],
                 ["Availability", view.availability],
-                ["Onboarding", view.onboarded ? "Complete" : "Pending invite"],
+                ["Onboarding", view.onboarded ? "Complete" : view.invitedAt ? `Invited ${fmtDate(view.invitedAt)}` : "Pending invite"],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-3"><dt className="text-gray-400 font-medium">{k}</dt><dd className="font-bold text-[#0F253B] text-right">{v}</dd></div>
               ))}
             </dl>
 
             {!view.onboarded && (
-              <button onClick={() => alert(`Invite ${view.tenant} to onboard (demo)`)} className="w-full mt-5 flex items-center justify-center gap-2 py-3 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all">
+              <button onClick={() => inviteOne(view)} className="w-full mt-5 flex items-center justify-center gap-2 py-3 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all">
                 <Send size={16} /> Send Onboarding Invite
               </button>
             )}
