@@ -12,7 +12,7 @@ const router = express.Router();
 
 router.use(protect);
 
-// Protect all routes with auth middleware
+// Protect all routes with auth middleware (assumed)
 router.get("/", getViewings);
 router.post("/", createViewing);
 router.put("/:id", updateViewing);

@@ -8,7 +8,11 @@ import memberRoutes from "./member.route.js";
 import ownerRoutes from "./owner.route.js";
 import viewingRoutes from "./viewing.Route.js";
 import onboardingRoutes from "./onboarding.route.js";
-import inspectionRoutes from "./inspection.Route.js"
+import tenancyRoutes from "./tenancy.route.js";
+import supplierRoutes from "./supplier.route.js";
+import maintenanceRoutes from "./maintenance.route.js";
+import complianceRoutes from "./compliance.Route.js"
+import welcomePackRoutes from "./welcomePack.route.js"
 
 const router = express.Router();
 
@@ -29,6 +33,10 @@ router.use("/members", memberRoutes);
 router.use("/owners", ownerRoutes);
 router.use("/viewings", viewingRoutes);
 router.use("/onboarding", onboardingRoutes);
-router.use("/inspections", inspectionRoutes);
+router.use("/tenancies", tenancyRoutes);
+router.use("/suppliers", supplierRoutes);
+router.use("/maintenance", maintenanceRoutes);
+router.use("/compliance", complianceRoutes);
+router.use("/welcome-pack", welcomePackRoutes);
 
 export default router;

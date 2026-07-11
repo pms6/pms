@@ -1,12 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Check, User, Briefcase, ShieldCheck, FileText, Users2, Wallet, Home,
-  Mail, Phone, ChevronRight, Plus, X,
+  Mail, Phone, ChevronRight, ChevronLeft, Plus, X, Trash2, Loader2,
+  Upload, CheckCircle2, XCircle, ExternalLink,
 } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
-import { onboarding, ONBOARDING_STAGES, properties, money } from "../_data/dummy";
+import { ONBOARDING_STAGES, money } from "../_data/dummy";
+import api from "../../api/api";
+import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
+
+const DOC_TYPES = [
+  "ID / Passport",
+  "Proof of income",
+  "Bank statement",
+  "Right to Rent",
+  "Guarantor ID",
+  "Tenancy agreement",
+  "Reference",
+  "Other",
+];
+
+// Rooms that can be offered to a new applicant.
+const AVAILABLE_ROOM_STATUSES = ["AVAILABLE", "AVAILABLE_SOON"];
 
 const STATUS_TONE = {
   verified: "green", passed: "green", approved: "green", protected: "green", complete: "green",
@@ -14,7 +31,7 @@ const STATUS_TONE = {
   failed: "red",
 };
 function tone(s) { return STATUS_TONE[s] || "gray"; }
-function initials(name) { return name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase(); }
+function initials(name) { return (name || "?").split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase(); }
 
 function Stepper({ index }) {
   return (
@@ -62,36 +79,89 @@ function Field({ label, value }) {
   );
 }
 
-function NewOnboardingModal({ onClose, onCreate }) {
+function NewOnboardingModal({ onClose, onCreated, properties }) {
   const [form, setForm] = useState({
-    name: "", email: "", phone: "", property: "", room: "",
+    name: "", email: "", phone: "", propertyId: "", roomId: "",
     rent: "", deposit: "", holdingDeposit: "", startDate: "", termMonths: "12",
   });
+  const [rooms, setRooms] = useState([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const num = (x) => Number(x) || 0;
 
-  const submit = (e) => {
-    e.preventDefault();
-    if (!form.name.trim()) { setError("Applicant name is required"); return; }
-    onCreate({
-      id: `o${Date.now()}`,
-      name: form.name, avatarSeed: form.name, email: form.email, phone: form.phone,
-      dob: "", nationality: "", currentAddress: "",
-      stageIndex: 0,
-      holdingDeposit: num(form.holdingDeposit),
-      employment: { employer: "", jobTitle: "", type: "", annualIncome: 0, startDate: "" },
-      rightToRent: { status: "pending", docType: "", docNumber: "", expiry: "", shareCode: "" },
-      references: { previousLandlord: "pending", employer: "pending", credit: "pending" },
-      guarantor: { name: "", relationship: "", annualIncome: 0, address: "", phone: "", status: "not_required" },
-      tenancy: { property: form.property || "—", room: form.room || "—", rent: num(form.rent), frequency: "monthly", deposit: num(form.deposit), startDate: form.startDate, termMonths: num(form.termMonths) || 12 },
-      depositScheme: { provider: "DPS", status: "not_started", ref: "—" },
-      documents: [],
-    });
+  // When the property changes, load its rooms and reset the room selection.
+  const onPropertyChange = async (e) => {
+    const propertyId = e.target.value;
+    setForm((f) => ({ ...f, propertyId, roomId: "" }));
+    setRooms([]);
+    if (!propertyId) return;
+    setRoomsLoading(true);
+    try {
+      const res = await api.get(`/rooms/property/${propertyId}`);
+      const all = res.data.data || [];
+      // Only offer rooms that are actually lettable.
+      setRooms(all.filter((r) => AVAILABLE_ROOM_STATUSES.includes(r.status)));
+    } catch {
+      setRooms([]);
+    } finally {
+      setRoomsLoading(false);
+    }
   };
 
-  const field = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
+  // Selecting a room auto-fills rent / deposit / holding from the room record.
+  const onRoomChange = (e) => {
+    const roomId = e.target.value;
+    const room = rooms.find((r) => r._id === roomId);
+    setForm((f) => ({
+      ...f,
+      roomId,
+      rent: room?.monthlyRent != null ? String(room.monthlyRent) : f.rent,
+      deposit: room?.securityDeposit != null ? String(room.securityDeposit) : f.deposit,
+      holdingDeposit: room?.holdingDeposit != null ? String(room.holdingDeposit) : f.holdingDeposit,
+    }));
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) { setError("Applicant name is required"); return; }
+    setSaving(true);
+    setError("");
+    try {
+      const property = properties.find((p) => p._id === form.propertyId);
+      const room = rooms.find((r) => r._id === form.roomId);
+      const res = await api.post("/onboarding", {
+        name: form.name,
+        email: form.email || undefined,
+        phone: form.phone || undefined,
+        holdingDeposit: num(form.holdingDeposit),
+        tenancy: {
+          property: property?.name || "—",
+          room: room?.roomName || room?.title || "—",
+          rent: num(form.rent),
+          frequency: "monthly",
+          deposit: num(form.deposit),
+          startDate: form.startDate,
+          termMonths: num(form.termMonths) || 12,
+        },
+      });
+      onCreated(res.data.data);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to add applicant");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const field = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B] disabled:opacity-60 disabled:cursor-not-allowed";
   const labelCls = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
+  const roomLabel = (r) => {
+    const name = r.roomName || r.title || "Room";
+    const soon = r.status === "AVAILABLE_SOON" ? " · Available soon" : "";
+    const rent = r.monthlyRent != null ? ` — £${r.monthlyRent}/mo` : "";
+    return `${name}${rent}${soon}`;
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -113,12 +183,28 @@ function NewOnboardingModal({ onClose, onCreate }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Property</label>
-              <select className={field} value={form.property} onChange={set("property")}>
+              <select className={field} value={form.propertyId} onChange={onPropertyChange}>
                 <option value="">Select…</option>
-                {properties.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                {properties.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
               </select>
             </div>
-            <div><label className={labelCls}>Room</label><input className={field} value={form.room} onChange={set("room")} placeholder="Room 3" /></div>
+            <div>
+              <label className={labelCls}>
+                Room {roomsLoading && <span className="text-gray-300 normal-case">· loading…</span>}
+              </label>
+              <select className={field} value={form.roomId} onChange={onRoomChange} disabled={!form.propertyId || roomsLoading}>
+                <option value="">
+                  {!form.propertyId
+                    ? "Select a property first"
+                    : roomsLoading
+                    ? "Loading rooms…"
+                    : rooms.length === 0
+                    ? "No available rooms"
+                    : "Select room…"}
+                </option>
+                {rooms.map((r) => <option key={r._id} value={r._id}>{roomLabel(r)}</option>)}
+              </select>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className={labelCls}>Monthly Rent (£)</label><input type="number" min="0" className={field} value={form.rent} onChange={set("rent")} placeholder="650" /></div>
@@ -130,25 +216,209 @@ function NewOnboardingModal({ onClose, onCreate }) {
             <div><label className={labelCls}>Term (mo)</label><input type="number" min="0" className={field} value={form.termMonths} onChange={set("termMonths")} /></div>
           </div>
 
-          <button type="submit" className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98]">Start Onboarding</button>
+          <button type="submit" disabled={saving} className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2">
+            {saving && <Loader2 size={18} className="animate-spin" />}
+            {saving ? "Adding…" : "Start Onboarding"}
+          </button>
         </form>
       </div>
     </div>
   );
 }
 
-export default function AdminOnboarding() {
-  const [items, setItems] = useState(onboarding);
-  const [selectedId, setSelectedId] = useState(onboarding[0]?.id);
-  const [showAdd, setShowAdd] = useState(false);
-  const a = items.find((x) => x.id === selectedId) || items[0];
-  const progress = a ? Math.round((a.stageIndex / (ONBOARDING_STAGES.length - 1)) * 100) : 0;
+// Documents card with PDF/image upload + verify workflow.
+function DocumentsSection({ applicant, onApplicantUpdate }) {
+  const fileRef = useRef(null);
+  const [docType, setDocType] = useState(DOC_TYPES[0]);
+  const [uploading, setUploading] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState("");
 
-  const create = (obj) => {
-    onboarding.unshift(obj); // sync to shared store
-    setItems([...onboarding]);
-    setSelectedId(obj.id);
+  const pick = () => fileRef.current?.click();
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    setUploading(true);
+    setError("");
+    try {
+      const { url, publicId, name } = await uploadFileToCloudinary(file);
+      const res = await api.post(`/onboarding/${applicant._id}/documents`, {
+        name, type: docType, url, publicId,
+      });
+      onApplicantUpdate(res.data.data);
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const verify = async (docId, status) => {
+    setBusyId(docId);
+    setError("");
+    try {
+      const res = await api.patch(`/onboarding/${applicant._id}/documents/${docId}/verify`, { status });
+      onApplicantUpdate(res.data.data);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to update document");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const remove = async (docId, name) => {
+    if (!confirm(`Delete document "${name}"?`)) return;
+    setBusyId(docId);
+    setError("");
+    try {
+      const res = await api.delete(`/onboarding/${applicant._id}/documents/${docId}`);
+      onApplicantUpdate(res.data.data);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to delete document");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const docs = applicant.documents || [];
+
+  return (
+    <Section
+      icon={FileText}
+      title="Documents"
+      action={
+        <div className="flex items-center gap-2">
+          <select
+            value={docType}
+            onChange={(e) => setDocType(e.target.value)}
+            className="text-xs font-bold text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-[#F47C3C] outline-none cursor-pointer"
+          >
+            {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <button
+            onClick={pick}
+            disabled={uploading}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-xs rounded-lg transition-all disabled:opacity-50"
+          >
+            {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+            {uploading ? "Uploading…" : "Upload"}
+          </button>
+          <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={onFile} />
+        </div>
+      }
+    >
+      {error && <div className="mb-3 p-2.5 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">{error}</div>}
+      {docs.length === 0 && <p className="text-sm text-gray-400 font-medium">No documents uploaded yet. Choose a type and upload a PDF or image.</p>}
+      <ul className="grid grid-cols-1 gap-2">
+        {docs.map((d) => (
+          <li key={d._id} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
+            <div className="w-9 h-9 rounded-lg bg-white border border-gray-100 flex items-center justify-center text-[#F47C3C] shrink-0"><FileText size={16} /></div>
+            <div className="min-w-0 flex-1">
+              <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-sm font-bold text-[#0F253B] truncate flex items-center gap-1 hover:text-[#F47C3C]">
+                {d.name} <ExternalLink size={12} className="shrink-0 opacity-60" />
+              </a>
+              <p className="text-[11px] text-gray-400 font-medium">{d.type || "Document"}</p>
+            </div>
+            <Badge tone={tone(d.status)}>{d.status}</Badge>
+            <div className="flex items-center gap-1 shrink-0">
+              {busyId === d._id ? (
+                <Loader2 size={15} className="animate-spin text-gray-400" />
+              ) : (
+                <>
+                  {d.status !== "verified" && (
+                    <button onClick={() => verify(d._id, "verified")} title="Mark verified" className="text-gray-300 hover:text-emerald-600 transition-all"><CheckCircle2 size={16} /></button>
+                  )}
+                  {d.status !== "failed" && (
+                    <button onClick={() => verify(d._id, "failed")} title="Mark rejected" className="text-gray-300 hover:text-red-600 transition-all"><XCircle size={16} /></button>
+                  )}
+                  <button onClick={() => remove(d._id, d.name)} title="Delete" className="text-gray-300 hover:text-red-600 transition-all"><Trash2 size={15} /></button>
+                </>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+export default function AdminOnboarding() {
+  const [items, setItems] = useState([]);
+  const [properties, setProperties] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [savingStage, setSavingStage] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [obRes, propsRes] = await Promise.all([
+        api.get("/onboarding"),
+        api.get("/properties", { params: { limit: 100 } }),
+      ]);
+      const list = obRes.data.data || [];
+      setItems(list);
+      setProperties(propsRes.data.data || []);
+      setSelectedId((cur) => cur && list.some((x) => x._id === cur) ? cur : list[0]?._id || null);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to load onboarding");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const a = items.find((x) => x._id === selectedId) || items[0];
+  const lastStage = ONBOARDING_STAGES.length - 1;
+  const progress = a ? Math.round((a.stageIndex / lastStage) * 100) : 0;
+
+  const created = (obj) => {
+    setItems((xs) => [obj, ...xs]);
+    setSelectedId(obj._id);
     setShowAdd(false);
+  };
+
+  // Replace an applicant in-place with a fresh copy returned by the API
+  // (used after document upload / verify / delete).
+  const replaceItem = (updated) => {
+    setItems((xs) => xs.map((x) => (x._id === updated._id ? updated : x)));
+  };
+
+  const moveStage = async (delta) => {
+    if (!a) return;
+    const next = Math.min(lastStage, Math.max(0, a.stageIndex + delta));
+    if (next === a.stageIndex) return;
+    const prev = a.stageIndex;
+    setSavingStage(true);
+    setItems((xs) => xs.map((x) => (x._id === a._id ? { ...x, stageIndex: next } : x)));
+    try {
+      await api.patch(`/onboarding/${a._id}/stage`, { stageIndex: next });
+    } catch (err) {
+      setItems((xs) => xs.map((x) => (x._id === a._id ? { ...x, stageIndex: prev } : x)));
+      alert(err.response?.data?.message || "Failed to update stage");
+    } finally {
+      setSavingStage(false);
+    }
+  };
+
+  const remove = async (applicant) => {
+    if (!confirm(`Remove "${applicant.name}" from onboarding?`)) return;
+    const snapshot = items;
+    const nextList = items.filter((x) => x._id !== applicant._id);
+    setItems(nextList);
+    if (selectedId === applicant._id) setSelectedId(nextList[0]?._id || null);
+    try {
+      await api.delete(`/onboarding/${applicant._id}`);
+    } catch (err) {
+      setItems(snapshot);
+      alert(err.response?.data?.message || "Failed to remove applicant");
+    }
   };
 
   return (
@@ -163,13 +433,15 @@ export default function AdminOnboarding() {
         }
       />
 
+      {error && <div className="p-4 bg-red-50 border-l-4 border-red-500 text-red-700 text-sm font-bold rounded">{error}</div>}
+
       {/* Pipeline summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: "In progress", value: items.filter((o) => o.stageIndex < 6).length, tone: "bg-blue-50 text-blue-600" },
-          { label: "Referencing", value: items.filter((o) => o.stageIndex === 1).length, tone: "bg-amber-50 text-amber-600" },
-          { label: "Ready to move-in", value: items.filter((o) => o.stageIndex >= 5).length, tone: "bg-emerald-50 text-emerald-600" },
-          { label: "Total applicants", value: items.length, tone: "bg-orange-50 text-[#F47C3C]" },
+          { label: "In progress", value: items.filter((o) => o.stageIndex < lastStage).length },
+          { label: "Referencing", value: items.filter((o) => o.stageIndex === 1).length },
+          { label: "Ready to move-in", value: items.filter((o) => o.stageIndex >= 5).length },
+          { label: "Total applicants", value: items.length },
         ].map((s, i) => (
           <div key={i} className="bg-white border border-gray-100 rounded-2xl p-4">
             <p className="text-2xl font-bold text-[#0F253B]">{s.value}</p>
@@ -178,159 +450,180 @@ export default function AdminOnboarding() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Master list */}
-        <div className="lg:col-span-1 space-y-2">
-          {items.map((o) => {
-            const p = Math.round((o.stageIndex / (ONBOARDING_STAGES.length - 1)) * 100);
-            const active = o.id === selectedId;
-            return (
-              <button key={o.id} onClick={() => setSelectedId(o.id)} className={`w-full text-left bg-white border rounded-2xl p-4 transition-all ${active ? "border-[#F47C3C] ring-2 ring-[#F47C3C]/20" : "border-gray-100 hover:shadow-md"}`}>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-[#0F253B] text-white flex items-center justify-center text-sm font-bold shrink-0">{initials(o.name)}</div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-bold text-[#0F253B] text-sm truncate">{o.name}</p>
-                    <p className="text-[11px] text-gray-400 font-medium truncate">{o.tenancy.property} · {o.tenancy.room}</p>
-                  </div>
-                  <ChevronRight size={16} className={active ? "text-[#F47C3C]" : "text-gray-300"} />
-                </div>
-                <div className="mt-3">
-                  <div className="flex items-center justify-between text-[10px] font-bold mb-1">
-                    <span className="text-gray-400 uppercase tracking-widest">{ONBOARDING_STAGES[o.stageIndex]}</span>
-                    <span className="text-[#0F253B]">{p}%</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden"><div className="h-full bg-[#F47C3C]" style={{ width: `${p}%` }} /></div>
-                </div>
-              </button>
-            );
-          })}
+      {loading ? (
+        <div className="flex items-center justify-center py-32"><div className="w-8 h-8 border-2 border-[#F47C3C]/30 border-t-[#F47C3C] rounded-full animate-spin" /></div>
+      ) : items.length === 0 ? (
+        <div className="text-center py-24 bg-white border border-gray-100 rounded-2xl">
+          <p className="text-sm font-semibold text-gray-400">No applicants in onboarding yet.</p>
+          <button onClick={() => setShowAdd(true)} className="mt-4 inline-flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all">
+            <Plus size={18} /> New Applicant
+          </button>
         </div>
-
-        {/* Detail */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* Header + stepper */}
-          <div className="bg-white border border-gray-100 rounded-2xl p-5">
-            <div className="flex items-start justify-between flex-wrap gap-3 mb-5">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-[#0F253B] text-white flex items-center justify-center font-bold">{initials(a.name)}</div>
-                <div>
-                  <h2 className="text-lg font-bold text-[#0F253B]">{a.name}</h2>
-                  <p className="text-xs text-gray-400 font-medium flex flex-wrap gap-x-3 gap-y-0.5">
-                    <span className="flex items-center gap-1"><Mail size={11} />{a.email}</span>
-                    <span className="flex items-center gap-1"><Phone size={11} />{a.phone}</span>
-                  </p>
-                </div>
-              </div>
-              <Badge tone={progress === 100 ? "green" : "orange"}>{progress}% complete</Badge>
-            </div>
-            <Stepper index={a.stageIndex} />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          {/* Master list */}
+          <div className="lg:col-span-1 space-y-2">
+            {items.map((o) => {
+              const p = Math.round((o.stageIndex / lastStage) * 100);
+              const active = o._id === selectedId;
+              return (
+                <button key={o._id} onClick={() => setSelectedId(o._id)} className={`w-full text-left bg-white border rounded-2xl p-4 transition-all ${active ? "border-[#F47C3C] ring-2 ring-[#F47C3C]/20" : "border-gray-100 hover:shadow-md"}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-[#0F253B] text-white flex items-center justify-center text-sm font-bold shrink-0">{initials(o.name)}</div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-[#0F253B] text-sm truncate">{o.name}</p>
+                      <p className="text-[11px] text-gray-400 font-medium truncate">{o.tenancy?.property} · {o.tenancy?.room}</p>
+                    </div>
+                    <ChevronRight size={16} className={active ? "text-[#F47C3C]" : "text-gray-300"} />
+                  </div>
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-[10px] font-bold mb-1">
+                      <span className="text-gray-400 uppercase tracking-widest">{ONBOARDING_STAGES[o.stageIndex]}</span>
+                      <span className="text-[#0F253B]">{p}%</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden"><div className="h-full bg-[#F47C3C]" style={{ width: `${p}%` }} /></div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
 
-          {/* Tenancy terms */}
-          <Section icon={Home} title="Tenancy Terms">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              <Field label="Property" value={a.tenancy.property} />
-              <Field label="Room" value={a.tenancy.room} />
-              <Field label="Rent" value={`${money(a.tenancy.rent)}/mo`} />
-              <Field label="Deposit" value={money(a.tenancy.deposit)} />
-              <Field label="Start date" value={a.tenancy.startDate} />
-              <Field label="Term" value={`${a.tenancy.termMonths} months`} />
-              <Field label="Frequency" value={a.tenancy.frequency} />
-              <Field label="Holding deposit" value={money(a.holdingDeposit)} />
-            </div>
-          </Section>
-
-          {/* Personal */}
-          <Section icon={User} title="Personal Details">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              <Field label="Date of birth" value={a.dob} />
-              <Field label="Nationality" value={a.nationality} />
-              <Field label="Current address" value={a.currentAddress} />
-            </div>
-          </Section>
-
-          {/* Employment */}
-          <Section icon={Briefcase} title="Employment & Affordability">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              <Field label="Employer" value={a.employment.employer} />
-              <Field label="Job title" value={a.employment.jobTitle} />
-              <Field label="Type" value={a.employment.type} />
-              <Field label="Annual income" value={money(a.employment.annualIncome)} />
-              <Field label="Started" value={a.employment.startDate} />
-              <Field label="Rent : income" value={`${a.employment.annualIncome ? Math.round((a.tenancy.rent * 12 / a.employment.annualIncome) * 100) : 0}%`} />
-            </div>
-          </Section>
-
-          {/* Right to Rent */}
-          <Section icon={ShieldCheck} title="Right to Rent" action={<Badge tone={tone(a.rightToRent.status)}>{a.rightToRent.status}</Badge>}>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <Field label="Document" value={a.rightToRent.docType} />
-              <Field label="Number" value={a.rightToRent.docNumber} />
-              <Field label="Expiry" value={a.rightToRent.expiry} />
-              <Field label="Share code" value={a.rightToRent.shareCode} />
-            </div>
-          </Section>
-
-          {/* References */}
-          <Section icon={FileText} title="References">
-            <div className="flex flex-wrap gap-3">
-              {[
-                { label: "Previous landlord", v: a.references.previousLandlord },
-                { label: "Employer", v: a.references.employer },
-                { label: "Credit check", v: a.references.credit },
-              ].map((r) => (
-                <div key={r.label} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-50">
-                  <span className="text-xs font-semibold text-[#0F253B]">{r.label}</span>
-                  <Badge tone={tone(r.v)}>{r.v}</Badge>
-                </div>
-              ))}
-            </div>
-          </Section>
-
-          {/* Guarantor */}
-          <Section icon={Users2} title="Guarantor" action={<Badge tone={tone(a.guarantor.status)}>{a.guarantor.status.replace("_", " ")}</Badge>}>
-            {a.guarantor.status === "not_required" ? (
-              <p className="text-sm text-gray-400 font-medium">Not required — applicant meets affordability criteria.</p>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <Field label="Name" value={a.guarantor.name} />
-                <Field label="Relationship" value={a.guarantor.relationship} />
-                <Field label="Annual income" value={money(a.guarantor.annualIncome)} />
-                <Field label="Address" value={a.guarantor.address} />
-                <Field label="Phone" value={a.guarantor.phone} />
-              </div>
-            )}
-          </Section>
-
-          {/* Deposit */}
-          <Section icon={Wallet} title="Deposit Protection" action={<Badge tone={tone(a.depositScheme.status)}>{a.depositScheme.status.replace("_", " ")}</Badge>}>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              <Field label="Scheme" value={a.depositScheme.provider} />
-              <Field label="Amount" value={money(a.tenancy.deposit)} />
-              <Field label="Reference" value={a.depositScheme.ref} />
-            </div>
-          </Section>
-
-          {/* Documents */}
-          <Section icon={FileText} title="Documents">
-            {a.documents.length === 0 && <p className="text-sm text-gray-400 font-medium">No documents uploaded yet.</p>}
-            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {a.documents.map((d) => (
-                <li key={d.name} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
-                  <div className="w-9 h-9 rounded-lg bg-white border border-gray-100 flex items-center justify-center text-[#F47C3C] shrink-0"><FileText size={16} /></div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold text-[#0F253B] truncate">{d.name}</p>
-                    <p className="text-[11px] text-gray-400 font-medium">{d.type}</p>
+          {/* Detail */}
+          {a && (
+            <div className="lg:col-span-2 space-y-4">
+              {/* Header + stepper */}
+              <div className="bg-white border border-gray-100 rounded-2xl p-5">
+                <div className="flex items-start justify-between flex-wrap gap-3 mb-5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-[#0F253B] text-white flex items-center justify-center font-bold">{initials(a.name)}</div>
+                    <div>
+                      <h2 className="text-lg font-bold text-[#0F253B]">{a.name}</h2>
+                      <p className="text-xs text-gray-400 font-medium flex flex-wrap gap-x-3 gap-y-0.5">
+                        <span className="flex items-center gap-1"><Mail size={11} />{a.email || "—"}</span>
+                        <span className="flex items-center gap-1"><Phone size={11} />{a.phone || "—"}</span>
+                      </p>
+                    </div>
                   </div>
-                  <Badge tone={tone(d.status)}>{d.status}</Badge>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        </div>
-      </div>
+                  <div className="flex items-center gap-2">
+                    <Badge tone={progress === 100 ? "green" : "orange"}>{progress}% complete</Badge>
+                    <button onClick={() => remove(a)} title="Remove" className="text-gray-300 hover:text-red-600 transition-all p-1"><Trash2 size={16} /></button>
+                  </div>
+                </div>
+                <Stepper index={a.stageIndex} />
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-50">
+                  <button
+                    onClick={() => moveStage(-1)}
+                    disabled={savingStage || a.stageIndex === 0}
+                    className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-gray-500 bg-gray-50 hover:bg-gray-100 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft size={15} /> Previous
+                  </button>
+                  <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400">
+                    Stage {a.stageIndex + 1} / {ONBOARDING_STAGES.length}
+                  </span>
+                  <button
+                    onClick={() => moveStage(1)}
+                    disabled={savingStage || a.stageIndex === lastStage}
+                    className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-[#F47C3C] hover:bg-[#e06d30] rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {savingStage ? <Loader2 size={15} className="animate-spin" /> : <>Advance <ChevronRight size={15} /></>}
+                  </button>
+                </div>
+              </div>
 
-      {showAdd && <NewOnboardingModal onClose={() => setShowAdd(false)} onCreate={create} />}
+              {/* Tenancy terms */}
+              <Section icon={Home} title="Tenancy Terms">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <Field label="Property" value={a.tenancy?.property} />
+                  <Field label="Room" value={a.tenancy?.room} />
+                  <Field label="Rent" value={a.tenancy?.rent ? `${money(a.tenancy.rent)}/mo` : "—"} />
+                  <Field label="Deposit" value={a.tenancy?.deposit ? money(a.tenancy.deposit) : "—"} />
+                  <Field label="Start date" value={a.tenancy?.startDate} />
+                  <Field label="Term" value={a.tenancy?.termMonths ? `${a.tenancy.termMonths} months` : "—"} />
+                  <Field label="Frequency" value={a.tenancy?.frequency} />
+                  <Field label="Holding deposit" value={a.holdingDeposit ? money(a.holdingDeposit) : "—"} />
+                </div>
+              </Section>
+
+              {/* Personal */}
+              <Section icon={User} title="Personal Details">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <Field label="Date of birth" value={a.dob} />
+                  <Field label="Nationality" value={a.nationality} />
+                  <Field label="Current address" value={a.currentAddress} />
+                </div>
+              </Section>
+
+              {/* Employment */}
+              <Section icon={Briefcase} title="Employment & Affordability">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <Field label="Employer" value={a.employment?.employer} />
+                  <Field label="Job title" value={a.employment?.jobTitle} />
+                  <Field label="Type" value={a.employment?.type} />
+                  <Field label="Annual income" value={a.employment?.annualIncome ? money(a.employment.annualIncome) : "—"} />
+                  <Field label="Started" value={a.employment?.startDate} />
+                  <Field label="Rent : income" value={`${a.employment?.annualIncome ? Math.round((a.tenancy?.rent * 12 / a.employment.annualIncome) * 100) : 0}%`} />
+                </div>
+              </Section>
+
+              {/* Right to Rent */}
+              <Section icon={ShieldCheck} title="Right to Rent" action={<Badge tone={tone(a.rightToRent?.status)}>{a.rightToRent?.status || "pending"}</Badge>}>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <Field label="Document" value={a.rightToRent?.docType} />
+                  <Field label="Number" value={a.rightToRent?.docNumber} />
+                  <Field label="Expiry" value={a.rightToRent?.expiry} />
+                  <Field label="Share code" value={a.rightToRent?.shareCode} />
+                </div>
+              </Section>
+
+              {/* References */}
+              <Section icon={FileText} title="References">
+                <div className="flex flex-wrap gap-3">
+                  {[
+                    { label: "Previous landlord", v: a.references?.previousLandlord },
+                    { label: "Employer", v: a.references?.employer },
+                    { label: "Credit check", v: a.references?.credit },
+                  ].map((r) => (
+                    <div key={r.label} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-50">
+                      <span className="text-xs font-semibold text-[#0F253B]">{r.label}</span>
+                      <Badge tone={tone(r.v)}>{r.v || "pending"}</Badge>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+
+              {/* Guarantor */}
+              <Section icon={Users2} title="Guarantor" action={<Badge tone={tone(a.guarantor?.status)}>{(a.guarantor?.status || "not_required").replace("_", " ")}</Badge>}>
+                {(!a.guarantor || a.guarantor.status === "not_required") ? (
+                  <p className="text-sm text-gray-400 font-medium">Not required — applicant meets affordability criteria.</p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <Field label="Name" value={a.guarantor.name} />
+                    <Field label="Relationship" value={a.guarantor.relationship} />
+                    <Field label="Annual income" value={a.guarantor.annualIncome ? money(a.guarantor.annualIncome) : "—"} />
+                    <Field label="Address" value={a.guarantor.address} />
+                    <Field label="Phone" value={a.guarantor.phone} />
+                  </div>
+                )}
+              </Section>
+
+              {/* Deposit */}
+              <Section icon={Wallet} title="Deposit Protection" action={<Badge tone={tone(a.depositScheme?.status)}>{(a.depositScheme?.status || "not_started").replace("_", " ")}</Badge>}>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <Field label="Scheme" value={a.depositScheme?.provider} />
+                  <Field label="Amount" value={a.tenancy?.deposit ? money(a.tenancy.deposit) : "—"} />
+                  <Field label="Reference" value={a.depositScheme?.ref} />
+                </div>
+              </Section>
+
+              {/* Documents — upload + verify workflow */}
+              <DocumentsSection applicant={a} onApplicantUpdate={replaceItem} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {showAdd && <NewOnboardingModal properties={properties} onClose={() => setShowAdd(false)} onCreated={created} />}
     </div>
   );
 }

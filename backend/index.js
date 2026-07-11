@@ -8,6 +8,8 @@ import env from "./config/env.js";
 import { connectDB } from "./config/db.js";
 import routes from "./routes/index.js";
 import cookieParser from "cookie-parser";
+import cron from "node-cron";
+import { sendAllPendingReminders } from "./cranjob/complianceReminder.js";
 
 const app = express();
 
@@ -42,6 +44,13 @@ app.use(
     legacyHeaders: false,
   })
 );
+
+// Run every day at 8:00 AM
+cron.schedule("0 8 * * *", async () => {
+  console.log("Running compliance reminders...");
+  const result = await sendAllPendingReminders();
+  console.log(`Reminders sent: ${result.sentCount}, Errors: ${result.errors.length}`);
+});
 
 // Routes
 app.use(env.apiPrefix, routes);

@@ -19,6 +19,7 @@ import {
   Users,
   Settings,
   Search,
+  DockIcon,
 } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 
@@ -32,6 +33,7 @@ const NAV = [
   { href: "/admin/occupancy", label: "Occupancy", icon: DoorOpen },
   { href: "/admin/welcome-pack", label: "Welcome Pack", icon: Wallet },
   { href: "/admin/Inspection", label: "Inspection", icon: Search},
+  { href: "/admin/compliance", label: "Compliance", icon: DockIcon},
   { href: "/admin/rent-collection", label: "Rent Collection", icon: Wallet },
   { href: "/admin/rent-review", label: "Rent Review", icon: TrendingUp },
   { href: "/admin/finances", label: "Finances", icon: Banknote },
