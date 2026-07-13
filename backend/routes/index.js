@@ -13,6 +13,8 @@ import supplierRoutes from "./supplier.route.js";
 import maintenanceRoutes from "./maintenance.route.js";
 import complianceRoutes from "./compliance.Route.js"
 import welcomePackRoutes from "./welcomePack.route.js"
+import publicRoutes from "./public.Route.js"
+import auditRoutes from "./auditLog.Route.js"
 
 const router = express.Router();
 
@@ -23,6 +25,10 @@ router.get("/", (_req, res) => {
     docs: "See DATA_MODEL.md for the schema and build order",
   });
 });
+
+// Public marketing / listings API (no auth) — must be mounted before the
+// protected routes so anonymous visitors can browse listings.
+router.use("/public", publicRoutes);
 
 // Phase 1 — Core platform
 router.use("/auth", authRoutes);
@@ -38,5 +44,6 @@ router.use("/suppliers", supplierRoutes);
 router.use("/maintenance", maintenanceRoutes);
 router.use("/compliance", complianceRoutes);
 router.use("/welcome-pack", welcomePackRoutes);
+router.use("/audit", auditRoutes);
 
 export default router;

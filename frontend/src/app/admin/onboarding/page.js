@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Check, User, Briefcase, ShieldCheck, FileText, Users2, Wallet, Home,
   Mail, Phone, ChevronRight, ChevronLeft, Plus, X, Trash2, Loader2,
-  Upload, CheckCircle2, XCircle, ExternalLink,
+  Upload, CheckCircle2, XCircle, ExternalLink, Inbox, UserPlus, Ban,
 } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
 import { ONBOARDING_STAGES, money } from "../_data/dummy";
@@ -347,6 +347,8 @@ function DocumentsSection({ applicant, onApplicantUpdate }) {
 export default function AdminOnboarding() {
   const [items, setItems] = useState([]);
   const [properties, setProperties] = useState([]);
+  const [requests, setRequests] = useState([]);
+  const [acceptingId, setAcceptingId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -357,13 +359,15 @@ export default function AdminOnboarding() {
     setLoading(true);
     setError("");
     try {
-      const [obRes, propsRes] = await Promise.all([
+      const [obRes, propsRes, reqRes] = await Promise.all([
         api.get("/onboarding"),
         api.get("/properties", { params: { limit: 100 } }),
+        api.get("/onboarding/requests"),
       ]);
       const list = obRes.data.data || [];
       setItems(list);
       setProperties(propsRes.data.data || []);
+      setRequests(reqRes.data.data || []);
       setSelectedId((cur) => cur && list.some((x) => x._id === cur) ? cur : list[0]?._id || null);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load onboarding");
@@ -371,6 +375,26 @@ export default function AdminOnboarding() {
       setLoading(false);
     }
   }, []);
+
+  // Accept a website request → creates an onboarding applicant, connects the
+  // tenant's account to this org, and emails them (all handled server-side).
+  const acceptRequest = async (lead) => {
+    setAcceptingId(lead._id);
+    setError("");
+    try {
+      const res = await api.post("/onboarding/accept-request", { leadId: lead._id });
+      const applicant = res.data.data?.applicant;
+      setRequests((rs) => rs.filter((r) => r._id !== lead._id));
+      if (applicant) {
+        setItems((xs) => [applicant, ...xs]);
+        setSelectedId(applicant._id);
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to accept request");
+    } finally {
+      setAcceptingId(null);
+    }
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -407,17 +431,19 @@ export default function AdminOnboarding() {
     }
   };
 
-  const remove = async (applicant) => {
-    if (!confirm(`Remove "${applicant.name}" from onboarding?`)) return;
+  // Cancel an onboarding: soft-deletes it, frees the original request, and
+  // disconnects the tenant from this org if this was their committed one.
+  const cancelApplicant = async (applicant) => {
+    if (!confirm(`Cancel onboarding for "${applicant.name}"? They'll be free to enquire again.`)) return;
     const snapshot = items;
     const nextList = items.filter((x) => x._id !== applicant._id);
     setItems(nextList);
     if (selectedId === applicant._id) setSelectedId(nextList[0]?._id || null);
     try {
-      await api.delete(`/onboarding/${applicant._id}`);
+      await api.patch(`/onboarding/${applicant._id}/cancel`);
     } catch (err) {
       setItems(snapshot);
-      alert(err.response?.data?.message || "Failed to remove applicant");
+      alert(err.response?.data?.message || "Failed to cancel onboarding");
     }
   };
 
@@ -434,6 +460,41 @@ export default function AdminOnboarding() {
       />
 
       {error && <div className="p-4 bg-red-50 border-l-4 border-red-500 text-red-700 text-sm font-bold rounded">{error}</div>}
+
+      {/* Pending requests — website enquiries awaiting acceptance */}
+      {requests.length > 0 && (
+        <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-50">
+            <div className="w-8 h-8 rounded-lg bg-orange-50 text-[#F47C3C] flex items-center justify-center"><Inbox size={16} /></div>
+            <h3 className="font-bold text-[#0F253B]">Pending Requests</h3>
+            <span className="ml-1 px-2 py-0.5 rounded-full bg-[#F47C3C] text-white text-[11px] font-bold">{requests.length}</span>
+            <span className="ml-auto text-[11px] font-medium text-gray-400">New viewing requests from your listings</span>
+          </div>
+          <ul className="divide-y divide-gray-50">
+            {requests.map((r) => (
+              <li key={r._id} className="flex items-center gap-3 px-5 py-3.5">
+                <div className="w-10 h-10 rounded-full bg-[#0F253B] text-white flex items-center justify-center text-sm font-bold shrink-0">{initials(r.name)}</div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-[#0F253B] text-sm truncate">{r.name}</p>
+                  <p className="text-[11px] text-gray-400 font-medium truncate flex flex-wrap gap-x-3">
+                    <span className="flex items-center gap-1"><Home size={11} />{r.interestedIn || "—"}</span>
+                    {r.email && <span className="flex items-center gap-1"><Mail size={11} />{r.email}</span>}
+                    {r.phone && <span className="flex items-center gap-1"><Phone size={11} />{r.phone}</span>}
+                  </p>
+                </div>
+                <button
+                  onClick={() => acceptRequest(r)}
+                  disabled={acceptingId === r._id}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-xs rounded-xl transition-all disabled:opacity-50 shrink-0"
+                >
+                  {acceptingId === r._id ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
+                  {acceptingId === r._id ? "Accepting…" : "Accept"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Pipeline summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -506,7 +567,12 @@ export default function AdminOnboarding() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge tone={progress === 100 ? "green" : "orange"}>{progress}% complete</Badge>
-                    <button onClick={() => remove(a)} title="Remove" className="text-gray-300 hover:text-red-600 transition-all p-1"><Trash2 size={16} /></button>
+                    <button
+                      onClick={() => cancelApplicant(a)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-xl transition-all"
+                    >
+                      <Ban size={14} /> Cancel Onboarding
+                    </button>
                   </div>
                 </div>
                 <Stepper index={a.stageIndex} />

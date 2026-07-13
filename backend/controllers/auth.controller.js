@@ -269,3 +269,69 @@ export const updateProfile = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+// =============================================
+// NEW: Update Organization Info
+// =============================================
+export const updateOrganization = async (req, res) => {
+  try {
+    if (req.user.role !== "Organization") {
+      return res
+        .status(403)
+        .json({ message: "Only organization accounts can update organization info" });
+    }
+
+    const {
+      name,
+      legalName,
+      phone,
+      address,
+      logo,
+      units,
+      planType,
+      fastTrack,
+      type,           // AGENCY / LANDLORD
+      businessType,   // BUSINESS / INDIVIDUAL
+    } = req.body;
+
+    // Find the organization linked to this user
+    let organization = await Organization.findOne({ userId: req.user._id });
+
+    if (!organization) {
+      // Fallback: Create if somehow missing (shouldn't happen after verifyOtp)
+      organization = await Organization.create({ 
+        userId: req.user._id,
+        name: name || `${req.user.email.split('@')[0]}'s Organization`
+      });
+    }
+
+    // Build update object (only fields that are sent)
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (legalName !== undefined) updates.legalName = legalName;
+    if (phone !== undefined) updates.phone = phone;
+    if (address !== undefined) updates.address = address;
+    if (logo !== undefined) updates.logo = logo;
+    if (units !== undefined) updates.units = units;
+    if (planType !== undefined) updates.planType = planType;
+    if (fastTrack !== undefined) updates.fastTrack = fastTrack;
+    if (type !== undefined) updates.type = type;
+    if (businessType !== undefined) updates.businessType = businessType;
+
+    // Update the organization
+    const updatedOrg = await Organization.findByIdAndUpdate(
+      organization._id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Organization information updated successfully",
+      organization: updatedOrg,
+    });
+  } catch (error) {
+    console.error("Error in updateOrganization:", error);
+    res.status(500).json({ message: error.message });
+  }
+};

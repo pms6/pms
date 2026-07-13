@@ -48,6 +48,21 @@ const leadSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Structured link to what the lead enquired about (set by website
+    // enquiries). Used to dedupe a tenant's repeat requests for the same room.
+    propertyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Property",
+      default: null,
+      index: true,
+    },
+
+    roomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Room",
+      default: null,
+    },
+
     budget: {
       type: Number,
       default: 0,
