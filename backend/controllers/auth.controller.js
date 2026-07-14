@@ -246,6 +246,11 @@ export const updateProfile = async (req, res) => {
       gender,
       profileImage,
       about,
+      occupationType,
+      jobTitle,
+      interests,
+      budget,
+      moveInDate,
       organizationId,
     } = req.body;
 
@@ -256,6 +261,11 @@ export const updateProfile = async (req, res) => {
     if (gender !== undefined) updates.gender = gender;
     if (profileImage !== undefined) updates.profileImage = profileImage;
     if (about !== undefined) updates.about = about;
+    if (occupationType !== undefined) updates.occupationType = occupationType;
+    if (jobTitle !== undefined) updates.jobTitle = jobTitle;
+    if (interests !== undefined) updates.interests = interests;
+    if (budget !== undefined) updates.budget = budget;
+    if (moveInDate !== undefined) updates.moveInDate = moveInDate;
     if (organizationId !== undefined) updates.organizationId = organizationId;
 
     const profile = await Tenant.findOneAndUpdate(

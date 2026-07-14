@@ -17,6 +17,8 @@ export const createLead = async (req, res) => {
       phone,
       source,
       interestedIn,
+      propertyId,
+      roomId,
       budget,
       assignedTo,
       status,
@@ -38,16 +40,23 @@ export const createLead = async (req, res) => {
       phone,
       source,
       interestedIn,
+      propertyId: propertyId || null,
+      roomId: roomId || null,
       budget: budget ? Number(budget) : 0,
       assignedTo,
       status: status || "new",
       notes,
     });
 
+    // Populate references before sending response
+    const populatedLead = await Lead.findById(lead._id)
+      .populate("propertyId", "name")
+      .populate("roomId", "name roomNumber type");
+
     return res.status(201).json({
       success: true,
       message: "Lead created successfully.",
-      data: lead,
+      data: populatedLead,
     });
   } catch (error) {
     console.error(error);
@@ -68,7 +77,6 @@ export const createLead = async (req, res) => {
 
 /**
  * Get Leads (optionally filtered by status / search)
- * Returns the full list for the org so the frontend can build the Kanban board.
  */
 export const getLeads = async (req, res) => {
   try {
@@ -89,7 +97,11 @@ export const getLeads = async (req, res) => {
       ];
     }
 
-    const leads = await Lead.find(filter).sort({ createdAt: -1 }).lean();
+    const leads = await Lead.find(filter)
+      .populate("propertyId", "name")
+      .populate("roomId", "name roomNumber")
+      .sort({ createdAt: -1 })
+      .lean();
 
     return res.status(200).json({
       success: true,
@@ -117,7 +129,10 @@ export const getLeadById = async (req, res) => {
       _id: id,
       organizationId,
       isDeleted: false,
-    }).lean();
+    })
+      .populate("propertyId", "name")
+      .populate("roomId", "name roomNumber")
+      .lean();
 
     if (!lead) {
       return res.status(404).json({
@@ -166,6 +181,8 @@ export const updateLead = async (req, res) => {
       phone,
       source,
       interestedIn,
+      propertyId,
+      roomId,
       budget,
       assignedTo,
       status,
@@ -177,6 +194,8 @@ export const updateLead = async (req, res) => {
     if (phone !== undefined) lead.phone = phone;
     if (source !== undefined) lead.source = source;
     if (interestedIn !== undefined) lead.interestedIn = interestedIn;
+    if (propertyId !== undefined) lead.propertyId = propertyId || null;
+    if (roomId !== undefined) lead.roomId = roomId || null;
     if (budget !== undefined) lead.budget = Number(budget) || 0;
     if (assignedTo !== undefined) lead.assignedTo = assignedTo;
     if (status !== undefined) lead.status = status;
@@ -184,10 +203,16 @@ export const updateLead = async (req, res) => {
 
     await lead.save();
 
+    // Return populated document
+    const updatedLead = await Lead.findById(lead._id)
+      .populate("propertyId", "name")
+      .populate("roomId", "name roomNumber")
+      .lean();
+
     return res.status(200).json({
       success: true,
       message: "Lead updated successfully.",
-      data: lead,
+      data: updatedLead,
     });
   } catch (error) {
     console.error(error);
@@ -226,7 +251,9 @@ export const updateLeadStatus = async (req, res) => {
       { _id: id, organizationId, isDeleted: false },
       { status },
       { new: true }
-    );
+    )
+      .populate("propertyId", "name")
+      .populate("roomId", "name roomNumber");
 
     if (!lead) {
       return res.status(404).json({

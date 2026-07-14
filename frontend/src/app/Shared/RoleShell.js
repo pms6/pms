@@ -45,7 +45,7 @@ export default function RoleShell({
     );
   }
 
-  const SidebarContent = () => (
+  const sidebarContent = (
     <>
       {/* Header */}
       <div className="px-6 py-6 flex items-center justify-between border-b border-white/10">
@@ -114,7 +114,7 @@ export default function RoleShell({
 
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-64 flex-col bg-[#0F253B] text-white">
-        <SidebarContent />
+        {sidebarContent}
       </aside>
 
       {/* Mobile sidebar */}
@@ -123,7 +123,7 @@ export default function RoleShell({
           isOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <SidebarContent />
+        {sidebarContent}
       </aside>
 
       {/* Backdrop */}
@@ -151,8 +151,17 @@ export default function RoleShell({
               </p>
             </div>
 
-            <div className="w-9 h-9 rounded-full bg-[#0F253B] text-white flex items-center justify-center text-sm font-bold">
-              {(user.name || "?").charAt(0).toUpperCase()}
+            <div className="w-9 h-9 rounded-full bg-[#0F253B] text-white flex items-center justify-center text-sm font-bold overflow-hidden">
+              {profile?.profileImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={profile.profileImage}
+                  alt={user.name || "Profile"}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                (user.name || "?").charAt(0).toUpperCase()
+              )}
             </div>
           </div>
         </header>

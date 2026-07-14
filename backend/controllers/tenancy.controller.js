@@ -1,5 +1,17 @@
 // controllers/tenancy.controller.js
 import Tenancy, { TENANCY_STATUS } from "../models/Tenancy.js";
+import User from "../models/User.js";
+import Tenant from "../models/Tenant.js";
+import Organization from "../models/Organization.js";
+import Onboarding from "../models/Onboarding.js";
+
+// Friendly gender label from the Tenant enum (MALE/FEMALE/OTHER/PREFER_NOT_SAY).
+const GENDER_LABEL = {
+  MALE: "Male",
+  FEMALE: "Female",
+  OTHER: "Other",
+  PREFER_NOT_SAY: "",
+};
 
 /**
  * Whitelist of fields a client may set on create/update.
@@ -53,6 +65,162 @@ export const getTenancies = async (req, res) => {
   } catch (error) {
     console.error("Get Tenancies Error:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch tenancies." });
+  }
+};
+
+// @desc    Housemates of the signed-in tenant — everyone else living in the
+//          same property, enriched with their tenant profile.
+// @route   GET /api/v1/tenancies/housemates
+// @access  Private (Tenant)
+export const getMyHousemates = async (req, res) => {
+  try {
+    const email = (req.user?.email || "").toLowerCase();
+    if (!email) return res.status(200).json({ success: true, data: [] });
+
+    // The tenant's own (most recent) active tenancy anchors the property.
+    const mine = await Tenancy.findOne({ tenantEmail: email, isDeleted: false })
+      .sort({ startDate: -1, createdAt: -1 })
+      .lean();
+
+    if (!mine) return res.status(200).json({ success: true, data: [] });
+
+    // Match everyone else in the same property — prefer the propertyId ref,
+    // fall back to the denormalised property name within the same org.
+    const propertyMatch = mine.propertyId
+      ? { propertyId: mine.propertyId }
+      : { property: mine.property, organizationId: mine.organizationId };
+
+    const others = await Tenancy.find({
+      ...propertyMatch,
+      isDeleted: false,
+      tenantEmail: { $ne: email },
+    })
+      .sort({ unit: 1 })
+      .lean();
+
+    // Enrich each housemate with their tenant profile (gender/occupation/…),
+    // resolved via tenantEmail → User → Tenant, in two batched round-trips.
+    const emails = [
+      ...new Set(
+        others.map((t) => (t.tenantEmail || "").toLowerCase()).filter(Boolean)
+      ),
+    ];
+    const users = emails.length
+      ? await User.find({ email: { $in: emails } }).select("_id email").lean()
+      : [];
+    const userByEmail = Object.fromEntries(
+      users.map((u) => [u.email.toLowerCase(), u])
+    );
+    const profiles = users.length
+      ? await Tenant.find({ userId: { $in: users.map((u) => u._id) } }).lean()
+      : [];
+    const profileByUserId = Object.fromEntries(
+      profiles.map((p) => [String(p.userId), p])
+    );
+
+    const yearsFrom = (birthdate) => {
+      if (!birthdate) return null;
+      const ms = Date.now() - new Date(birthdate).getTime();
+      if (Number.isNaN(ms) || ms < 0) return null;
+      return Math.floor(ms / (365.25 * 24 * 60 * 60 * 1000));
+    };
+
+    const data = others.map((t) => {
+      const u = userByEmail[(t.tenantEmail || "").toLowerCase()];
+      const p = u ? profileByUserId[String(u._id)] : null;
+      const fullName = [p?.firstName, p?.lastName].filter(Boolean).join(" ");
+      const age = yearsFrom(p?.birthdate);
+      return {
+        id: String(t._id),
+        room: t.unit && t.unit !== "—" ? t.unit : "",
+        name:
+          fullName ||
+          t.tenant ||
+          (t.tenantEmail || "").split("@")[0] ||
+          "Housemate",
+        gender: GENDER_LABEL[p?.gender] ?? "",
+        age: age != null ? `${age} years` : "",
+        occupation: p?.jobTitle || "",
+        bio: p?.about || "",
+        interests: Array.isArray(p?.interests) ? p.interests : [],
+        profileImage: p?.profileImage || "",
+      };
+    });
+
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error("Get Housemates Error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch housemates." });
+  }
+};
+
+// @desc    The signed-in tenant's own room/tenancy — terms, managing
+//          organization and their documents (for the "My Room" page).
+// @route   GET /api/v1/tenancies/my-room
+// @access  Private (Tenant)
+export const getMyRoom = async (req, res) => {
+  try {
+    const email = (req.user?.email || "").toLowerCase();
+    if (!email) return res.status(200).json({ success: true, data: null });
+
+    // The tenant's most recent active tenancy.
+    const tenancy = await Tenancy.findOne({ tenantEmail: email, isDeleted: false })
+      .sort({ startDate: -1, createdAt: -1 })
+      .lean();
+
+    if (!tenancy) return res.status(200).json({ success: true, data: null });
+
+    // Managing organization (name/logo/phone for the footer card).
+    const org = tenancy.organizationId
+      ? await Organization.findById(tenancy.organizationId)
+          .select("name logo phone")
+          .lean()
+      : null;
+
+    // Documents come from the tenant's onboarding record for this org (where
+    // tenancy-related files like the agreement/deposit info are stored).
+    const onboarding = await Onboarding.findOne({
+      email,
+      organizationId: tenancy.organizationId,
+      isDeleted: false,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const documents = (onboarding?.documents || [])
+      .filter((d) => d.url)
+      .map((d) => ({
+        name: d.name,
+        type: d.type || "",
+        status: d.status || "pending",
+        url: d.url,
+        uploadedAt: d.uploadedAt || null,
+      }));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        room: tenancy.unit && tenancy.unit !== "—" ? tenancy.unit : "",
+        property: tenancy.property || "",
+        rent: tenancy.rent || 0,
+        status: tenancy.status || "",
+        availability: tenancy.availability || "",
+        startDate: tenancy.startDate || null,
+        fixedTermEnd: tenancy.fixedTermEnd || null,
+        periodicStart: tenancy.periodicStart || null,
+        organization: org
+          ? { name: org.name || "", logo: org.logo || "", phone: org.phone || "" }
+          : null,
+        documents,
+      },
+    });
+  } catch (error) {
+    console.error("Get My Room Error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch your room." });
   }
 };
 

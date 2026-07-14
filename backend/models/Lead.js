@@ -61,6 +61,7 @@ const leadSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Room",
       default: null,
+      index: true,
     },
 
     budget: {

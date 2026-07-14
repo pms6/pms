@@ -4,7 +4,97 @@ import Lead from "../models/Lead.js";
 import User from "../models/User.js";
 import Tenant from "../models/Tenant.js";
 import Organization from "../models/Organization.js";
+import bcrypt from "bcrypt";
+import env from "../config/env.js";
 import { sendEmail } from "../utils/sendEmail.js";
+
+// Generate a random temporary password for a newly-created applicant account.
+const generatePassword = () => {
+  const chars =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
+  let password = "";
+  for (let i = 0; i < 10; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+};
+
+const loginUrl = () =>
+  `${process.env.FRONTEND_URL || "http://localhost:3000"}/login`;
+
+/**
+ * Ensure the applicant has a login account, then email them their onboarding
+ * welcome. If no User exists for the email, we create a verified Tenant account
+ * (connected to this organization) with a temporary password and include those
+ * credentials in the email. If the account already exists, we send the same
+ * welcome but tell them to log in with their existing credentials.
+ *
+ * Best-effort: any failure is logged but never throws, so a mail/account glitch
+ * cannot roll back the onboarding record that was already created.
+ */
+async function provisionApplicantAndNotify({ email, name, organizationId }) {
+  const clean = (email || "").toLowerCase().trim();
+  if (!clean) return;
+
+  try {
+    let user = await User.findOne({ email: clean });
+    let tempPassword = null;
+
+    if (!user) {
+      tempPassword = generatePassword();
+      const salt = await bcrypt.genSalt(env.bcryptSaltRounds);
+      const hashedPassword = await bcrypt.hash(tempPassword, salt);
+
+      user = await User.create({
+        email: clean,
+        password: hashedPassword,
+        role: "Tenant",
+        isVerified: true,
+      });
+
+      // Create the tenant profile connected to this organization.
+      await Tenant.findOneAndUpdate(
+        { userId: user._id },
+        { $set: { organizationId } },
+        { upsert: true, setDefaultsOnInsert: true }
+      );
+    }
+
+    const orgName = await orgDisplayName(organizationId);
+    const url = loginUrl();
+    const greeting = name ? `Hi ${name},` : "Hi,";
+
+    const credentialsBlock = tempPassword
+      ? `
+          <div style="background:#f5f5f5; padding:15px; border-radius:6px; margin:20px 0;">
+            <p style="margin:5px 0;"><strong>Email:</strong> ${clean}</p>
+            <p style="margin:5px 0;"><strong>Temporary Password:</strong>
+              <code style="background:#e0e0e0; padding:2px 8px; border-radius:3px;">${tempPassword}</code>
+            </p>
+          </div>
+          <p style="font-size:14px; color:#666;">Please change your password after logging in for the first time.</p>`
+      : `<p style="color:#666; margin:20px 0;">You already have an account with us — just log in with your existing credentials.</p>`;
+
+    await sendEmail({
+      email: clean,
+      subject: `${orgName} has started your onboarding`,
+      html: `
+        <div style="font-family: sans-serif; padding: 20px; max-width: 520px; border: 1px solid #e0e0e0; border-radius: 8px;">
+          <h2 style="color: #0F253B;">Welcome to ${orgName}</h2>
+          <p>${greeting}</p>
+          <p>${orgName} has added you to onboarding. Log in to your tenant portal to track your move-in progress and complete the next steps.</p>
+          ${credentialsBlock}
+          <p style="text-align:center; margin: 24px 0;">
+            <a href="${url}" style="background:#F47C3C; color:#fff; text-decoration:none; padding:12px 24px; border-radius:8px; font-weight:bold;">Log in to my portal</a>
+          </p>
+          <p style="font-size: 12px; color: #666;">If the button doesn't work, paste this link into your browser: ${url}</p>
+        </div>
+      `,
+    });
+  } catch (mailError) {
+    console.error("Onboarding welcome/provision failed:", mailError.message);
+  }
+}
 
 // stageIndex at which an applicant is "in review" — advanced past "Application".
 // Reaching this commits the tenant to that organization.
@@ -115,6 +205,17 @@ export const createOnboarding = async (req, res) => {
     }
 
     const applicant = await Onboarding.create(payload);
+
+    // If the applicant isn't in our system yet, create a login account and email
+    // them their credentials; otherwise just send the onboarding welcome. This is
+    // best-effort and won't roll back the applicant that was just created.
+    if (applicant.email) {
+      await provisionApplicantAndNotify({
+        email: applicant.email,
+        name: applicant.name,
+        organizationId,
+      });
+    }
 
     return res.status(201).json({
       success: true,

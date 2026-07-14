@@ -1,19 +1,51 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { User, Camera, Briefcase, GraduationCap, Save } from "lucide-react";
+import { useAuth } from "@/app/Context/AuthContext";
+import uploadToCloudinary from "@/app/utils/uploadToCloudinary";
+
+const EMPTY_FORM = {
+  firstName: "",
+  lastName: "",
+  dob: "",
+  gender: "",
+  profileType: "",
+  occupation: "",
+  bio: "",
+  interests: [],
+};
+
+// Map the stored tenant profile → the shape this form works with.
+const profileToForm = (p) => ({
+  firstName: p?.firstName || "",
+  lastName: p?.lastName || "",
+  dob: p?.birthdate ? String(p.birthdate).slice(0, 10) : "",
+  gender: p?.gender || "",
+  profileType: p?.occupationType || "",
+  occupation: p?.jobTitle || "",
+  bio: p?.about || "",
+  interests: Array.isArray(p?.interests) ? p.interests : [],
+});
 
 export default function ProfilePage() {
-  const [form, setForm] = useState({
-    firstName: "Jonah",
-    lastName: "Caulfield",
-    dob: "1994-02-04",
-    gender: "male",
-    profileType: "professional",
-    occupation: "Environmental Health Officer",
-    bio: "I'm Jonah. What more do I need to say?",
-    interests: ["Fitness", "Food", "Video Games", "TV"],
-  });
+  const { profile, loading, updateProfile } = useAuth();
+
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState(null); // { type: "success"|"error", message }
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // Hydrate the form from the loaded profile. Using the "adjust state during
+  // render when a prop changes" pattern (rather than an effect) means the form
+  // re-syncs whenever the stored profile reference changes — on first load and
+  // after a save — without clobbering the user's edits while they type.
+  const [syncedProfile, setSyncedProfile] = useState(null);
+  if (profile && profile !== syncedProfile) {
+    setSyncedProfile(profile);
+    setForm(profileToForm(profile));
+  }
 
   const interestOptions = [
     "Arts & Crafts","Fitness","Food","Games","Movies","Music","Nights Out",
@@ -34,6 +66,69 @@ export default function ProfilePage() {
     }));
   };
 
+  const handleCancel = () => {
+    setForm(profile ? profileToForm(profile) : EMPTY_FORM);
+    setStatus(null);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setStatus(null);
+    try {
+      await updateProfile({
+        firstName: form.firstName,
+        lastName: form.lastName,
+        birthdate: form.dob || null,
+        gender: form.gender || undefined,
+        occupationType: form.profileType || undefined,
+        jobTitle: form.occupation,
+        about: form.bio,
+        interests: form.interests,
+      });
+      setStatus({ type: "success", message: "Profile saved successfully." });
+    } catch (err) {
+      setStatus({
+        type: "error",
+        message:
+          err?.response?.data?.message || "Failed to save profile. Please try again.",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleImageSelect = async (e) => {
+    const file = e.target.files?.[0];
+    // Reset the input so selecting the same file again still fires onChange.
+    e.target.value = "";
+    if (!file) return;
+
+    setUploadingImage(true);
+    setStatus(null);
+    try {
+      const { url } = await uploadToCloudinary(file);
+      // Persist immediately so the new picture survives a refresh; updateProfile
+      // also refreshes the shared auth profile, so the avatar updates everywhere.
+      await updateProfile({ profileImage: url });
+      setStatus({ type: "success", message: "Profile picture updated." });
+    } catch (err) {
+      setStatus({
+        type: "error",
+        message: err?.message || "Failed to upload picture. Please try again.",
+      });
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 py-16 text-center text-gray-500">
+        Loading your profile…
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-0.5 sm:px-6 lg:px-0 py-6 sm:py-10 space-y-6 sm:space-y-8">
 
@@ -53,18 +148,47 @@ export default function ProfilePage() {
         {/* Profile Image */}
         <div className="flex flex-col items-center mb-8 sm:mb-10">
 
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleImageSelect}
+          />
+
           <div className="relative">
-            <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full bg-gray-100 border-4 border-gray-200 flex items-center justify-center">
-              <User size={50} className="sm:w-[60px] sm:h-[60px] text-gray-400" />
+            <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full bg-gray-100 border-4 border-gray-200 flex items-center justify-center overflow-hidden">
+              {uploadingImage ? (
+                <span className="text-xs text-gray-500">Uploading…</span>
+              ) : profile?.profileImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={profile.profileImage}
+                  alt="Profile"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <User size={50} className="sm:w-[60px] sm:h-[60px] text-gray-400" />
+              )}
             </div>
 
-            <button className="absolute bottom-0 right-0 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-[#F47C3C] text-white flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingImage}
+              className="absolute bottom-0 right-0 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-[#F47C3C] text-white flex items-center justify-center disabled:opacity-60"
+            >
               <Camera size={16} className="sm:w-[18px] sm:h-[18px]" />
             </button>
           </div>
 
-          <button className="mt-4 text-sm font-semibold text-[#F47C3C] hover:underline">
-            Upload Profile Picture
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingImage}
+            className="mt-4 text-sm font-semibold text-[#F47C3C] hover:underline disabled:opacity-60"
+          >
+            {uploadingImage ? "Uploading…" : "Upload Profile Picture"}
           </button>
         </div>
 
@@ -88,9 +212,11 @@ export default function ProfilePage() {
               onChange={handleChange}
               className="w-full border rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#F47C3C] outline-none"
             >
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-              <option value="other">Other</option>
+              <option value="">Select…</option>
+              <option value="MALE">Male</option>
+              <option value="FEMALE">Female</option>
+              <option value="OTHER">Other</option>
+              <option value="PREFER_NOT_SAY">Prefer not to say</option>
             </select>
           </div>
 
@@ -106,16 +232,16 @@ export default function ProfilePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
             <RoleButton
-              active={form.profileType === "professional"}
-              onClick={() => setForm({ ...form, profileType: "professional" })}
+              active={form.profileType === "PROFESSIONAL"}
+              onClick={() => setForm({ ...form, profileType: "PROFESSIONAL" })}
               icon={<Briefcase />}
               title="Professional"
               desc="Currently working"
             />
 
             <RoleButton
-              active={form.profileType === "student"}
-              onClick={() => setForm({ ...form, profileType: "student" })}
+              active={form.profileType === "STUDENT"}
+              onClick={() => setForm({ ...form, profileType: "STUDENT" })}
               icon={<GraduationCap />}
               title="Student"
               desc="Currently studying"
@@ -174,16 +300,37 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {/* Status message */}
+        {status && (
+          <div
+            className={`mt-8 rounded-xl px-4 py-3 text-sm font-medium ${
+              status.type === "success"
+                ? "bg-green-50 text-green-700 border border-green-200"
+                : "bg-red-50 text-red-700 border border-red-200"
+            }`}
+          >
+            {status.message}
+          </div>
+        )}
+
         {/* Buttons */}
         <div className="flex flex-col sm:flex-row justify-end gap-3 sm:gap-4 mt-8 sm:mt-12">
 
-          <button className="w-full sm:w-auto px-6 py-3 rounded-xl border border-gray-300 font-semibold hover:bg-gray-50">
+          <button
+            onClick={handleCancel}
+            disabled={saving}
+            className="w-full sm:w-auto px-6 py-3 rounded-xl border border-gray-300 font-semibold hover:bg-gray-50 disabled:opacity-60"
+          >
             Cancel
           </button>
 
-          <button className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 sm:px-7 py-3 rounded-xl bg-[#F47C3C] text-white font-semibold hover:bg-[#e56f2d]">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 sm:px-7 py-3 rounded-xl bg-[#F47C3C] text-white font-semibold hover:bg-[#e56f2d] disabled:opacity-60"
+          >
             <Save size={18} />
-            Save Profile
+            {saving ? "Saving…" : "Save Profile"}
           </button>
 
         </div>

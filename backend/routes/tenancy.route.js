@@ -3,6 +3,8 @@ import express from "express";
 import {
   getTenancies,
   getTenancyStats,
+  getMyHousemates,
+  getMyRoom,
   createTenancy,
   updateTenancy,
   deleteTenancy,
@@ -15,6 +17,12 @@ const router = express.Router();
 
 // Apply auth to all routes
 router.use(protect);
+
+// The signed-in tenant's housemates (others in the same property)
+router.get("/housemates", getMyHousemates);
+
+// The signed-in tenant's own room/tenancy
+router.get("/my-room", getMyRoom);
 
 // Occupancy overview stats (summary cards)
 router.get("/stats", getTenancyStats);
