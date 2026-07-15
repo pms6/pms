@@ -45,8 +45,8 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
 );
 
   const handleNext = () => {
-    if (!formData.photos || formData.photos.length < 10) {
-      toast.info("Please upload at least 10 photos before continuing.");
+    if (!formData.description || !formData.description.trim()) {
+      toast.info("Please describe the problem before continuing.");
       return;
     }
 

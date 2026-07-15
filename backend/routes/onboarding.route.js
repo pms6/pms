@@ -6,6 +6,7 @@ import {
   getOnboardingById,
   updateOnboarding,
   updateOnboardingStage,
+  completeOnboarding,
   deleteOnboarding,
   getOnboardingStats,
   addOnboardingDocument,
@@ -48,6 +49,9 @@ router.delete("/:id", deleteOnboarding);
 
 // Advance / set the onboarding stage (stepper)
 router.patch("/:id/stage", updateOnboardingStage);
+
+// Complete onboarding (Move-in) → creates the tenancy, unlocks the tenant's room
+router.patch("/:id/complete", completeOnboarding);
 
 // Cancel an onboarding (soft delete + revert lead + disconnect tenant)
 router.patch("/:id/cancel", cancelOnboarding);

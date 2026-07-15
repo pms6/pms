@@ -1,217 +1,278 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, X } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, Wrench, User, Building2, PoundSterling, X } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
+import { money } from "../../admin/_data/dummy";
 import api from "../../api/api";
 
-const PRIORITY = ["low", "med", "high", "urgent"];
-const STATUS = ["open", "assigned", "in_progress", "closed"];
-const PRIORITY_TONE = { urgent: "red", high: "amber", med: "gray", low: "gray" };
+const PRIORITY_TONE = { urgent: "red", high: "amber", med: "blue", low: "gray" };
 const STATUS_TONE = { open: "blue", assigned: "amber", in_progress: "orange", closed: "green" };
+const STATUSES = ["open", "assigned", "in_progress", "closed"];
+const PRIORITIES = ["urgent", "high", "med", "low"];
 
-function MaintModal({ initial, properties, onClose, onSaved }) {
-  const isEdit = Boolean(initial);
+const FIELD = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
+const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
+
+function RequestModal({ properties, suppliers, onClose, onSave }) {
   const [form, setForm] = useState({
-    title: initial?.title || "",
-    propertyId: initial?.propertyId?._id || initial?.propertyId || "",
-    category: initial?.category || "",
-    priority: initial?.priority || "med",
-    status: initial?.status || "open",
-    cost: initial?.cost ?? "",
+    title: "", propertyId: "", property: "", roomId: "", room: "", category: "General",
+    priority: "med", reportedBy: "", supplier: "", cost: "", description: "",
   });
+  const [rooms, setRooms] = useState([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
+  const roomLabel = (r) => `${r.roomName || r.title || "Room"}${r.roomNumber ? ` · ${r.roomNumber}` : ""}`;
+
+  // Selecting a property loads its rooms and resets the room choice.
+  const onPropertyChange = async (e) => {
+    const propertyId = e.target.value;
+    const property = properties.find((p) => p._id === propertyId)?.name || "";
+    setForm((f) => ({ ...f, propertyId, property, roomId: "", room: "" }));
+    setRooms([]);
+    if (!propertyId) return;
+    setRoomsLoading(true);
+    try {
+      const res = await api.get(`/rooms/property/${propertyId}`);
+      setRooms(res.data.data || []);
+    } catch {
+      setRooms([]);
+    } finally {
+      setRoomsLoading(false);
+    }
+  };
+
+  const onRoomChange = (e) => {
+    const roomId = e.target.value;
+    const room = rooms.find((r) => r._id === roomId);
+    setForm((f) => ({ ...f, roomId, room: room ? roomLabel(room) : "" }));
+  };
+
   const submit = async (e) => {
     e.preventDefault();
+    if (!form.title.trim()) { setError("Title is required"); return; }
     setSaving(true);
     setError("");
     try {
-      const body = { title: form.title, priority: form.priority, status: form.status };
-      if (form.propertyId) body.propertyId = form.propertyId;
-      if (form.category) body.category = form.category;
-      if (form.cost !== "") body.cost = String(form.cost);
-      if (isEdit) await api.patch(`/maintenance/${initial._id}`, body);
-      else await api.post("/maintenance", body);
-      onSaved();
+      await onSave({
+        title: form.title,
+        propertyId: form.propertyId || null,
+        property: form.property,
+        roomId: form.roomId || null,
+        room: form.room,
+        category: form.category,
+        priority: form.priority,
+        reportedBy: form.reportedBy,
+        supplier: form.supplier,
+        cost: form.cost === "" ? null : Number(form.cost),
+        description: form.description,
+      });
     } catch (err) {
-      const d = err.response?.data;
-      setError(d?.details?.[0]?.message || d?.message || "Save failed");
+      setError(err.response?.data?.message || "Failed to create request");
     } finally {
       setSaving(false);
     }
   };
 
-  const field = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium";
-  const labelCls = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
-          <h3 className="text-xl font-bold text-[#0F253B]">{isEdit ? "Edit Request" : "New Request"}</h3>
+          <h3 className="text-xl font-bold text-[#0F253B]">New Maintenance Request</h3>
           <button onClick={onClose} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
         </div>
         {error && <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">{error}</div>}
         <form onSubmit={submit} className="space-y-4">
-          <div>
-            <label className={labelCls}>Title</label>
-            <input className={field} value={form.title} onChange={set("title")} required placeholder="e.g. Boiler not heating" />
-          </div>
-          <div>
-            <label className={labelCls}>Property</label>
-            <select className={field} value={form.propertyId} onChange={set("propertyId")}>
-              <option value="">— None —</option>
-              {properties.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
-            </select>
-          </div>
+          <div><label className={LABEL}>Title</label><input className={FIELD} value={form.title} onChange={set("title")} placeholder="e.g. Boiler not heating" required /></div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>Priority</label>
-              <select className={field} value={form.priority} onChange={set("priority")}>
-                {PRIORITY.map((p) => <option key={p} value={p}>{p}</option>)}
+              <label className={LABEL}>Property</label>
+              <select className={FIELD} value={form.propertyId} onChange={onPropertyChange}>
+                <option value="">Select property</option>
+                {properties.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
               </select>
             </div>
             <div>
-              <label className={labelCls}>Status</label>
-              <select className={field} value={form.status} onChange={set("status")}>
-                {STATUS.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
+              <label className={LABEL}>Room / Area</label>
+              <select className={FIELD} value={form.roomId} onChange={onRoomChange} disabled={!form.propertyId || roomsLoading}>
+                <option value="">{roomsLoading ? "Loading rooms…" : !form.propertyId ? "Select a property first" : "Whole property / communal"}</option>
+                {rooms.map((r) => <option key={r._id} value={r._id}>{roomLabel(r)}</option>)}
               </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>Category</label>
-              <input className={field} value={form.category} onChange={set("category")} placeholder="Plumbing" />
+              <label className={LABEL}>Priority</label>
+              <select className={`${FIELD} capitalize`} value={form.priority} onChange={set("priority")}>
+                {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
             </div>
+            <div><label className={LABEL}>Category</label><input className={FIELD} value={form.category} onChange={set("category")} placeholder="Heating, Plumbing…" /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={LABEL}>Reported By</label><input className={FIELD} value={form.reportedBy} onChange={set("reportedBy")} placeholder="Tenant name" /></div>
             <div>
-              <label className={labelCls}>Cost (£)</label>
-              <input className={field} value={form.cost} onChange={set("cost")} placeholder="0.00" />
+              <label className={LABEL}>Supplier</label>
+              <select className={FIELD} value={form.supplier} onChange={set("supplier")}>
+                <option value="">Unassigned</option>
+                {suppliers.map((s) => <option key={s._id} value={s.company}>{s.company}</option>)}
+              </select>
             </div>
           </div>
-          <button type="submit" disabled={saving} className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98] flex items-center justify-center">
-            {saving ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : isEdit ? "Save Changes" : "Create Request"}
-          </button>
+          <div><label className={LABEL}>Estimated Cost (£)</label><input type="number" min="0" step="0.01" className={FIELD} value={form.cost} onChange={set("cost")} placeholder="Leave blank if TBC" /></div>
+          <div><label className={LABEL}>Description</label><textarea rows={2} className={FIELD} value={form.description} onChange={set("description")} placeholder="Details of the issue…" /></div>
+
+          <button type="submit" disabled={saving} className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all active:scale-[0.98]">{saving ? "Creating…" : "Create Request"}</button>
         </form>
       </div>
     </div>
   );
 }
 
-export default function ManagerMaintenance() {
-  const [items, setItems] = useState([]);
+export default function AdminMaintenance() {
+  const [list, setList] = useState([]);
+  const [stats, setStats] = useState({ open: 0, urgent: 0, suppliersEngaged: 0, spend: 0 });
   const [properties, setProperties] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [modal, setModal] = useState(null);
-
-  useEffect(() => {
-    api.get("/properties", { params: { limit: 100 } }).then((r) => setProperties(r.data.data)).catch(() => {});
-  }, []);
+  const [filter, setFilter] = useState("");
+  const [showModal, setShowModal] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const params = { limit: 50 };
-      if (statusFilter) params.status = statusFilter;
-      const res = await api.get("/maintenance", { params });
-      setItems(res.data.data);
+      const [mRes, statsRes, propsRes, supsRes] = await Promise.all([
+        api.get("/maintenance"),
+        api.get("/maintenance/stats"),
+        api.get("/properties", { params: { limit: 100 } }),
+        api.get("/suppliers"),
+      ]);
+      setList(mRes.data.data || []);
+      setStats(statsRes.data.data || { open: 0, urgent: 0, suppliersEngaged: 0, spend: 0 });
+      setProperties(propsRes.data.data || []);
+      setSuppliers(supsRes.data.data || []);
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to load requests");
+      setError(err.response?.data?.message || "Failed to load maintenance");
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const remove = async (m) => {
-    if (!confirm(`Delete "${m.title || "this request"}"?`)) return;
+  const rows = filter ? list.filter((m) => m.status === filter) : list;
+
+  const create = async (payload) => {
+    const res = await api.post("/maintenance", payload);
+    const created = res.data.data;
+    setList((prev) => [created, ...prev]);
+    setShowModal(false);
+    load(); // refresh stat cards
+  };
+
+  const changeStatus = async (m, status) => {
+    if (status === m.status) return;
+    const snapshot = list;
+    setList((prev) => prev.map((x) => (x._id === m._id ? { ...x, status } : x)));
     try {
-      await api.delete(`/maintenance/${m._id}`);
-      load();
+      await api.patch(`/maintenance/${m._id}/status`, { status });
+      const statsRes = await api.get("/maintenance/stats");
+      setStats(statsRes.data.data || stats);
     } catch (err) {
-      alert(err.response?.data?.message || "Delete failed");
+      setList(snapshot);
+      alert(err.response?.data?.message || "Failed to update status");
     }
   };
+
+  const cards = [
+    { label: "Open requests", value: stats.open },
+    { label: "Urgent", value: stats.urgent },
+    { label: "Suppliers engaged", value: stats.suppliersEngaged },
+    { label: "Spend (30d)", value: money(stats.spend) },
+  ];
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Maintenance"
-        subtitle="Track and resolve repair requests"
+        subtitle="Repair requests, suppliers and costs"
         action={
-          <button onClick={() => setModal({})} className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
             <Plus size={18} /> New Request
           </button>
         }
       />
 
+      {error && (
+        <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">{error}</div>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {cards.map((s, i) => (
+          <div key={i} className="bg-white border border-gray-100 rounded-2xl p-4">
+            <p className="text-2xl font-bold text-[#0F253B]">{loading ? "—" : s.value}</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-gray-400 mt-1">{s.label}</p>
+          </div>
+        ))}
+      </div>
+
       <div className="flex gap-2 flex-wrap">
-        {["", ...STATUS].map((s) => (
-          <button
-            key={s || "all"}
-            onClick={() => setStatusFilter(s)}
-            className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all ${statusFilter === s ? "bg-[#0F253B] text-white border-[#0F253B]" : "bg-white text-gray-500 border-gray-100 hover:bg-gray-50"}`}
-          >
+        {["", ...STATUSES].map((s) => (
+          <button key={s || "all"} onClick={() => setFilter(s)} className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all capitalize ${filter === s ? "bg-[#0F253B] text-white border-[#0F253B]" : "bg-white text-gray-500 border-gray-100 hover:bg-gray-50"}`}>
             {s ? s.replace("_", " ") : "All"}
           </button>
         ))}
       </div>
 
-      {error && <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-sm font-bold rounded">{error}</div>}
-
-      <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
-                <th className="px-5 py-3">Title</th>
-                <th className="px-5 py-3">Property</th>
-                <th className="px-5 py-3">Priority</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3">Cost</th>
-                <th className="px-5 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-400">Loading…</td></tr>
-              ) : items.length === 0 ? (
-                <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-400">No maintenance requests</td></tr>
-              ) : (
-                items.map((m) => (
-                  <tr key={m._id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                    <td className="px-5 py-3 font-bold text-[#0F253B]">{m.title || m.category || "Request"}</td>
-                    <td className="px-5 py-3 text-gray-500">{m.propertyId?.name || "—"}</td>
-                    <td className="px-5 py-3"><Badge tone={PRIORITY_TONE[m.priority] || "gray"}>{m.priority}</Badge></td>
-                    <td className="px-5 py-3"><Badge tone={STATUS_TONE[m.status] || "gray"}>{m.status.replace("_", " ")}</Badge></td>
-                    <td className="px-5 py-3 text-gray-500">{m.cost ? `£${m.cost}` : "—"}</td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => setModal(m)} className="p-2 text-gray-400 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg"><Pencil size={16} /></button>
-                        <button onClick={() => remove(m)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+      {loading ? (
+        <div className="bg-white border border-gray-100 rounded-2xl p-10 text-center text-gray-400">Loading maintenance requests…</div>
+      ) : rows.length === 0 ? (
+        <div className="bg-white border border-gray-100 rounded-2xl p-10 text-center text-gray-400">No maintenance requests {filter ? "with this status" : "yet"}</div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {rows.map((m) => (
+            <div key={m._id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden hover:shadow-md transition-all">
+              <div className="relative h-36 bg-gray-100">
+                {m.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={m.image} alt={m.title} className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-gray-300"><Wrench size={28} /></div>
+                )}
+                <div className="absolute top-2 left-2 flex gap-1.5">
+                  <Badge tone={PRIORITY_TONE[m.priority] || "gray"}>{m.priority}</Badge>
+                </div>
+                <div className="absolute top-2 right-2">
+                  <Badge tone={STATUS_TONE[m.status] || "gray"}>{m.status.replace("_", " ")}</Badge>
+                </div>
+              </div>
+              <div className="p-4">
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-[#0F253B]">{m.title}</p>
+                  <span className="text-[10px] font-bold text-gray-300">#{m.ref}</span>
+                </div>
+                <p className="text-xs text-gray-400 font-medium mt-1 flex items-center gap-1.5"><Building2 size={12} />{m.property || "—"}{m.room ? ` · ${m.room}` : ""}</p>
+                <div className="mt-3 space-y-1.5 text-xs text-gray-500 font-medium">
+                  <p className="flex items-center gap-1.5"><User size={12} className="text-gray-300" />Reported by {m.reportedBy || "—"}</p>
+                  <p className="flex items-center gap-1.5"><Wrench size={12} className="text-gray-300" />{m.supplier || "Unassigned"}</p>
+                  <p className="flex items-center gap-1.5"><PoundSterling size={12} className="text-gray-300" />{m.cost != null ? money(m.cost) : "TBC"} · {m.category}</p>
+                </div>
+                <select value={m.status} onChange={(e) => changeStatus(m, e.target.value)} className="mt-3 w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-xs font-bold text-[#0F253B] outline-none focus:ring-2 focus:ring-[#F47C3C] capitalize">
+                  {STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
+                </select>
+              </div>
+            </div>
+          ))}
         </div>
-      </div>
+      )}
 
-      {modal !== null && (
-        <MaintModal
-          initial={modal._id ? modal : null}
-          properties={properties}
-          onClose={() => setModal(null)}
-          onSaved={() => { setModal(null); load(); }}
-        />
+      {showModal && (
+        <RequestModal properties={properties} suppliers={suppliers} onClose={() => setShowModal(false)} onSave={create} />
       )}
     </div>
   );

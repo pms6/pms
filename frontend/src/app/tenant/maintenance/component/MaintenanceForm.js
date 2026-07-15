@@ -1,12 +1,19 @@
 'use client';
 import { useState } from 'react';
+import { toast } from 'react-toastify';
+import { CheckCircle2 } from 'lucide-react';
+import api from '@/app/api/api';
 import StepOne from './StepOne';
 import StepTwo from './StepTwo';
 import StepThree from './StepThree';
 
+// Map the form's priority labels to the backend enum.
+const PRIORITY_MAP = { Low: 'low', Routine: 'med', Urgent: 'urgent' };
+
 export default function MaintenanceForm() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [formData, setFormData] = useState({
     category: '',
     priority: 'Routine',
@@ -23,10 +30,78 @@ export default function MaintenanceForm() {
   // Helper to get labels based on step
   const stepLabels = ["Select Problem", "Add Details", "Confirm & Submit"];
 
-  // ✅ SUBMIT API
-  const submitMaintenance = async () => {
-    
+  const resetForm = () => {
+    setFormData({
+      category: '',
+      priority: 'Routine',
+      description: '',
+      issueStarted: '',
+      contactTime: 'Anytime',
+      access: 'Yes — someone is always home',
+      photos: [],
+    });
+    setStep(1);
+    setSubmitted(false);
   };
+
+  // ✅ SUBMIT API — create the maintenance request for the signed-in tenant.
+  // The backend stamps the tenant's property/room/name automatically.
+  const submitMaintenance = async () => {
+    // Collect resolved photo URLs (skip any local blob previews still uploading).
+    const photoUrls = (formData.photos || [])
+      .map((p) => (typeof p === 'string' ? p : p?.url))
+      .filter((u) => u && !u.startsWith('blob:'));
+
+    // Fold the extra contact fields into the description (the model has no
+    // dedicated columns for them).
+    const detail = [
+      formData.description,
+      formData.contactTime ? `Best time to call: ${formData.contactTime}` : '',
+      formData.access ? `Access: ${formData.access}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    setLoading(true);
+    try {
+      await api.post('/maintenance', {
+        title: formData.category || 'Maintenance request',
+        category: formData.category || 'General',
+        description: detail,
+        priority: PRIORITY_MAP[formData.priority] || 'med',
+        image: photoUrls[0] || '',
+        ...(formData.issueStarted ? { date: formData.issueStarted } : {}),
+      });
+      setSubmitted(true);
+      toast.success('Your maintenance request has been submitted.');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to submit request.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (submitted) {
+    return (
+      <div className="p-4 md:px-15 md:py-10 max-w-[1440px] mx-auto">
+        <div className="max-w-md mx-auto text-center bg-white border border-[#E8E4DF] rounded-2xl p-8 md:p-10 shadow-sm">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-50 text-green-600">
+            <CheckCircle2 size={32} />
+          </div>
+          <h2 className="text-xl font-bold text-[#0F253B]">Request submitted</h2>
+          <p className="mt-2 text-sm text-[#6B7280]">
+            Thanks — your operator has been notified and will be in touch to arrange the repair.
+          </p>
+          <button
+            onClick={resetForm}
+            className="mt-6 w-full py-3 bg-[#F47C3C] hover:bg-[#e85e2f] text-white font-bold rounded-xl transition"
+          >
+            Report another issue
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:px-15 md:py-5 max-w-[1440px] mx-auto">

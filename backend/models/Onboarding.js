@@ -72,6 +72,20 @@ const guarantorSchema = new mongoose.Schema(
 
 const tenancySchema = new mongoose.Schema(
   {
+    // Optional structured references so a completed onboarding can create a
+    // Tenancy that's linked to the real property/room (enables room-scoped
+    // features like room-specific welcome packs). The name strings below stay
+    // for display and for onboardings created without a picked room.
+    propertyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Property",
+      default: null,
+    },
+    roomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Room",
+      default: null,
+    },
     property: { type: String, trim: true, default: "—" },
     room: { type: String, trim: true, default: "—" },
     rent: { type: Number, default: 0 },
@@ -172,6 +186,17 @@ const onboardingSchema = new mongoose.Schema(
     tenancy: { type: tenancySchema, default: () => ({}) },
     depositScheme: { type: depositSchemeSchema, default: () => ({}) },
     documents: { type: [documentSchema], default: [] },
+
+    // ============================
+    // Completion — set when the operator finalises "Move-in". Once completed we
+    // create a Tenancy (linked below) so the tenant can access their room.
+    // ============================
+    completedAt: { type: Date, default: null },
+    tenancyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenancy",
+      default: null,
+    },
 
     // ============================
     // Soft delete

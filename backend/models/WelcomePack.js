@@ -15,6 +15,15 @@ const welcomePackSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Optional room targeting. When null the pack applies to the whole property;
+    // when set it applies only to tenants of that specific room.
+    roomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Room",
+      default: null,
+      index: true,
+    },
+
     title: {
       type: String,
       required: true,

@@ -287,6 +287,27 @@ export default function TenantOnboardingPage() {
 
         {selected && (
           <>
+            {/* Completed banner — tenancy is active, room is accessible */}
+            {selected.completedAt && (
+              <div className="mb-6 flex flex-col gap-3 rounded-3xl border border-green-200 bg-green-50 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <CheckCircle2 className="h-8 w-8 shrink-0 text-green-600" />
+                  <div>
+                    <p className="font-bold text-green-800">Onboarding complete 🎉</p>
+                    <p className="text-sm text-green-700">
+                      Your tenancy is active — you can now view your room and details.
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href="/tenant/room"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-green-600 px-5 py-3 font-bold text-white transition hover:bg-green-700"
+                >
+                  <Home className="h-4 w-4" /> Go to My Room
+                </Link>
+              </div>
+            )}
+
             {/* Property / summary card */}
             <div className="rounded-3xl bg-white p-6 shadow-sm border border-slate-200">
               <div className="flex flex-col gap-6 md:flex-row md:justify-between">

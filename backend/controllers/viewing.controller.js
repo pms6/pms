@@ -2,6 +2,76 @@ import Viewing from "../models/Viewing.js";
 import Lead from "../models/Lead.js";
 import Room from "../models/Room.js";
 
+// @desc    Get the signed-in TENANT's own viewings (matched by their leads).
+// @route   GET /api/viewings/my
+//
+// A viewing belongs to a Lead; the tenant is identified by the lead's email
+// (what website enquiries are keyed on), so we resolve their leads first, then
+// the viewings booked against them — across every organisation they enquired to.
+export const getMyViewings = async (req, res) => {
+  try {
+    const email = (req.user?.email || "").toLowerCase();
+    if (!email) return res.json({ success: true, data: [] });
+
+    const leads = await Lead.find({ email, isDeleted: false }).select("_id").lean();
+    const leadIds = leads.map((l) => l._id);
+    if (leadIds.length === 0) return res.json({ success: true, data: [] });
+
+    const viewings = await Viewing.find({ lead: { $in: leadIds }, isDeleted: false })
+      .populate("property", "name")
+      .populate("room", "roomName roomNumber title")
+      .populate("organizationId", "name phone")
+      .sort({ date: -1, time: -1 });
+
+    res.json({ success: true, data: viewings });
+  } catch (error) {
+    console.error("Get My Viewings Error:", error);
+    res.status(500).json({ success: false, message: "Failed to load your viewings." });
+  }
+};
+
+// @desc    Tenant cancels one of their OWN scheduled viewings.
+// @route   PATCH /api/viewings/my/:id/cancel
+export const cancelMyViewing = async (req, res) => {
+  try {
+    const email = (req.user?.email || "").toLowerCase();
+    if (!email) return res.status(404).json({ success: false, message: "Viewing not found." });
+
+    const leads = await Lead.find({ email, isDeleted: false }).select("_id").lean();
+    const leadIds = leads.map((l) => l._id);
+
+    const viewing = await Viewing.findOne({
+      _id: req.params.id,
+      lead: { $in: leadIds },
+      isDeleted: false,
+    });
+
+    if (!viewing) {
+      return res.status(404).json({ success: false, message: "Viewing not found." });
+    }
+    if (viewing.status !== "scheduled") {
+      return res.status(400).json({
+        success: false,
+        message: "Only scheduled viewings can be cancelled.",
+      });
+    }
+
+    viewing.status = "cancelled";
+    await viewing.save();
+
+    const populated = await viewing.populate([
+      { path: "property", select: "name" },
+      { path: "room", select: "roomName roomNumber title" },
+      { path: "organizationId", select: "name phone" },
+    ]);
+
+    res.json({ success: true, data: populated });
+  } catch (error) {
+    console.error("Cancel My Viewing Error:", error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 // @desc    Get all viewings (with optional filters)
 // @route   GET /api/viewings
 export const getViewings = async (req, res) => {

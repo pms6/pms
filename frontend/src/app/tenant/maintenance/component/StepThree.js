@@ -150,7 +150,7 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
                 </div>
 
                 <p className="text-[11px] text-gray-400">
-                  {formData.photos?.length || 0} photos attached · Minimum 10 required
+                  {formData.photos?.length || 0} photos attached (optional)
                 </p>
 
               </div>
@@ -180,9 +180,9 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
 
             {/* Actions */}
             <div className="pt-4 md:pt-0">
-              <button 
+              <button
                 onClick={onSubmit}
-                disabled={loading || (formData.photos?.length || 0) < 10}
+                disabled={loading}
                 className={`w-full text-[12px] md:text-[16px] font-sans text-white font-bold py-5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-wide
                   ${loading ? "bg-gray-400 cursor-not-allowed" : "bg-orange-500 hover:bg-orange-600 shadow-orange-200"}
                 `}

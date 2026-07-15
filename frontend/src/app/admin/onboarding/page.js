@@ -137,6 +137,8 @@ function NewOnboardingModal({ onClose, onCreated, properties }) {
         phone: form.phone || undefined,
         holdingDeposit: num(form.holdingDeposit),
         tenancy: {
+          propertyId: form.propertyId || undefined,
+          roomId: form.roomId || undefined,
           property: property?.name || "—",
           room: room?.roomName || room?.title || "—",
           rent: num(form.rent),
@@ -354,6 +356,7 @@ export default function AdminOnboarding() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [savingStage, setSavingStage] = useState(false);
+  const [completing, setCompleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -402,6 +405,12 @@ export default function AdminOnboarding() {
   const lastStage = ONBOARDING_STAGES.length - 1;
   const progress = a ? Math.round((a.stageIndex / lastStage) * 100) : 0;
 
+  // At the Referencing stage the applicant can only be advanced once at least
+  // one document (uploaded by the tenant OR the admin) is on file.
+  const REFERENCING_STAGE = ONBOARDING_STAGES.indexOf("Referencing");
+  const needsDocsToAdvance =
+    !!a && a.stageIndex === REFERENCING_STAGE && (a.documents?.length || 0) === 0;
+
   const created = (obj) => {
     setItems((xs) => [obj, ...xs]);
     setSelectedId(obj._id);
@@ -416,6 +425,11 @@ export default function AdminOnboarding() {
 
   const moveStage = async (delta) => {
     if (!a) return;
+    // Block advancing past Referencing until a document has been uploaded.
+    if (delta > 0 && needsDocsToAdvance) {
+      alert("Upload at least one document (tenant or admin) before advancing past Referencing.");
+      return;
+    }
     const next = Math.min(lastStage, Math.max(0, a.stageIndex + delta));
     if (next === a.stageIndex) return;
     const prev = a.stageIndex;
@@ -428,6 +442,22 @@ export default function AdminOnboarding() {
       alert(err.response?.data?.message || "Failed to update stage");
     } finally {
       setSavingStage(false);
+    }
+  };
+
+  // Complete onboarding at the final (Move-in) stage: creates the tenancy on the
+  // server so the tenant can access their room + details from the tenant portal.
+  const completeApplicant = async () => {
+    if (!a || a.completedAt) return;
+    if (!confirm(`Complete onboarding for "${a.name}"? This creates their tenancy and gives them access to their room.`)) return;
+    setCompleting(true);
+    try {
+      const res = await api.patch(`/onboarding/${a._id}/complete`);
+      replaceItem(res.data.data);
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to complete onboarding");
+    } finally {
+      setCompleting(false);
     }
   };
 
@@ -566,20 +596,26 @@ export default function AdminOnboarding() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge tone={progress === 100 ? "green" : "orange"}>{progress}% complete</Badge>
-                    <button
-                      onClick={() => cancelApplicant(a)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-xl transition-all"
-                    >
-                      <Ban size={14} /> Cancel Onboarding
-                    </button>
+                    {a.completedAt ? (
+                      <Badge tone="green">Completed</Badge>
+                    ) : (
+                      <Badge tone={progress === 100 ? "green" : "orange"}>{progress}% complete</Badge>
+                    )}
+                    {!a.completedAt && (
+                      <button
+                        onClick={() => cancelApplicant(a)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-xl transition-all"
+                      >
+                        <Ban size={14} /> Cancel Onboarding
+                      </button>
+                    )}
                   </div>
                 </div>
                 <Stepper index={a.stageIndex} />
                 <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-50">
                   <button
                     onClick={() => moveStage(-1)}
-                    disabled={savingStage || a.stageIndex === 0}
+                    disabled={savingStage || completing || a.stageIndex === 0 || !!a.completedAt}
                     className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-gray-500 bg-gray-50 hover:bg-gray-100 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <ChevronLeft size={15} /> Previous
@@ -587,14 +623,34 @@ export default function AdminOnboarding() {
                   <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400">
                     Stage {a.stageIndex + 1} / {ONBOARDING_STAGES.length}
                   </span>
-                  <button
-                    onClick={() => moveStage(1)}
-                    disabled={savingStage || a.stageIndex === lastStage}
-                    className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-[#F47C3C] hover:bg-[#e06d30] rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {savingStage ? <Loader2 size={15} className="animate-spin" /> : <>Advance <ChevronRight size={15} /></>}
-                  </button>
+                  {a.completedAt ? (
+                    <span className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl">
+                      <CheckCircle2 size={15} /> Onboarding Complete
+                    </span>
+                  ) : a.stageIndex === lastStage ? (
+                    <button
+                      onClick={completeApplicant}
+                      disabled={completing}
+                      className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {completing ? <Loader2 size={15} className="animate-spin" /> : <><CheckCircle2 size={15} /> Complete Onboarding</>}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => moveStage(1)}
+                      disabled={savingStage || needsDocsToAdvance}
+                      title={needsDocsToAdvance ? "Upload at least one document to advance past Referencing" : undefined}
+                      className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-[#F47C3C] hover:bg-[#e06d30] rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {savingStage ? <Loader2 size={15} className="animate-spin" /> : <>Advance <ChevronRight size={15} /></>}
+                    </button>
+                  )}
                 </div>
+                {needsDocsToAdvance && (
+                  <p className="mt-3 text-center text-[11px] font-semibold text-amber-600">
+                    Upload at least one document (tenant or admin) below to advance past Referencing.
+                  </p>
+                )}
               </div>
 
               {/* Tenancy terms */}

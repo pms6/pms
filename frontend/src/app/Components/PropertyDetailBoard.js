@@ -531,7 +531,7 @@ function RoomDetail({ room, property, onEdit, onManage }) {
  * @param {string} basePath - route prefix used for the "Back to properties"
  *                            links (e.g. "/admin/properties" or "/manager/properties").
  */
-export default function PropertyDetailBoard({ basePath = "/agent/properties" }) {
+export default function PropertyDetailBoard({ basePath = "/admin/properties" }) {
   const { id } = useParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

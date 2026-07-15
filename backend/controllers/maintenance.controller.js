@@ -1,5 +1,6 @@
 // controllers/maintenance.controller.js
 import Maintenance, { MAINTENANCE_STATUSES } from "../models/Maintenance.js";
+import { resolveTenantProperty } from "../utils/tenantProperty.js";
 
 /**
  * Whitelist of fields a client may set on create/update.
@@ -62,6 +63,11 @@ export const getMaintenance = async (req, res) => {
     if (priority) filter.priority = priority;
     if (property) filter.property = property;
 
+    // A tenant only ever sees the requests they raised — never the whole org's.
+    if (req.user.role === "Tenant") {
+      filter.createdBy = req.user._id;
+    }
+
     const requests = await Maintenance.find(filter).sort({ date: -1, createdAt: -1 });
 
     return res.status(200).json({ success: true, data: requests });
@@ -119,6 +125,22 @@ export const createMaintenance = async (req, res) => {
 
     if (!payload.title || !String(payload.title).trim()) {
       return res.status(400).json({ success: false, message: "Title is required." });
+    }
+
+    // For a tenant, stamp the request with THEIR property/room and name so the
+    // operator sees who reported it and where — the tenant can't set these.
+    if (req.user.role === "Tenant") {
+      const { tenancy, property } = await resolveTenantProperty(req.user);
+      if (property?._id) payload.propertyId = property._id;
+      payload.property = property?.name || tenancy?.property || payload.property || "";
+      payload.room = tenancy?.unit && tenancy.unit !== "—" ? tenancy.unit : payload.room || "";
+      if (tenancy?.roomId) payload.roomId = tenancy.roomId;
+      payload.reportedBy = tenancy?.tenant || req.user.email || "Tenant";
+      // Tenants can't self-assign a supplier, cost or a non-default status.
+      delete payload.supplierId;
+      delete payload.supplier;
+      delete payload.cost;
+      delete payload.status;
     }
 
     const ref = await nextRef(organizationId);

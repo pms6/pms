@@ -13,6 +13,7 @@ import supplierRoutes from "./supplier.route.js";
 import maintenanceRoutes from "./maintenance.route.js";
 import complianceRoutes from "./compliance.Route.js"
 import welcomePackRoutes from "./welcomePack.route.js"
+import paymentRoutes from "./payment.route.js"
 import publicRoutes from "./public.Route.js"
 import auditRoutes from "./auditLog.Route.js"
 
@@ -44,6 +45,7 @@ router.use("/suppliers", supplierRoutes);
 router.use("/maintenance", maintenanceRoutes);
 router.use("/compliance", complianceRoutes);
 router.use("/welcome-pack", welcomePackRoutes);
+router.use("/payments", paymentRoutes);
 router.use("/audit", auditRoutes);
 
 export default router;

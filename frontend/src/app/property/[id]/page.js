@@ -36,6 +36,36 @@ import {
 const FALLBACK = (seed) =>
   `https://picsum.photos/seed/${encodeURIComponent(seed || "pms")}/1200/800`;
 
+// Build status-aware copy for the "can't request other properties" lock, based
+// on the tenant's most-advanced committed onboarding.
+function lockCopy(o, stages) {
+  const property =
+    o.tenancy?.property && o.tenancy.property !== "—" ? o.tenancy.property : "another property";
+  const lastIndex = (stages.length || 7) - 1;
+  const stageName = stages[o.stageIndex] || "review";
+
+  // Completed onboarding → the tenant already holds an active tenancy.
+  if (o.completedAt || (o.stageIndex ?? 0) >= lastIndex) {
+    return {
+      title: "You already have an active tenancy",
+      message: `Your onboarding for ${property} is complete — you now have an active tenancy, so you can't request other properties.`,
+    };
+  }
+
+  // Referencing has a specific ask (upload documents); other stages are generic.
+  if (stageName === "Referencing") {
+    return {
+      title: `Your application is in ${stageName}`,
+      message: `Your application for ${property} is in Referencing — please complete it before requesting other properties.`,
+    };
+  }
+
+  return {
+    title: `Your application is at the ${stageName} stage`,
+    message: `Your application for ${property} is at the ${stageName} stage, so you can't request other properties right now.`,
+  };
+}
+
 export default function PropertyDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -50,6 +80,8 @@ export default function PropertyDetailPage() {
   // True when the signed-in tenant already has an application in review, in
   // which case they can't request other properties — buttons are disabled.
   const [reviewLock, setReviewLock] = useState(false);
+  // Status-aware copy for the lock, derived from the committed onboarding's stage.
+  const [lock, setLock] = useState({ message: "", title: "" });
 
   // Look up the tenant's onboarding to know if they're locked out of requesting.
   useEffect(() => {
@@ -59,7 +91,23 @@ export default function PropertyDetailPage() {
       try {
         const res = await api.get("/onboarding/me");
         const items = res.data?.data || [];
-        if (active) setReviewLock(items.some((o) => (o.stageIndex ?? 0) >= 1));
+        const stages = res.data?.stages || [];
+
+        // A tenant is committed once any onboarding has advanced past Application
+        // (stageIndex >= 1) or has completed. Pick the most-advanced one to phrase
+        // the message around.
+        const committed = items
+          .filter((o) => o.completedAt || (o.stageIndex ?? 0) >= 1)
+          .sort(
+            (a, b) =>
+              (b.completedAt ? 1 : 0) - (a.completedAt ? 1 : 0) ||
+              (b.stageIndex ?? 0) - (a.stageIndex ?? 0)
+          );
+
+        if (active) {
+          setReviewLock(committed.length > 0);
+          if (committed.length) setLock(lockCopy(committed[0], stages));
+        }
       } catch {
         /* non-blocking — leave requests enabled if this fails */
       }
@@ -254,13 +302,13 @@ export default function PropertyDetailPage() {
 
               {reviewLock && (
                 <div className="mt-5 rounded-xl bg-amber-50 border border-amber-100 p-3 text-xs font-semibold text-amber-700">
-                  Your application is already in review, so you can&apos;t request other properties right now.
+                  {lock.message}
                 </div>
               )}
               <button
                 onClick={() => setEnquiry({ room: null })}
                 disabled={reviewLock}
-                title={reviewLock ? "Your application is already in review" : undefined}
+                title={reviewLock ? lock.title : undefined}
                 className="mt-3 w-full py-3.5 rounded-xl bg-[#F47C3C] text-white font-bold hover:brightness-105 shadow-lg shadow-[#F47C3C]/30 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
               >
                 <Calendar size={18} /> Request a Viewing
@@ -331,7 +379,7 @@ export default function PropertyDetailPage() {
                   <button
                     onClick={() => setEnquiry({ room: null })}
                     disabled={reviewLock}
-                    title={reviewLock ? "Your application is already in review" : undefined}
+                    title={reviewLock ? lock.title : undefined}
                     className="mt-4 w-full py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-[#0F253B] hover:bg-gray-50 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Contact operator <ArrowRight size={15} />
@@ -380,7 +428,7 @@ export default function PropertyDetailPage() {
                       <button
                         onClick={() => setEnquiry({ room: r })}
                         disabled={reviewLock}
-                        title={reviewLock ? "Your application is already in review" : undefined}
+                        title={reviewLock ? lock.title : undefined}
                         className="mt-4 w-full py-2.5 rounded-xl bg-[#0F253B] text-white text-sm font-bold hover:brightness-125 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Calendar size={15} /> Request this room
@@ -407,7 +455,7 @@ export default function PropertyDetailPage() {
             <button
               onClick={() => setEnquiry({ room: null })}
               disabled={reviewLock}
-              title={reviewLock ? "Your application is already in review" : undefined}
+              title={reviewLock ? lock.title : undefined}
               className="px-6 py-3.5 rounded-xl bg-[#F47C3C] text-white font-bold hover:brightness-105 transition whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Request a Viewing

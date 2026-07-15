@@ -1,6 +1,32 @@
 import { sendAllPendingReminders } from "../cranjob/complianceReminder.js";
 import Compliance from "../models/Compliance.js";
 import Property from "../models/Property.js";
+import { resolveTenantProperty } from "../utils/tenantProperty.js";
+
+// GET the signed-in TENANT's compliance certificates — scoped to THEIR property
+// only (gas safety, EICR, EPC, etc.), never the whole organization's records.
+export const getMyCompliance = async (req, res) => {
+  try {
+    const { property } = await resolveTenantProperty(req.user);
+
+    // No resolvable property yet → nothing to show (not an error).
+    if (!property?._id) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const compliances = await Compliance.find({
+      organizationId: property.organizationId,
+      propertyId: property._id,
+    })
+      .populate("propertyId", "name propertyCode address")
+      .sort({ expiryDate: 1 });
+
+    res.json({ success: true, data: compliances });
+  } catch (error) {
+    console.error("Get My Compliance Error:", error);
+    res.status(500).json({ success: false, message: "Failed to load compliance documents." });
+  }
+};
 
 // GET All Compliance Records
 export const getCompliances = async (req, res) => {

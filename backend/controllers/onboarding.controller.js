@@ -3,6 +3,8 @@ import Onboarding, { ONBOARDING_STAGES } from "../models/Onboarding.js";
 import Lead from "../models/Lead.js";
 import User from "../models/User.js";
 import Tenant from "../models/Tenant.js";
+import Tenancy from "../models/Tenancy.js";
+import Room from "../models/Room.js";
 import Organization from "../models/Organization.js";
 import bcrypt from "bcrypt";
 import env from "../config/env.js";
@@ -407,6 +409,20 @@ export const updateOnboardingStage = async (req, res) => {
     const nextStageIndex = Number(stageIndex);
     const movedForward = nextStageIndex > prevStageIndex;
 
+    // Gate: an applicant at "Referencing" cannot be advanced until at least one
+    // document (tenant- or admin-uploaded) is on file.
+    const REFERENCING_STAGE = ONBOARDING_STAGES.indexOf("Referencing");
+    if (
+      movedForward &&
+      prevStageIndex === REFERENCING_STAGE &&
+      (applicant.documents?.length || 0) === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Upload at least one document before advancing past Referencing.",
+      });
+    }
+
     applicant.stageIndex = nextStageIndex;
     await applicant.save();
 
@@ -485,6 +501,139 @@ export const deleteOnboarding = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to remove applicant.",
+    });
+  }
+};
+
+/**
+ * Complete onboarding (Move-in).
+ *
+ * Finalises the applicant: advances them to the last stage (Move-in), creates a
+ * Tenancy record from the agreed terms so the tenant appears in the tenancies
+ * list and can access their room, links the Tenancy back to the onboarding, and
+ * emails the tenant a welcome. Idempotent-guarded — an onboarding that already
+ * has a tenancy cannot be completed twice.
+ */
+export const completeOnboarding = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const organizationId = req.user.organizationId;
+
+    const applicant = await Onboarding.findOne({
+      _id: id,
+      organizationId,
+      isDeleted: false,
+    });
+
+    if (!applicant) {
+      return res.status(404).json({
+        success: false,
+        message: "Applicant not found.",
+      });
+    }
+
+    if (applicant.completedAt || applicant.tenancyId) {
+      return res.status(409).json({
+        success: false,
+        message: "This onboarding has already been completed.",
+      });
+    }
+
+    const t = applicant.tenancy || {};
+
+    // Derive the fixed-term end from the start date + term (best-effort).
+    const start = t.startDate ? new Date(t.startDate) : null;
+    const validStart = start && !Number.isNaN(start.getTime()) ? start : null;
+    let fixedTermEnd = null;
+    if (validStart) {
+      fixedTermEnd = new Date(validStart);
+      fixedTermEnd.setMonth(fixedTermEnd.getMonth() + (Number(t.termMonths) || 12));
+    }
+
+    // Resolve the tenant profile so the tenancy links back to the account.
+    let tenantId = null;
+    if (applicant.email) {
+      const user = await User.findOne({ email: applicant.email.toLowerCase() })
+        .select("_id")
+        .lean();
+      if (user) {
+        const tenant = await Tenant.findOne({ userId: user._id })
+          .select("_id")
+          .lean();
+        if (tenant) tenantId = tenant._id;
+      }
+    }
+
+    // Create the Tenancy (occupancy) record. Carry the structured property/room
+    // references through so room-scoped features (e.g. room-specific welcome
+    // packs) work for tenants who came through onboarding.
+    const tenancy = await Tenancy.create({
+      organizationId,
+      createdBy: req.user._id,
+      tenantId,
+      propertyId: t.propertyId || null,
+      roomId: t.roomId || null,
+      property: t.property || "—",
+      unit: t.room || "—",
+      tenant: applicant.name,
+      tenantEmail: applicant.email || "",
+      rent: Number(t.rent) || 0,
+      startDate: validStart,
+      fixedTermEnd,
+      status: "Fixed Term",
+      onboarded: true,
+    });
+
+    // Finalise the onboarding: last stage + completion links.
+    applicant.stageIndex = ONBOARDING_STAGES.length - 1;
+    applicant.completedAt = new Date();
+    applicant.tenancyId = tenancy._id;
+    await applicant.save();
+
+    // Mark the room occupied and attach the tenant (best-effort — a room glitch
+    // must not roll back the completion that already succeeded). Scoped to the
+    // org so we never touch another organisation's room.
+    if (t.roomId) {
+      try {
+        await Room.updateOne(
+          { _id: t.roomId, organizationId },
+          { $set: { status: "OCCUPIED", currentTenant: tenantId } }
+        );
+      } catch (roomError) {
+        console.error("Onboarding room occupancy update failed:", roomError.message);
+      }
+    }
+
+    // Notify the tenant that they've moved in (best-effort).
+    if (applicant.email) {
+      const property = t.property || "your property";
+      const org = await orgDisplayName(organizationId);
+      await notifyTenant({
+        email: applicant.email,
+        subject: `Welcome to your new home at ${property}`,
+        heading: "Your move-in is complete",
+        message: `${org} has completed your onboarding for <strong>${property}</strong>. Your tenancy is now active — log in to view your tenancy details and manage your rental.`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Onboarding completed. Tenancy created.",
+      data: { applicant, tenancy },
+    });
+  } catch (error) {
+    console.error(error);
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: Object.values(error.errors).map((e) => e.message).join(", "),
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to complete onboarding.",
     });
   }
 };
@@ -866,6 +1015,8 @@ export const acceptOnboardingRequest = async (req, res) => {
       stageIndex: 0,
       holdingDeposit: num(holdingDeposit),
       tenancy: {
+        propertyId: lead.propertyId || null,
+        roomId: lead.roomId || null,
         property: lead.interestedIn || "—",
         room: "—",
         rent: num(rent),

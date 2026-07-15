@@ -2,6 +2,6 @@
 
 import PropertiesBoard from "../../Components/PropertiesBoard";
 
-export default function ManagerProperties() {
+export default function AdminProperties() {
   return <PropertiesBoard basePath="/manager/properties" />;
 }
