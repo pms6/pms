@@ -7,7 +7,7 @@ const NAV = [
   { href: "/agent/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/agent/leads", label: "Leads", icon: UserPlus },
   { href: "/agent/viewings", label: "Viewings", icon: CalendarClock },
-  { href: "/agent/applicants", label: "Applicants", icon: ClipboardList },
+  // { href: "/agent/applicants", label: "Applicants", icon: ClipboardList },
   { href: "/agent/properties", label: "Properties", icon: Megaphone },
 ];
 

@@ -9,7 +9,7 @@ const NAV = [
   { href: "/manager/team", label: "Team", icon: Users },
   { href: "/manager/maintenance", label: "Maintenance", icon: Wrench },
   { href: "/manager/compliance", label: "Compliance", icon: ShieldCheck },
-  { href: "/manager/reports", label: "Reports", icon: BarChart3 },
+  // { href: "/manager/reports", label: "Reports", icon: BarChart3 },
 ];
 
 export default function ManagerLayout({ children }) {

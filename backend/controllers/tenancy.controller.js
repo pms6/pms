@@ -4,6 +4,13 @@ import User from "../models/User.js";
 import Tenant from "../models/Tenant.js";
 import Organization from "../models/Organization.js";
 import Onboarding from "../models/Onboarding.js";
+import Property from "../models/Property.js";
+import Room from "../models/Room.js";
+import mongoose from "mongoose";
+
+// --- ADD THESE IMPORTS ---
+import bcrypt from "bcryptjs"; // or "bcrypt" depending on what you use
+import { sendEmail } from "../utils/sendEmail.js";
 
 // Friendly gender label from the Tenant enum (MALE/FEMALE/OTHER/PREFER_NOT_SAY).
 const GENDER_LABEL = {
@@ -68,24 +75,19 @@ export const getTenancies = async (req, res) => {
   }
 };
 
-// @desc    Housemates of the signed-in tenant — everyone else living in the
-//          same property, enriched with their tenant profile.
+// @desc    Housemates of the signed-in tenant
 // @route   GET /api/v1/tenancies/housemates
-// @access  Private (Tenant)
 export const getMyHousemates = async (req, res) => {
   try {
     const email = (req.user?.email || "").toLowerCase();
     if (!email) return res.status(200).json({ success: true, data: [] });
 
-    // The tenant's own (most recent) active tenancy anchors the property.
     const mine = await Tenancy.findOne({ tenantEmail: email, isDeleted: false })
       .sort({ startDate: -1, createdAt: -1 })
       .lean();
 
     if (!mine) return res.status(200).json({ success: true, data: [] });
 
-    // Match everyone else in the same property — prefer the propertyId ref,
-    // fall back to the denormalised property name within the same org.
     const propertyMatch = mine.propertyId
       ? { propertyId: mine.propertyId }
       : { property: mine.property, organizationId: mine.organizationId };
@@ -98,13 +100,12 @@ export const getMyHousemates = async (req, res) => {
       .sort({ unit: 1 })
       .lean();
 
-    // Enrich each housemate with their tenant profile (gender/occupation/…),
-    // resolved via tenantEmail → User → Tenant, in two batched round-trips.
     const emails = [
       ...new Set(
         others.map((t) => (t.tenantEmail || "").toLowerCase()).filter(Boolean)
       ),
     ];
+
     const users = emails.length
       ? await User.find({ email: { $in: emails } }).select("_id email").lean()
       : [];
@@ -133,11 +134,7 @@ export const getMyHousemates = async (req, res) => {
       return {
         id: String(t._id),
         room: t.unit && t.unit !== "—" ? t.unit : "",
-        name:
-          fullName ||
-          t.tenant ||
-          (t.tenantEmail || "").split("@")[0] ||
-          "Housemate",
+        name: fullName || t.tenant || (t.tenantEmail || "").split("@")[0] || "Housemate",
         gender: GENDER_LABEL[p?.gender] ?? "",
         age: age != null ? `${age} years` : "",
         occupation: p?.jobTitle || "",
@@ -150,37 +147,29 @@ export const getMyHousemates = async (req, res) => {
     return res.status(200).json({ success: true, data });
   } catch (error) {
     console.error("Get Housemates Error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch housemates." });
+    return res.status(500).json({ success: false, message: "Failed to fetch housemates." });
   }
 };
 
-// @desc    The signed-in tenant's own room/tenancy — terms, managing
-//          organization and their documents (for the "My Room" page).
+// @desc    The signed-in tenant's own room/tenancy
 // @route   GET /api/v1/tenancies/my-room
-// @access  Private (Tenant)
 export const getMyRoom = async (req, res) => {
   try {
     const email = (req.user?.email || "").toLowerCase();
     if (!email) return res.status(200).json({ success: true, data: null });
 
-    // The tenant's most recent active tenancy.
     const tenancy = await Tenancy.findOne({ tenantEmail: email, isDeleted: false })
       .sort({ startDate: -1, createdAt: -1 })
       .lean();
 
     if (!tenancy) return res.status(200).json({ success: true, data: null });
 
-    // Managing organization (name/logo/phone for the footer card).
     const org = tenancy.organizationId
       ? await Organization.findById(tenancy.organizationId)
           .select("name logo phone")
           .lean()
       : null;
 
-    // Documents come from the tenant's onboarding record for this org (where
-    // tenancy-related files like the agreement/deposit info are stored).
     const onboarding = await Onboarding.findOne({
       email,
       organizationId: tenancy.organizationId,
@@ -218,13 +207,11 @@ export const getMyRoom = async (req, res) => {
     });
   } catch (error) {
     console.error("Get My Room Error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch your room." });
+    return res.status(500).json({ success: false, message: "Failed to fetch your room." });
   }
 };
 
-// @desc    Occupancy overview stats (summary cards)
+// @desc    Occupancy overview stats
 // @route   GET /api/v1/tenancies/stats
 export const getTenancyStats = async (req, res) => {
   try {
@@ -242,9 +229,7 @@ export const getTenancyStats = async (req, res) => {
       Tenancy.countDocuments(match),
       Tenancy.countDocuments({ ...match, availability: "Occupied" }),
       Tenancy.countDocuments({ ...match, onboarded: false }),
-      // A tenancy is "changing" when it is going periodic or ending.
       Tenancy.countDocuments({ ...match, status: { $in: ["Becoming Periodic", "Ending"] } }),
-      // Fixed-term tenancies are candidates for renewal.
       Tenancy.countDocuments({ ...match, status: "Fixed Term" }),
     ]);
 
@@ -258,7 +243,137 @@ export const getTenancyStats = async (req, res) => {
   }
 };
 
-// @desc    Create a tenancy
+const generatePassword = () => {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
+  let password = "";
+  for (let i = 0; i < 10; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+};
+
+const loginUrl = () => `${process.env.FRONTEND_URL || "http://localhost:3000"}/login`;
+
+const emailShell = (inner) => `
+  <div style="font-family: -apple-system, Segoe UI, sans-serif; padding: 20px; max-width: 520px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px;">
+    ${inner}
+  </div>
+`;
+
+const loginButton = () => `
+  <p style="text-align:center; margin: 24px 0;">
+    <a href="${loginUrl()}" style="background:#F47C3C; color:#fff; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:bold;">
+      Log in to Tenant Portal
+    </a>
+  </p>
+`;
+
+// New user → email their login credentials.
+const buildCredentialsEmail = ({ name, orgName, where, cleanEmail, tempPassword }) =>
+  emailShell(`
+    <h2 style="color:#0F253B; margin-top:0;">Welcome to ${orgName}</h2>
+    <p>Hi ${name || "there"},</p>
+    <p>An account has been created for you and your tenancy at <strong>${where}</strong> is set up.</p>
+    <div style="background:#f5f5f5; padding:15px; border-radius:6px; margin:20px 0;">
+      <p style="margin:0 0 8px;"><strong>Email:</strong> ${cleanEmail}</p>
+      <p style="margin:0;"><strong>Temporary Password:</strong> <code>${tempPassword}</code></p>
+    </div>
+    <p>Please log in and change your password after your first sign-in.</p>
+    ${loginButton()}
+  `);
+
+// Existing user → confirmation email (no credentials).
+const buildConfirmationEmail = ({ name, orgName, where }) =>
+  emailShell(`
+    <h2 style="color:#0F253B; margin-top:0;">Tenancy confirmed</h2>
+    <p>Hi ${name || "there"},</p>
+    <p>This confirms your tenancy at <strong>${where}</strong> with ${orgName} has been set up.</p>
+    <p>You can view the details in your tenant portal using your existing account.</p>
+    ${loginButton()}
+  `);
+
+/**
+ * Provision tenant account + send the right email:
+ *   - New user  → create account + email temporary credentials
+ *   - Existing  → send a tenancy confirmation email (no credentials)
+ *
+ * @returns {{ tenantId: string|null, isNewUser: boolean, emailSent: boolean }}
+ */
+async function provisionTenantAndNotify({ email, name, organizationId, propertyName, unit, createAccount }) {
+  const result = { tenantId: null, isNewUser: false, emailSent: false };
+  if (!createAccount || !email) return result;
+
+  const cleanEmail = String(email).toLowerCase().trim();
+  if (!cleanEmail) return result;
+
+  let tempPassword = null;
+
+  try {
+    let user = await User.findOne({ email: cleanEmail });
+
+    if (!user) {
+      result.isNewUser = true;
+      tempPassword = generatePassword();
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(tempPassword, salt);
+
+      user = await User.create({
+        email: cleanEmail,
+        password: hashedPassword,
+        role: "Tenant",
+        isVerified: true,
+      });
+    }
+
+    // Create or update Tenant profile
+    const [firstName, ...rest] = String(name || "").trim().split(/\s+/);
+    const lastName = rest.join(" ");
+
+    const tenant = await Tenant.findOneAndUpdate(
+      { userId: user._id },
+      {
+        $set: { organizationId, email: cleanEmail },
+        $setOnInsert: { firstName: firstName || undefined, lastName: lastName || undefined },
+      },
+      { upsert: true, setDefaultsOnInsert: true, new: true }
+    );
+    result.tenantId = tenant?._id || null;
+  } catch (err) {
+    console.error(`[OCCUPANCY] ❌ Failed to provision account for ${cleanEmail}:`, err.message);
+    return result;
+  }
+
+  // Email is best-effort — never fail the tenancy because the mail server hiccuped.
+  try {
+    const org = await Organization.findById(organizationId).select("name").lean();
+    const orgName = org?.name || "the property team";
+    const where = [propertyName, unit].filter(Boolean).join(" · ") || "your new home";
+
+    const { subject, html } = result.isNewUser
+      ? {
+          subject: `${orgName} - Your login details for ${where}`,
+          html: buildCredentialsEmail({ name, orgName, where, cleanEmail, tempPassword }),
+        }
+      : {
+          subject: `${orgName} - Your tenancy at ${where} is confirmed`,
+          html: buildConfirmationEmail({ name, orgName, where }),
+        };
+
+    console.log(
+      `[EMAIL] Sending ${result.isNewUser ? "credentials" : "confirmation"} email to: ${cleanEmail}`
+    );
+
+    await sendEmail({ email: cleanEmail, subject, html });
+    result.emailSent = true;
+    console.log(`[EMAIL] ✅ Sent ${result.isNewUser ? "credentials" : "confirmation"} email to ${cleanEmail}`);
+  } catch (err) {
+    console.error(`[EMAIL] ❌ Failed to send email to ${cleanEmail}:`, err.message);
+  }
+
+  return result;
+}
+
+// @desc    Create a tenancy (links to EXISTING Property + Room)
 // @route   POST /api/v1/tenancies
 export const createTenancy = async (req, res) => {
   try {
@@ -266,19 +381,86 @@ export const createTenancy = async (req, res) => {
     const createdBy = req.user._id;
 
     const payload = pickPayload(req.body);
+    const createAccount = req.body.createAccount === true;
 
-    if (!payload.property || !String(payload.property).trim()) {
-      return res.status(400).json({ success: false, message: "Property is required." });
+    if (!payload.propertyId || !mongoose.isValidObjectId(payload.propertyId)) {
+      return res.status(400).json({ success: false, message: "Valid propertyId is required." });
+    }
+    if (!payload.roomId || !mongoose.isValidObjectId(payload.roomId)) {
+      return res.status(400).json({ success: false, message: "Valid roomId is required." });
     }
     if (!payload.tenant || !String(payload.tenant).trim()) {
-      return res.status(400).json({ success: false, message: "Tenant is required." });
+      return res.status(400).json({ success: false, message: "Tenant name is required." });
     }
 
-    const tenancy = await Tenancy.create({ ...payload, organizationId, createdBy });
+    // Verify Property & Room
+    const [property, room] = await Promise.all([
+      Property.findOne({ _id: payload.propertyId, organizationId, isDeleted: false }),
+      Room.findOne({ _id: payload.roomId, organizationId, propertyId: payload.propertyId, isDeleted: false })
+    ]);
+
+    if (!property) return res.status(404).json({ success: false, message: "Property not found." });
+    if (!room) return res.status(404).json({ success: false, message: "Room not found." });
+
+    // Update tenant org if needed
+    if (payload.tenantId) {
+      const tenant = await Tenant.findById(payload.tenantId);
+      if (tenant) {
+        let needsSave = false;
+        if (!tenant.organizationId || String(tenant.organizationId) !== String(organizationId)) {
+          tenant.organizationId = organizationId;
+          needsSave = true;
+        }
+        if (payload.tenantEmail && payload.tenantEmail !== tenant.email) {
+          tenant.email = payload.tenantEmail.toLowerCase().trim();
+          needsSave = true;
+        }
+        if (needsSave) await tenant.save();
+      }
+    }
+
+    // Create Tenancy
+    const tenancy = await Tenancy.create({
+      ...payload,
+      organizationId,
+      createdBy,
+      property: property.name,
+      unit: room.roomNumber || room.roomName || room.title || "—",
+    });
+
+    // Provision account + send email (if requested)
+    let notifyResult = { tenantId: null, isNewUser: false, emailSent: false };
+    if (createAccount && payload.tenantEmail) {
+      notifyResult = await provisionTenantAndNotify({
+        email: payload.tenantEmail,
+        name: payload.tenant,
+        organizationId,
+        propertyName: property.name,
+        unit: tenancy.unit,
+        createAccount,
+      });
+
+      if (notifyResult.tenantId) {
+        tenancy.tenantId = notifyResult.tenantId;
+        await tenancy.save();
+
+        // Optional: Update room with current tenant
+        await Room.updateOne({ _id: payload.roomId }, { $set: { currentTenant: notifyResult.tenantId, status: "OCCUPIED" } });
+      }
+    }
+
+    let message = "Tenancy created successfully.";
+    if (notifyResult.emailSent) {
+      message = notifyResult.isNewUser
+        ? "Tenancy created — login credentials emailed to the tenant."
+        : "Tenancy created — confirmation email sent to the tenant.";
+    } else if (createAccount && payload.tenantEmail) {
+      message = "Tenancy created, but the notification email could not be sent.";
+    }
 
     return res.status(201).json({
       success: true,
-      message: "Tenancy created.",
+      message,
       data: tenancy,
     });
   } catch (error) {
@@ -347,7 +529,7 @@ export const deleteTenancy = async (req, res) => {
   }
 };
 
-// @desc    Send an onboarding invite to a single tenancy's tenant
+// @desc    Send an onboarding invite to a single tenant
 // @route   PATCH /api/v1/tenancies/:id/invite
 export const inviteTenant = async (req, res) => {
   try {
@@ -363,8 +545,6 @@ export const inviteTenant = async (req, res) => {
       return res.status(404).json({ success: false, message: "Tenancy not found." });
     }
 
-    // NOTE: email dispatch is handled by the mailer once configured; here we
-    // just record that an invite was sent so the UI can reflect it.
     tenancy.invitedAt = new Date();
     await tenancy.save();
 
@@ -379,7 +559,7 @@ export const inviteTenant = async (req, res) => {
   }
 };
 
-// @desc    Send onboarding invites to every not-yet-onboarded tenant
+// @desc    Send onboarding invites to all not-onboarded tenants
 // @route   POST /api/v1/tenancies/invite-all
 export const inviteAllTenants = async (req, res) => {
   try {
@@ -403,5 +583,5 @@ export const inviteAllTenants = async (req, res) => {
   }
 };
 
-// Expose the allowed statuses (handy for the client / future validation).
+// Expose allowed statuses
 export const tenancyStatuses = TENANCY_STATUS;

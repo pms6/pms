@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { DoorOpen, Users, UserPlus, Repeat, RefreshCw, Download, Send, Eye, X } from "lucide-react";
+import { DoorOpen, Users, UserPlus, Repeat, RefreshCw, Download, Send, Eye, X, Plus, FileSpreadsheet } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
 import { TENANCY_STATUS, TENANCY_STATUS_TONE, money } from "../_data/dummy";
 import api from "../../api/api";
+import AddOccupancyModal from "./_components/AddOccupancyModal";
+import ImportExcelModal from "./_components/ImportExcelModal";
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-GB") : "—");
 
@@ -19,6 +21,8 @@ export default function AdminOccupancy() {
   const [statusF, setStatusF] = useState("");
   const [view, setView] = useState(null);
   const [inviting, setInviting] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,9 +103,17 @@ export default function AdminOccupancy() {
         title="Occupancy"
         subtitle="Occupancy status of all properties, units and tenants"
         action={
-          <button onClick={inviteAll} disabled={inviting || pendingOnboarding === 0} className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
-            <Send size={18} /> Invite All Tenants
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setShowImport(true)} className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-[#0F253B] font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
+              <FileSpreadsheet size={18} /> Import Excel
+            </button>
+            <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-4 py-2.5 bg-[#0F253B] hover:bg-[#1c3853] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
+              <Plus size={18} /> Add Occupancy
+            </button>
+            <button onClick={inviteAll} disabled={inviting || pendingOnboarding === 0} className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
+              <Send size={18} /> Invite All Tenants
+            </button>
+          </div>
         }
       />
 
@@ -233,6 +245,12 @@ export default function AdminOccupancy() {
           </div>
         </div>
       )}
+
+      {/* Add Property + Room + Tenancy */}
+      {showAdd && <AddOccupancyModal onClose={() => setShowAdd(false)} onCreated={load} />}
+
+      {/* Excel import */}
+      {showImport && <ImportExcelModal onClose={() => setShowImport(false)} onImported={load} />}
     </div>
   );
 }

@@ -16,6 +16,7 @@ import welcomePackRoutes from "./welcomePack.route.js"
 import paymentRoutes from "./payment.route.js"
 import publicRoutes from "./public.Route.js"
 import auditRoutes from "./auditLog.Route.js"
+import tenantRoute from "./tenant.Route.js"
 
 const router = express.Router();
 
@@ -33,6 +34,7 @@ router.use("/public", publicRoutes);
 
 // Phase 1 — Core platform
 router.use("/auth", authRoutes);
+router.use("/tenants", tenantRoute);
 router.use("/properties", propertyRoutes);
 router.use("/rooms", roomRoutes);
 router.use("/leads", leadRoutes);

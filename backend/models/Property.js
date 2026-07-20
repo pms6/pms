@@ -51,6 +51,15 @@ const propertySchema = new mongoose.Schema(
 
     ownerName:String,
 
+    // Structured link to the Owner record (in addition to the denormalised
+    // ownerName above). Set automatically when an owner is chosen/created.
+    ownerId:{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"Owner",
+        default:null,
+        index:true
+    },
+
     address:{
         line1:String,
         line2:String,
