@@ -11,6 +11,7 @@ import onboardingRoutes from "./onboarding.route.js";
 import tenancyRoutes from "./tenancy.route.js";
 import supplierRoutes from "./supplier.route.js";
 import maintenanceRoutes from "./maintenance.route.js";
+import inspectionRoutes from "./inspection.Route.js";
 import complianceRoutes from "./compliance.Route.js"
 import welcomePackRoutes from "./welcomePack.route.js"
 import paymentRoutes from "./payment.route.js"
@@ -45,6 +46,7 @@ router.use("/onboarding", onboardingRoutes);
 router.use("/tenancies", tenancyRoutes);
 router.use("/suppliers", supplierRoutes);
 router.use("/maintenance", maintenanceRoutes);
+router.use("/inspections", inspectionRoutes);
 router.use("/compliance", complianceRoutes);
 router.use("/welcome-pack", welcomePackRoutes);
 router.use("/payments", paymentRoutes);
