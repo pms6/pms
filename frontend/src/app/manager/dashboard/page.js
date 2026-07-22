@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Home, Wrench, ShieldAlert, TrendingUp, BedDouble, UserPlus } from "lucide-react";
+import { Home, Wrench, ShieldAlert, TrendingUp, BedDouble } from "lucide-react";
 import { StatCard, PageHeader, Card, Badge } from "../../Shared/ui";
 import api from "../../api/api";
 

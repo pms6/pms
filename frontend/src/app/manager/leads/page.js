@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, X, Mail, Phone, PoundSterling, Trash2, Loader2 } from "lucide-react";
 import { PageHeader } from "../../Shared/ui";
-import { LEAD_STAGES } from "../_data/dummy";
 import api from "../../api/api";
 
 const COLUMNS = [
@@ -15,6 +14,8 @@ const COLUMNS = [
 ];
 
 const SOURCES = ["Rightmove", "Zoopla", "SpareRoom", "OpenRent", "Website", "Referral"];
+
+const LEAD_STAGES = ["new", "qualified", "viewing", "converted", "lost"];
 
 function initials(name) {
   return (name || "?").split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();

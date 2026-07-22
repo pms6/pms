@@ -3,13 +3,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Wrench, User, Building2, PoundSterling, X } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
-import { money } from "../../admin/_data/dummy";
+// import { money } from "../../admin/_data/dummy";
 import api from "../../api/api";
 
 const PRIORITY_TONE = { urgent: "red", high: "amber", med: "blue", low: "gray" };
 const STATUS_TONE = { open: "blue", assigned: "amber", in_progress: "orange", closed: "green" };
 const STATUSES = ["open", "assigned", "in_progress", "closed"];
 const PRIORITIES = ["urgent", "high", "med", "low"];
+const money = (n) => `£${Number(n).toLocaleString("en-GB")}`;
 
 const FIELD = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
 const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
