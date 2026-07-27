@@ -451,7 +451,7 @@ export default function TenantSignUpPage() {
 
               <p className="mt-6 text-center text-xs text-gray-400 font-medium">
                 Already have an account?{" "}
-                <Link href="/tenant-login" className="text-[#F47C3C] font-bold hover:underline">
+                <Link href="/login" className="text-[#F47C3C] font-bold hover:underline">
                   Sign in
                 </Link>
               </p>
