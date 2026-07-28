@@ -292,6 +292,50 @@ const buildConfirmationEmail = ({ name, orgName, where }) =>
     ${loginButton()}
   `);
 
+// Onboarding invite → asks the tenant to log in and complete their details.
+const buildInviteEmail = ({ name, orgName, where }) =>
+  emailShell(`
+    <h2 style="color:#0F253B; margin-top:0;">Complete your onboarding</h2>
+    <p>Hi ${name || "there"},</p>
+    <p>${orgName} has invited you to finish setting up your tenancy at <strong>${where}</strong>.</p>
+    <p>Log in to your tenant portal to complete your onboarding details.</p>
+    ${loginButton()}
+    <p style="color:#666; font-size:13px;">If you don't have an account yet, use the "Forgot password" link on the login page with this email address.</p>
+  `);
+
+/**
+ * Send one onboarding invite. Never throws — the caller decides what to do
+ * with the outcome so a bad address can't take down a bulk send.
+ *
+ * @returns {{ sent: boolean, reason: string|null }}
+ */
+async function sendOnboardingInvite({ tenancy, orgName }) {
+  const cleanEmail = String(tenancy.tenantEmail || "").toLowerCase().trim();
+  if (!cleanEmail) return { sent: false, reason: "no email address on file" };
+
+  const where = [tenancy.property, tenancy.unit].filter((v) => v && v !== "—").join(" · ") || "your home";
+
+  try {
+    console.log(`[EMAIL] Sending onboarding invite to: ${cleanEmail}`);
+    await sendEmail({
+      email: cleanEmail,
+      subject: `${orgName} - Complete your onboarding for ${where}`,
+      html: buildInviteEmail({ name: tenancy.tenant, orgName, where }),
+    });
+    console.log(`[EMAIL] ✅ Sent onboarding invite to ${cleanEmail}`);
+    return { sent: true, reason: null };
+  } catch (err) {
+    console.error(`[EMAIL] ❌ Failed to send onboarding invite to ${cleanEmail}:`, err.message);
+    return { sent: false, reason: err.message || "email delivery failed" };
+  }
+}
+
+// Org name is used as the sender label in invite emails.
+const getOrgName = async (organizationId) => {
+  const org = await Organization.findById(organizationId).select("name").lean();
+  return org?.name || "the property team";
+};
+
 /**
  * Provision tenant account + send the right email:
  *   - New user  → create account + email temporary credentials
@@ -545,6 +589,25 @@ export const inviteTenant = async (req, res) => {
       return res.status(404).json({ success: false, message: "Tenancy not found." });
     }
 
+    if (!String(tenancy.tenantEmail || "").trim()) {
+      return res.status(400).json({
+        success: false,
+        message: `No email address on file for ${tenancy.tenant}. Add one before sending an invite.`,
+      });
+    }
+
+    const orgName = await getOrgName(organizationId);
+    const { sent, reason } = await sendOnboardingInvite({ tenancy, orgName });
+
+    // Only stamp invitedAt when an invite actually went out, so the record
+    // never claims an invite the tenant never received.
+    if (!sent) {
+      return res.status(502).json({
+        success: false,
+        message: `Could not send the onboarding invite to ${tenancy.tenant}: ${reason}.`,
+      });
+    }
+
     tenancy.invitedAt = new Date();
     await tenancy.save();
 
@@ -565,17 +628,69 @@ export const inviteAllTenants = async (req, res) => {
   try {
     const organizationId = req.user.organizationId;
 
-    const result = await Tenancy.updateMany(
-      { organizationId, isDeleted: false, onboarded: false },
-      { $set: { invitedAt: new Date() } }
-    );
+    const pending = await Tenancy.find({
+      organizationId,
+      isDeleted: false,
+      onboarded: false,
+    }).select("tenant tenantEmail property unit");
 
-    const invited = result.modifiedCount ?? result.nModified ?? 0;
+    if (!pending.length) {
+      return res.status(200).json({
+        success: true,
+        message: "No tenants are waiting on an onboarding invite.",
+        data: { invited: 0, skipped: 0, failed: 0, failures: [] },
+      });
+    }
+
+    const orgName = await getOrgName(organizationId);
+
+    const sentIds = [];
+    const failures = [];
+    let skipped = 0;
+
+    // Send in small batches so a large org doesn't open hundreds of
+    // simultaneous SMTP connections.
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < pending.length; i += BATCH_SIZE) {
+      const batch = pending.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map((tenancy) => sendOnboardingInvite({ tenancy, orgName }))
+      );
+
+      results.forEach(({ sent, reason }, index) => {
+        const tenancy = batch[index];
+        if (sent) {
+          sentIds.push(tenancy._id);
+        } else if (reason === "no email address on file") {
+          skipped += 1;
+          failures.push({ tenant: tenancy.tenant, reason });
+        } else {
+          failures.push({ tenant: tenancy.tenant, reason });
+        }
+      });
+    }
+
+    // Stamp only the tenancies whose invite actually went out.
+    if (sentIds.length) {
+      await Tenancy.updateMany(
+        { _id: { $in: sentIds } },
+        { $set: { invitedAt: new Date() } }
+      );
+    }
+
+    const invited = sentIds.length;
+    const failed = failures.length - skipped;
+
+    let message = `Onboarding invite sent to ${invited} of ${pending.length} tenant(s).`;
+    const notes = [];
+    if (skipped) notes.push(`${skipped} had no email address`);
+    if (failed) notes.push(`${failed} failed to send`);
+    if (notes.length) message += ` ${notes.join(", ")}.`;
 
     return res.status(200).json({
-      success: true,
-      message: `Onboarding invite sent to ${invited} tenant(s).`,
-      data: { invited },
+      success: invited > 0,
+      message,
+      data: { invited, skipped, failed, failures },
     });
   } catch (error) {
     console.error("Invite All Tenants Error:", error);

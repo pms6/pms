@@ -69,7 +69,9 @@ export default function AdminOccupancy() {
     try {
       const res = await api.post("/tenancies/invite-all");
       alert(res.data?.message || "Invites sent.");
-      setItems((xs) => xs.map((x) => (x.onboarded ? x : { ...x, invitedAt: new Date().toISOString() })));
+      // Refetch rather than assume every pending tenant was invited — the
+      // server only stamps invitedAt on the ones whose email actually sent.
+      await load();
     } catch (err) {
       alert(err.response?.data?.message || "Failed to send invites");
     } finally {
