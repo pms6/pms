@@ -152,7 +152,7 @@ export default function AdminDashboard() {
         <div className="absolute -right-8 -top-8 w-48 h-48 rounded-full bg-[#F47C3C]/20 blur-2xl" />
         <div className="relative">
           <p className="text-[11px] font-bold uppercase tracking-widest text-white/50">Northern Lettings · Admin</p>
-          <h1 className="text-2xl sm:text-3xl font-bold mt-1">Welcome back, Sharjeel 👋</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold mt-1">Welcome back👋</h1>
           <p className="text-sm text-white/60 mt-1">Here's what's happening across your portfolio today.</p>
 
           <div className="flex flex-wrap gap-6 mt-5">
