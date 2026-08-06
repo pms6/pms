@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "react-toastify";
@@ -53,7 +53,7 @@ const ageRangeFromDob = (dob) => {
 
 export default function TenantSignUpPage() {
   const router = useRouter();
-  const { register, verifyOtp, updateProfile } = useAuth();
+  const { register, resendOtp: requestNewOtp, verifyOtp, updateProfile } = useAuth();
 
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -72,6 +72,9 @@ export default function TenantSignUpPage() {
   // Step 2 — otp
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const otpRefs = useRef([]);
+  // Seconds left before another code may be requested. The server enforces the
+  // same 60s window; this just keeps the button honest about it.
+  const [resendIn, setResendIn] = useState(0);
 
   // Step 3 — profile
   const [firstName, setFirstName] = useState("");
@@ -87,6 +90,12 @@ export default function TenantSignUpPage() {
 
   const targetRole = purpose === "organization" ? "Organization" : "Tenant";
   const ageRange = useMemo(() => ageRangeFromDob(dob), [dob]);
+
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const id = setTimeout(() => setResendIn((s) => s - 1), 1000);
+    return () => clearTimeout(id);
+  }, [resendIn]);
 
   const go = (n) => {
     setError("");
@@ -124,6 +133,7 @@ export default function TenantSignUpPage() {
     try {
       await register({ email, password, targetRole });
       toast.success("We've emailed you a 6-digit verification code.");
+      setResendIn(60);
       go(2);
     } catch (err) {
       setError(err.response?.data?.message || err.message || "Registration failed.");
@@ -185,13 +195,21 @@ export default function TenantSignUpPage() {
     }
   };
 
+  // Re-registering to get another code doesn't work — the account already
+  // exists by this point, so /auth/register rejects it as a duplicate and no
+  // second email ever goes out. /auth/resend-otp is the endpoint for this.
   const resendOtp = async () => {
     setError("");
     setLoading(true);
     try {
-      await register({ email, password, targetRole });
+      await requestNewOtp(email);
+      setOtp(["", "", "", "", "", ""]);
+      otpRefs.current[0]?.focus();
+      setResendIn(60);
       toast.success("A new code is on its way.");
     } catch (err) {
+      const retryAfter = err.response?.data?.retryAfter;
+      if (retryAfter) setResendIn(retryAfter);
       setError(err.response?.data?.message || "Could not resend the code.");
     } finally {
       setLoading(false);
@@ -554,15 +572,21 @@ export default function TenantSignUpPage() {
               <SubmitButton loading={loading} label="Verify" />
 
               <p className="mt-6 text-center text-xs text-gray-400 font-medium">
-                Didn't get it?{" "}
-                <button
-                  type="button"
-                  onClick={resendOtp}
-                  disabled={loading}
-                  className="text-[#F47C3C] font-bold hover:underline disabled:opacity-50"
-                >
-                  Resend code
-                </button>
+                Didn&apos;t get it?{" "}
+                {resendIn > 0 ? (
+                  <span className="text-gray-400 font-bold">
+                    Resend code in {resendIn}s
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={resendOtp}
+                    disabled={loading}
+                    className="text-[#F47C3C] font-bold hover:underline disabled:opacity-50"
+                  >
+                    Resend code
+                  </button>
+                )}
               </p>
             </form>
           )}

@@ -14,8 +14,18 @@ const userSchema = new mongoose.Schema(
       default: "Pending",
     },
 
+    // Email-verification code (sign-up).
     otp: String,
     otpExpire: Date,
+    otpSentAt: Date, // drives the resend cooldown
+    otpAttempts: { type: Number, default: 0 }, // wrong guesses on the current code
+
+    // Password-reset code — kept separate from the verification code so a
+    // pending reset can never be used to verify an account, or vice versa.
+    resetOtp: String,
+    resetOtpExpire: Date,
+    resetOtpSentAt: Date,
+    resetOtpAttempts: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

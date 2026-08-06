@@ -45,11 +45,40 @@ export const AuthProvider = ({ children }) => {
     return res.data;
   };
 
+  // RESEND OTP — issues a fresh verification code for an existing, still
+  // unverified account. Calling /auth/register again would be rejected as a
+  // duplicate, which is why this has its own endpoint.
+  const resendOtp = async (email) => {
+    const res = await api.post("/auth/resend-otp", { email });
+    return res.data;
+  };
+
   // VERIFY OTP — activates the account, creates the profile, and logs the
   // user in (sets the cookie). We hydrate afterwards.
   const verifyOtp = async ({ email, otp, targetRole }) => {
     await api.post("/auth/verify-otp", { email, otp, targetRole });
     return loadMe();
+  };
+
+  // FORGOT PASSWORD — emails a reset code. The reply is intentionally the same
+  // whether or not the address is registered, so don't read anything into it.
+  const forgotPassword = async (email) => {
+    const res = await api.post("/auth/forgot-password", { email });
+    return res.data;
+  };
+
+  // VERIFY RESET OTP — checks a reset code without spending it, so the UI can
+  // move to the new-password step before the user has typed one.
+  const verifyResetOtp = async ({ email, otp }) => {
+    const res = await api.post("/auth/verify-reset-otp", { email, otp });
+    return res.data;
+  };
+
+  // RESET PASSWORD — sets the new password. No session is created; the user
+  // signs in afterwards with the credentials they just chose.
+  const resetPassword = async ({ email, otp, password }) => {
+    const res = await api.post("/auth/reset-password", { email, otp, password });
+    return res.data;
   };
 
   // UPDATE PROFILE — persists the COHO personal-information step.
@@ -102,7 +131,11 @@ export const AuthProvider = ({ children }) => {
         isAuthenticated: !!user,
         login,
         register,
+        resendOtp,
         verifyOtp,
+        forgotPassword,
+        verifyResetOtp,
+        resetPassword,
         updateProfile,
         logout,
         refreshMe: loadMe,
