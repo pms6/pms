@@ -5,23 +5,31 @@ import { resolveTenantProperty } from "../utils/tenantProperty.js";
 // further to property-wide packs plus any pack targeted at THEIR specific room.
 export const getMyWelcomePack = async (req, res) => {
   try {
-    const { tenancy, property } = await resolveTenantProperty(req.user);
+    const { property, roomId } = await resolveTenantProperty(req.user);
 
     if (!property?._id) {
       return res.json({ success: true, data: [] });
     }
 
-    // Property-wide packs (no room) always apply; room-specific packs apply only
-    // when they match the tenant's own room.
-    const roomMatch = [{ roomId: null }, { roomId: { $exists: false } }];
-    if (tenancy?.roomId) roomMatch.push({ roomId: tenancy.roomId });
-
-    const items = await WelcomePack.find({
+    const query = {
       organizationId: property.organizationId,
       propertyId: property._id,
       isDeleted: false,
-      $or: roomMatch,
-    })
+    };
+
+    // Property-wide packs (no room) always apply; room-specific packs apply only
+    // when they match the tenant's own room. When the room can't be resolved at
+    // all we don't narrow by room — a tenancy with no room link would otherwise
+    // see nothing at all in a property whose packs are all room-targeted.
+    if (roomId) {
+      query.$or = [
+        { roomId: null },
+        { roomId: { $exists: false } },
+        { roomId },
+      ];
+    }
+
+    const items = await WelcomePack.find(query)
       .populate("propertyId", "name")
       .populate("roomId", "roomName title roomNumber")
       .sort({ createdAt: -1 });
