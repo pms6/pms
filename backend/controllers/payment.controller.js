@@ -9,9 +9,12 @@ const monthKey = (d) =>
 const sameMonth = (a, b) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
 
-// Derive a charge's status from its due date (a "paid" charge never changes).
+// Derive a charge's status from its due date. "paid" is final, and a charge
+// awaiting an operator's confirmation must not be dragged back to due/overdue
+// underneath them.
 function computeStatus(charge, today) {
   if (charge.status === "paid") return "paid";
+  if (charge.status === "awaiting_confirmation") return "awaiting_confirmation";
   const due = new Date(charge.dueDate);
   if (due > today) return "upcoming";
   if (sameMonth(due, today)) return "due";
@@ -28,13 +31,34 @@ async function ensureCharges(tenancy) {
   const today = new Date();
   const anchorDay = start.getDate();
 
+  // A tenancy that has rolled onto a periodic basis keeps billing; one still on
+  // a fixed term stops at the end of that term. Without this a tenancy that
+  // ended months ago carries on generating charges forever.
+  const rolledOn =
+    tenancy.status === "Periodic" || tenancy.status === "Becoming Periodic";
+  const termEnd =
+    !rolledOn && tenancy.fixedTermEnd ? new Date(tenancy.fixedTermEnd) : null;
+  const validTermEnd = termEnd && !Number.isNaN(termEnd.getTime()) ? termEnd : null;
+
+  // Anchor day clamped to the target month's length: a tenancy starting on the
+  // 31st must fall due on 30 September, not 1 October.
+  const dueOn = (year, month) => {
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    return new Date(year, month, Math.min(anchorDay, lastDay));
+  };
+
   // Build the list of billing periods (1st-of-month cursors).
   const periods = [];
   let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
   const endBound = new Date(today.getFullYear(), today.getMonth() + 1, 1); // include next month
   let guard = 0;
   while (cursor <= endBound && guard < 72) {
-    const due = new Date(cursor.getFullYear(), cursor.getMonth(), anchorDay);
+    // Stop once the billing month starts after the term ends. Comparing the
+    // month start (not the due date) keeps the final part-month billed — a
+    // tenancy ending on the 24th with rent due on the 31st still owes that
+    // month, and would otherwise generate no charges at all.
+    if (validTermEnd && cursor > validTermEnd) break;
+    const due = dueOn(cursor.getFullYear(), cursor.getMonth());
     periods.push({ key: monthKey(cursor), due });
     cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
     guard++;
@@ -161,18 +185,80 @@ export const payCharge = async (req, res) => {
       return res.status(200).json({ success: true, message: "Already paid.", data: charge });
     }
 
-    charge.status = "paid";
-    charge.paidDate = new Date();
-    charge.method = req.body?.method || "Card";
+    if (charge.status === "awaiting_confirmation") {
+      return res.status(200).json({
+        success: true,
+        message: "Already reported — waiting for your operator to confirm.",
+        data: charge,
+      });
+    }
+
+    // This records the tenant's CLAIM, not a payment. No money moves here and
+    // nothing verifies it, so marking the charge "paid" would let a tenant
+    // clear their own balance. An operator confirms it below.
+    charge.status = "awaiting_confirmation";
+    charge.claimedAt = new Date();
+    charge.claimedMethod = req.body?.method || "Bank Transfer";
     await charge.save();
 
     return res.status(200).json({
       success: true,
-      message: "Payment recorded.",
+      message: "Payment reported. Your operator will confirm it.",
       data: charge,
     });
   } catch (error) {
     console.error("Pay Charge Error:", error);
-    return res.status(500).json({ success: false, message: "Failed to record payment." });
+    return res.status(500).json({ success: false, message: "Failed to report payment." });
+  }
+};
+
+// @desc    Operator confirms (or rejects) a tenant's reported payment.
+// @route   PATCH /api/v1/payments/:id/confirm   body: { confirm: true|false }
+// @access  Private (organization member)
+export const confirmCharge = async (req, res) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) {
+      return res.status(401).json({ success: false, message: "Organization ID required" });
+    }
+    if (req.user.role === "Tenant") {
+      return res.status(403).json({
+        success: false,
+        message: "Only your operator can confirm a payment.",
+      });
+    }
+
+    const confirm = req.body?.confirm !== false;
+
+    const charge = await RentCharge.findOne({ _id: req.params.id, organizationId });
+    if (!charge) {
+      return res.status(404).json({ success: false, message: "Charge not found." });
+    }
+
+    if (confirm) {
+      charge.status = "paid";
+      charge.paidDate = charge.claimedAt || new Date();
+      charge.method = charge.claimedMethod || req.body?.method || "Bank Transfer";
+      charge.confirmedBy = req.user._id;
+      charge.confirmedAt = new Date();
+    } else {
+      // Rejected — hand it back to the ledger, which re-derives due/overdue.
+      charge.status = computeStatus({ ...charge.toObject(), status: "due" }, new Date());
+      charge.claimedAt = null;
+      charge.claimedMethod = "";
+      charge.confirmedBy = req.user._id;
+      charge.confirmedAt = new Date();
+    }
+
+    await charge.save();
+
+    return res.status(200).json({
+      success: true,
+      message: confirm ? "Payment confirmed." : "Payment rejected.",
+      data: charge,
+    });
+  } catch (error) {
+    console.error("Confirm Charge Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update the charge." });
   }
 };

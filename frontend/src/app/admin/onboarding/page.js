@@ -33,12 +33,14 @@ const STATUS_TONE = {
 function tone(s) { return STATUS_TONE[s] || "gray"; }
 function initials(name) { return (name || "?").split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase(); }
 
-function Stepper({ index }) {
+function Stepper({ index, complete = false }) {
   return (
     <div className="flex items-center gap-1 overflow-x-auto pb-2">
       {ONBOARDING_STAGES.map((s, i) => {
-        const done = i < index;
-        const current = i === index;
+        // Completing sets stageIndex to the last index, so without the
+        // `complete` flag the final stage would render as "current" forever.
+        const done = complete || i < index;
+        const current = !complete && i === index;
         return (
           <div key={s} className="flex items-center shrink-0">
             <div className="flex flex-col items-center gap-1.5 w-20">
@@ -449,7 +451,12 @@ export default function AdminOnboarding() {
   // server so the tenant can access their room + details from the tenant portal.
   const completeApplicant = async () => {
     if (!a || a.completedAt) return;
-    if (!confirm(`Complete onboarding for "${a.name}"? This creates their tenancy and gives them access to their room.`)) return;
+    if (
+      !confirm(
+        `Complete onboarding for "${a.name}"?\n\nThis will:\n• Create their tenancy\n• Mark the room occupied\n• Email the tenant\n\nThis can't be undone from here.`
+      )
+    )
+      return;
     setCompleting(true);
     try {
       const res = await api.patch(`/onboarding/${a._id}/complete`);
@@ -528,10 +535,19 @@ export default function AdminOnboarding() {
 
       {/* Pipeline summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {/* Counts key off completedAt, not stageIndex alone — a completed
+            applicant sits at the last stage and would otherwise still be
+            counted as "ready to move-in". */}
         {[
-          { label: "In progress", value: items.filter((o) => o.stageIndex < lastStage).length },
-          { label: "Referencing", value: items.filter((o) => o.stageIndex === 1).length },
-          { label: "Ready to move-in", value: items.filter((o) => o.stageIndex >= 5).length },
+          {
+            label: "In progress",
+            value: items.filter((o) => !o.completedAt && o.stageIndex < lastStage).length,
+          },
+          {
+            label: "Ready to complete",
+            value: items.filter((o) => !o.completedAt && o.stageIndex === lastStage).length,
+          },
+          { label: "Completed", value: items.filter((o) => o.completedAt).length },
           { label: "Total applicants", value: items.length },
         ].map((s, i) => (
           <div key={i} className="bg-white border border-gray-100 rounded-2xl p-4">
@@ -598,8 +614,14 @@ export default function AdminOnboarding() {
                   <div className="flex items-center gap-2">
                     {a.completedAt ? (
                       <Badge tone="green">Completed</Badge>
+                    ) : a.stageIndex === lastStage ? (
+                      // Reaching the last stage is NOT completion — the tenancy
+                      // is only created when the button below is pressed. This
+                      // used to read a green "100% complete", which contradicted
+                      // the "Complete Onboarding" button sitting next to it.
+                      <Badge tone="amber">Ready to complete</Badge>
                     ) : (
-                      <Badge tone={progress === 100 ? "green" : "orange"}>{progress}% complete</Badge>
+                      <Badge tone="orange">{progress}% complete</Badge>
                     )}
                     {!a.completedAt && (
                       <button
@@ -611,7 +633,7 @@ export default function AdminOnboarding() {
                     )}
                   </div>
                 </div>
-                <Stepper index={a.stageIndex} />
+                <Stepper index={a.stageIndex} complete={!!a.completedAt} />
                 <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-50">
                   <button
                     onClick={() => moveStage(-1)}
@@ -621,11 +643,13 @@ export default function AdminOnboarding() {
                     <ChevronLeft size={15} /> Previous
                   </button>
                   <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400">
-                    Stage {a.stageIndex + 1} / {ONBOARDING_STAGES.length}
+                    {a.completedAt
+                      ? "All stages complete"
+                      : `Stage ${a.stageIndex + 1} / ${ONBOARDING_STAGES.length} · ${ONBOARDING_STAGES[a.stageIndex]}`}
                   </span>
                   {a.completedAt ? (
                     <span className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl">
-                      <CheckCircle2 size={15} /> Onboarding Complete
+                      <CheckCircle2 size={15} /> Tenancy Created
                     </span>
                   ) : a.stageIndex === lastStage ? (
                     <button
@@ -633,7 +657,11 @@ export default function AdminOnboarding() {
                       disabled={completing}
                       className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      {completing ? <Loader2 size={15} className="animate-spin" /> : <><CheckCircle2 size={15} /> Complete Onboarding</>}
+                      {completing ? (
+                        <><Loader2 size={15} className="animate-spin" /> Creating tenancy…</>
+                      ) : (
+                        <><CheckCircle2 size={15} /> Complete &amp; Create Tenancy</>
+                      )}
                     </button>
                   ) : (
                     <button
@@ -642,10 +670,29 @@ export default function AdminOnboarding() {
                       title={needsDocsToAdvance ? "Upload at least one document to advance past Referencing" : undefined}
                       className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-[#F47C3C] hover:bg-[#e06d30] rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      {savingStage ? <Loader2 size={15} className="animate-spin" /> : <>Advance <ChevronRight size={15} /></>}
+                      {savingStage ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : (
+                        <>Advance to {ONBOARDING_STAGES[a.stageIndex + 1]} <ChevronRight size={15} /></>
+                      )}
                     </button>
                   )}
                 </div>
+
+                {/* Say what the button will actually do, so "complete" is never
+                    mistaken for "already complete". */}
+                {a.completedAt ? (
+                  <p className="mt-3 text-center text-[11px] font-semibold text-emerald-700">
+                    Completed {new Date(a.completedAt).toLocaleDateString("en-GB")} — the tenancy is
+                    active and the room is marked occupied. The tenant now sees every stage as done.
+                  </p>
+                ) : a.stageIndex === lastStage && !needsDocsToAdvance ? (
+                  <p className="mt-3 text-center text-[11px] font-semibold text-gray-500">
+                    Final step. This creates the tenancy, marks the room occupied and emails the
+                    tenant. It can&apos;t be undone from here.
+                  </p>
+                ) : null}
+
                 {needsDocsToAdvance && (
                   <p className="mt-3 text-center text-[11px] font-semibold text-amber-600">
                     Upload at least one document (tenant or admin) below to advance past Referencing.

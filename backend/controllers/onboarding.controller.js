@@ -9,6 +9,7 @@ import Organization from "../models/Organization.js";
 import bcrypt from "bcrypt";
 import env from "../config/env.js";
 import { sendEmail } from "../utils/sendEmail.js";
+import { findRoomOccupant, roomTakenMessage } from "../utils/roomAvailability.js";
 
 // Generate a random temporary password for a newly-created applicant account.
 const generatePassword = () => {
@@ -262,6 +263,53 @@ export const getOnboardings = async (req, res) => {
     const applicants = await Onboarding.find(filter)
       .sort({ createdAt: -1 })
       .lean();
+
+    // Attach each applicant's profile photo. Onboarding and Tenant share no
+    // key, so the hop is email -> User -> Tenant. Additive only: applicants
+    // without a tenant account simply get an empty string.
+    const emails = [
+      ...new Set(applicants.map((a) => (a.email || "").toLowerCase()).filter(Boolean)),
+    ];
+
+    if (emails.length) {
+      const users = await User.find({ email: { $in: emails } })
+        .select("_id email")
+        .lean();
+
+      const profiles = users.length
+        ? await Tenant.find({ userId: { $in: users.map((u) => u._id) } })
+            .select("userId profileImage")
+            .lean()
+        : [];
+
+      const imageByUserId = new Map(profiles.map((p) => [String(p.userId), p.profileImage || ""]));
+      const imageByEmail = new Map(
+        users.map((u) => [u.email, imageByUserId.get(String(u._id)) || ""])
+      );
+
+      for (const applicant of applicants) {
+        applicant.profileImage = imageByEmail.get((applicant.email || "").toLowerCase()) || "";
+      }
+    }
+
+    // Attach the screening answers captured on the website request form. They
+    // live on the Lead the onboarding came from, reachable via `leadId`.
+    // Additive only: an onboarding created by hand has no lead, so it gets null.
+    const leadIds = [...new Set(applicants.map((a) => a.leadId).filter(Boolean).map(String))];
+
+    if (leadIds.length) {
+      const leads = await Lead.find({ _id: { $in: leadIds } })
+        .select("_id applicant")
+        .lean();
+
+      const applicantByLeadId = new Map(leads.map((l) => [String(l._id), l.applicant || null]));
+
+      for (const applicant of applicants) {
+        applicant.applicantDetails = applicant.leadId
+          ? applicantByLeadId.get(String(applicant.leadId)) || null
+          : null;
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -541,6 +589,22 @@ export const completeOnboarding = async (req, res) => {
 
     const t = applicant.tenancy || {};
 
+    // Refuse to move someone into a room that already has an active tenancy.
+    // This path used to mark the room OCCUPIED without ever checking, which is
+    // how two tenancies end up on one room.
+    if (t.roomId) {
+      const occupant = await findRoomOccupant({
+        roomId: t.roomId,
+        organizationId,
+      });
+      if (occupant) {
+        return res.status(409).json({
+          success: false,
+          message: roomTakenMessage(occupant),
+        });
+      }
+    }
+
     // Derive the fixed-term end from the start date + term (best-effort).
     const start = t.startDate ? new Date(t.startDate) : null;
     const validStart = start && !Number.isNaN(start.getTime()) ? start : null;
@@ -672,7 +736,15 @@ export const cancelOnboarding = async (req, res) => {
     if (applicant.leadId) {
       await Lead.updateOne(
         { _id: applicant.leadId, organizationId },
-        { $set: { status: "lost" } }
+        {
+          $set: {
+            status: "lost",
+            // This path bypasses the Kanban endpoint that asks the operator for
+            // a reason, so record why the lead was lost here instead.
+            lostReason: "Onboarding cancelled",
+            lostAt: new Date(),
+          },
+        }
       );
     }
 

@@ -46,6 +46,9 @@ export const createLead = async (req, res) => {
       assignedTo,
       status: status || "new",
       notes,
+      // A lead created straight into "lost" still records why, when given.
+      lostReason: status === "lost" ? String(req.body.lostReason ?? "").trim() : "",
+      lostAt: status === "lost" ? new Date() : null,
     });
 
     // Populate references before sending response
@@ -198,8 +201,28 @@ export const updateLead = async (req, res) => {
     if (roomId !== undefined) lead.roomId = roomId || null;
     if (budget !== undefined) lead.budget = Number(budget) || 0;
     if (assignedTo !== undefined) lead.assignedTo = assignedTo;
-    if (status !== undefined) lead.status = status;
     if (notes !== undefined) lead.notes = notes;
+
+    // Keep the lost reason in step with the stage, the same way the Kanban
+    // status endpoint does.
+    if (status !== undefined) {
+      lead.status = status;
+
+      if (status === "lost") {
+        const reason = String(req.body.lostReason ?? lead.lostReason ?? "").trim();
+        if (!reason) {
+          return res.status(400).json({
+            success: false,
+            message: "A reason is required when marking a lead as lost.",
+          });
+        }
+        lead.lostReason = reason;
+        lead.lostAt = lead.lostAt || new Date();
+      } else {
+        lead.lostReason = "";
+        lead.lostAt = null;
+      }
+    }
 
     await lead.save();
 
@@ -237,7 +260,7 @@ export const updateLead = async (req, res) => {
 export const updateLeadStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, lostReason } = req.body;
     const organizationId = req.user.organizationId;
 
     if (!status || !LEAD_STAGES.includes(status)) {
@@ -247,9 +270,25 @@ export const updateLeadStatus = async (req, res) => {
       });
     }
 
+    // Losing a lead has to say why. Moving back out of "lost" clears the reason
+    // so a live lead never carries a stale one.
+    const reason = String(lostReason ?? "").trim();
+
+    if (status === "lost" && !reason) {
+      return res.status(400).json({
+        success: false,
+        message: "A reason is required when marking a lead as lost.",
+      });
+    }
+
+    const update =
+      status === "lost"
+        ? { status, lostReason: reason, lostAt: new Date() }
+        : { status, lostReason: "", lostAt: null };
+
     const lead = await Lead.findOneAndUpdate(
       { _id: id, organizationId, isDeleted: false },
-      { status },
+      update,
       { new: true }
     )
       .populate("propertyId", "name")

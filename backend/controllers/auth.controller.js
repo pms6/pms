@@ -566,6 +566,12 @@ export const updateProfile = async (req, res) => {
       budget,
       moveInDate,
       organizationId,
+      // Renting preferences (mirrors the website request form).
+      nationality,
+      smoking,
+      occupancy,
+      pet,
+      minimumStayMonths,
     } = req.body;
 
     const updates = {};
@@ -581,6 +587,15 @@ export const updateProfile = async (req, res) => {
     if (budget !== undefined) updates.budget = budget;
     if (moveInDate !== undefined) updates.moveInDate = moveInDate;
     if (organizationId !== undefined) updates.organizationId = organizationId;
+    if (nationality !== undefined) updates.nationality = nationality;
+    if (smoking !== undefined) updates.smoking = smoking;
+    if (occupancy !== undefined) updates.occupancy = occupancy;
+    if (pet !== undefined) updates.pet = pet;
+    if (minimumStayMonths !== undefined) {
+      // "" from an unset <select> must clear the field, not fail the Number cast.
+      const n = Number(minimumStayMonths);
+      updates.minimumStayMonths = Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
+    }
 
     const profile = await Tenant.findOneAndUpdate(
       { userId: req.user._id },

@@ -42,17 +42,24 @@ export const createRoom = async (req, res) => {
       roomSize,
       bathroomType,
       monthlyRent,
+      rentPeriod,
       securityDeposit,
       holdingDeposit,
+      billsOption,
       billsIncluded,
       status,
       availableImmediately,
       availableFrom,
       minimumTenancy,
       maximumTenancy,
+      shortTermLets,
+      daysAvailable,
+      referencesRequired,
       roomAmenities,
       propertyAmenities,
       wifiSpeed,
+      preferences,
+      inventory,
       images,
       featured,
       isPublished,
@@ -108,17 +115,24 @@ export const createRoom = async (req, res) => {
       roomSize,
       bathroomType,
       monthlyRent,
+      rentPeriod: rentPeriod || "MONTHLY",
       securityDeposit,
       holdingDeposit,
+      billsOption: billsOption || "SOME",
       billsIncluded,
       status: status || "AVAILABLE",
       availableImmediately: availableImmediately || false,
       availableFrom: availableFrom || null,
       minimumTenancy: minimumTenancy || 6,
       maximumTenancy: maximumTenancy || null,
+      shortTermLets: shortTermLets || false,
+      daysAvailable: daysAvailable || "SEVEN_DAYS",
+      referencesRequired: referencesRequired === undefined ? null : referencesRequired,
       roomAmenities: roomAmenities || [],
       propertyAmenities: propertyAmenities || [],
       wifiSpeed,
+      preferences: preferences || {},
+      inventory: inventory || {},
       images: images || [],
       featured: featured || false,
       isPublished: isPublished !== undefined ? isPublished : true,
@@ -376,17 +390,24 @@ export const updateRoom = async (req, res) => {
       roomSize,
       bathroomType,
       monthlyRent,
+      rentPeriod,
       securityDeposit,
       holdingDeposit,
+      billsOption,
       billsIncluded,
       status,
       availableImmediately,
       availableFrom,
       minimumTenancy,
       maximumTenancy,
+      shortTermLets,
+      daysAvailable,
+      referencesRequired,
       roomAmenities,
       propertyAmenities,
       wifiSpeed,
+      preferences,
+      inventory,
       images,
       featured,
       isPublished,
@@ -406,17 +427,24 @@ export const updateRoom = async (req, res) => {
     if (roomSize !== undefined) room.roomSize = roomSize;
     if (bathroomType) room.bathroomType = bathroomType;
     if (monthlyRent) room.monthlyRent = monthlyRent;
+    if (rentPeriod) room.rentPeriod = rentPeriod;
     if (securityDeposit !== undefined) room.securityDeposit = securityDeposit;
     if (holdingDeposit !== undefined) room.holdingDeposit = holdingDeposit;
+    if (billsOption) room.billsOption = billsOption;
     if (billsIncluded) room.billsIncluded = { ...room.billsIncluded, ...billsIncluded };
     if (status) room.status = status;
     if (availableImmediately !== undefined) room.availableImmediately = availableImmediately;
     if (availableFrom !== undefined) room.availableFrom = availableFrom;
     if (minimumTenancy) room.minimumTenancy = minimumTenancy;
     if (maximumTenancy !== undefined) room.maximumTenancy = maximumTenancy;
+    if (shortTermLets !== undefined) room.shortTermLets = shortTermLets;
+    if (daysAvailable) room.daysAvailable = daysAvailable;
+    if (referencesRequired !== undefined) room.referencesRequired = referencesRequired;
     if (roomAmenities) room.roomAmenities = roomAmenities;
     if (propertyAmenities) room.propertyAmenities = propertyAmenities;
     if (wifiSpeed !== undefined) room.wifiSpeed = wifiSpeed;
+    if (preferences) room.preferences = { ...room.preferences, ...preferences };
+    if (inventory !== undefined) room.inventory = inventory;
     if (images) room.images = images;
     if (featured !== undefined) room.featured = featured;
     if (isPublished !== undefined) room.isPublished = isPublished;

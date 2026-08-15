@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Building2, Download, X, Bell, CalendarClock } from "lucide-react";
+import { Plus, Building2, Download, X, Bell, CalendarClock, FileText, Eye, ScrollText } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
 import api from "../../api/api";
 import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
+import { ExpiryBadge } from "../../Components/PropertyContract";
 
 const STATUS_TONE = { expired: "red", warning: "amber", valid: "green" };
 
@@ -18,6 +19,30 @@ const CATEGORIES = [
   "PAT",
   "Smoke Detector Test"
 ];
+
+// Contracts are not compliance certificates — they live on the Property record
+// (property.contract for the terms, property.documents[type=CONTRACT] for the
+// files). This is a display mode over that data, not a new certificate type.
+const CONTRACT_VIEW = "Property Contract";
+
+const AGREEMENT_LABEL = {
+  AST: "Assured Shorthold Tenancy",
+  COMPANY_LET: "Company Let",
+  LICENCE: "Licence",
+  LODGER: "Lodger Agreement",
+  OTHER: "Other",
+};
+
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-GB") : "—");
+const fmtMoney = (n) =>
+  n || n === 0 ? `£${Number(n).toLocaleString("en-GB")}` : "—";
+
+// A property counts as having a contract if it has terms or a contract file.
+const contractDocs = (p) =>
+  (p?.documents || []).filter((d) => d.type === "CONTRACT");
+const hasContract = (p) =>
+  Boolean(p?.contract?.startDate || p?.contract?.endDate || p?.contract?.rentAmount) ||
+  contractDocs(p).length > 0;
 
 const FIELD = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
 const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
@@ -308,6 +333,13 @@ export default function AdminCompliance() {
     a.click();
   };
 
+  // Properties with a contract, honouring the property filter above.
+  const contractProperties = properties.filter(
+    (p) => hasContract(p) && (!propertyFilter || p._id === propertyFilter)
+  );
+
+  const showingContracts = selectedCategory === CONTRACT_VIEW;
+
   // Fixed filtering logic
   const filteredRows = list.filter((item) => {
     const matchStatus = !statusFilter || item.status === statusFilter;
@@ -369,10 +401,15 @@ export default function AdminCompliance() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-2">
-        {["All", ...CATEGORIES].map((cat) => {
+      <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2">
+        {["All", ...CATEGORIES, CONTRACT_VIEW].map((cat) => {
           const isSelected = selectedCategory === cat;
-          const count = cat === "All" ? stats.total : (stats.byCategory[cat] || 0);
+          const count =
+            cat === "All"
+              ? stats.total
+              : cat === CONTRACT_VIEW
+              ? contractProperties.length
+              : (stats.byCategory[cat] || 0);
 
           return (
             <button
@@ -397,6 +434,19 @@ export default function AdminCompliance() {
 
       {loading ? (
         <div className="bg-white border border-gray-100 rounded-2xl p-10 text-center text-gray-400">Loading metrics data…</div>
+      ) : showingContracts ? (
+        contractProperties.length === 0 ? (
+          <div className="bg-white border border-gray-100 rounded-2xl p-10 text-center text-gray-400">
+            No property contracts on record. Contracts are set on the property itself — add one
+            under Properties, and it will appear here.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {contractProperties.map((p) => (
+              <ContractCard key={p._id} property={p} />
+            ))}
+          </div>
+        )
       ) : filteredRows.length === 0 ? (
         <div className="bg-white border border-gray-100 rounded-2xl p-10 text-center text-gray-400">No matching tracking data detected.</div>
       ) : (
@@ -466,6 +516,107 @@ export default function AdminCompliance() {
           onSave={createCompliance}
         />
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Property contract — read-only view of what the Property record holds */
+/* ------------------------------------------------------------------ */
+
+function ContractTerm({ label, value }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{label}</p>
+      <p className="text-sm font-bold text-[#0F253B] mt-0.5 break-words">{value || "—"}</p>
+    </div>
+  );
+}
+
+function ContractCard({ property }) {
+  const c = property.contract || {};
+  const docs = contractDocs(property);
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-2 min-w-0">
+          <ScrollText size={16} className="text-[#F47C3C] shrink-0" />
+          <h3 className="font-bold text-[#0F253B] truncate">{property.name}</h3>
+          <Badge tone="gray">{AGREEMENT_LABEL[c.agreementType] || c.agreementType || "—"}</Badge>
+          <ExpiryBadge contract={c} />
+        </div>
+        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+          {docs.length} document{docs.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <ContractTerm label="Start" value={fmtDate(c.startDate)} />
+        <ContractTerm label="End" value={fmtDate(c.endDate)} />
+        <ContractTerm
+          label="Rent"
+          value={
+            c.rentAmount
+              ? `${fmtMoney(c.rentAmount)} ${(c.rentPeriod || "MONTHLY").toLowerCase()}`
+              : ""
+          }
+        />
+        <ContractTerm label="Notice" value={c.noticeMonths ? `${c.noticeMonths} month${c.noticeMonths === 1 ? "" : "s"}` : ""} />
+        <ContractTerm label="Deposit" value={c.depositAmount ? fmtMoney(c.depositAmount) : ""} />
+        <ContractTerm label="Deposit scheme" value={c.depositScheme === "NONE" ? "" : c.depositScheme} />
+        <ContractTerm label="Landlord" value={c.landlordName} />
+        <ContractTerm label="Tenant" value={c.tenantName} />
+      </div>
+
+      {c.rollsToPeriodic && (
+        <p className="mt-3 text-xs font-medium text-gray-500">
+          Rolls into a periodic tenancy at the end of the fixed term.
+        </p>
+      )}
+
+      {c.notes && <p className="mt-3 text-sm text-gray-600 font-medium">{c.notes}</p>}
+
+      <div className="mt-4 pt-4 border-t border-gray-50">
+        {docs.length === 0 ? (
+          <p className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-300">
+            <FileText size={12} /> No contract file uploaded on this property.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {docs.map((d, i) => (
+              <span
+                key={d.url || i}
+                className="inline-flex items-center gap-2 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2"
+              >
+                <FileText size={13} className="text-gray-400 shrink-0" />
+                <span className="text-xs font-bold text-[#0F253B] truncate max-w-[200px]">
+                  {d.name || "Contract"}
+                </span>
+                <a
+                  href={d.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="View"
+                  className="inline-flex items-center gap-1 text-[10px] font-bold text-[#F47C3C] hover:underline"
+                >
+                  <Eye size={11} /> View
+                </a>
+                <a
+                  href={d.url}
+                  download={d.name || true}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Download"
+                  className="text-gray-400 hover:text-[#0F253B]"
+                >
+                  <Download size={12} />
+                </a>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

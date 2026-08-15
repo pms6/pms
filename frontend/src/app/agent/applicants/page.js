@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useState } from "react";
+import { Plus, Pencil, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
+import { applicantEntries } from "../../Shared/applicant";
 import api from "../../api/api";
 
 const REF_STATUS = ["pending", "passed", "failed"];
@@ -103,6 +104,16 @@ export default function AgentApplicants() {
   const [error, setError] = useState("");
   const [refFilter, setRefFilter] = useState("");
   const [modal, setModal] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+
+  // The screening answers live on the applicant's lead. `leadId` may arrive
+  // populated or as a bare id, so fall back to the leads already in state.
+  const answersFor = (a) => {
+    const lead =
+      (a.leadId && typeof a.leadId === "object" ? a.leadId : null) ||
+      leads.find((l) => l._id === (a.leadId?._id || a.leadId));
+    return applicantEntries(lead?.applicant);
+  };
 
   useEffect(() => {
     api.get("/leads", { params: { limit: 100 } }).then((r) => setLeads(r.data.data)).catch(() => {});
@@ -162,6 +173,7 @@ export default function AgentApplicants() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
+                <th className="px-5 py-3 w-8" />
                 <th className="px-5 py-3">Name</th>
                 <th className="px-5 py-3">Lead</th>
                 <th className="px-5 py-3">References</th>
@@ -172,25 +184,66 @@ export default function AgentApplicants() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={7} className="px-5 py-10 text-center text-gray-400">Loading…</td></tr>
               ) : items.length === 0 ? (
-                <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-400">No applicants yet</td></tr>
+                <tr><td colSpan={7} className="px-5 py-10 text-center text-gray-400">No applicants yet</td></tr>
               ) : (
-                items.map((a) => (
-                  <tr key={a._id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                    <td className="px-5 py-3 font-bold text-[#0F253B]">{a.name}</td>
-                    <td className="px-5 py-3 text-gray-500">{a.leadId?.name || "—"}</td>
-                    <td className="px-5 py-3"><Badge tone={REF_TONE[a.referenceStatus] || "gray"}>{a.referenceStatus}</Badge></td>
-                    <td className="px-5 py-3"><Badge tone={ONB_TONE[a.onboardingStatus] || "gray"}>{a.onboardingStatus.replace("_", " ")}</Badge></td>
-                    <td className="px-5 py-3 text-gray-500">{a.holdingDeposit ? `£${a.holdingDeposit}` : "—"}</td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => setModal(a)} className="p-2 text-gray-400 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg"><Pencil size={16} /></button>
-                        <button onClick={() => remove(a)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                items.map((a) => {
+                  const answers = answersFor(a);
+                  const isOpen = expanded === a._id;
+
+                  return (
+                    <Fragment key={a._id}>
+                      <tr className="border-b border-gray-50 hover:bg-gray-50/50">
+                        <td className="px-5 py-3">
+                          {answers.length > 0 && (
+                            <button
+                              onClick={() => setExpanded(isOpen ? null : a._id)}
+                              title={isOpen ? "Hide applicant details" : "Show applicant details"}
+                              className="text-gray-400 hover:text-[#F47C3C]"
+                            >
+                              {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-5 py-3 font-bold text-[#0F253B]">{a.name}</td>
+                        <td className="px-5 py-3 text-gray-500">{a.leadId?.name || "—"}</td>
+                        <td className="px-5 py-3"><Badge tone={REF_TONE[a.referenceStatus] || "gray"}>{a.referenceStatus}</Badge></td>
+                        <td className="px-5 py-3"><Badge tone={ONB_TONE[a.onboardingStatus] || "gray"}>{a.onboardingStatus.replace("_", " ")}</Badge></td>
+                        <td className="px-5 py-3 text-gray-500">{a.holdingDeposit ? `£${a.holdingDeposit}` : "—"}</td>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => setModal(a)} className="p-2 text-gray-400 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg"><Pencil size={16} /></button>
+                            <button onClick={() => remove(a)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {isOpen && (
+                        <tr className="border-b border-gray-50 bg-gray-50/50">
+                          <td />
+                          <td colSpan={6} className="px-5 py-4">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">
+                              Applicant details
+                            </p>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                              {answers.map((ans) => (
+                                <div key={ans.key} className="min-w-0">
+                                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                                    {ans.label}
+                                  </p>
+                                  <p className="text-sm font-bold text-[#0F253B] mt-0.5 break-words">
+                                    {ans.value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })
               )}
             </tbody>
           </table>

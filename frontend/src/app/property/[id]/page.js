@@ -500,6 +500,16 @@ function EnquiryModal({ property, room, onClose }) {
     preferredDate: "",
     preferredTime: "",
     message: "",
+    // Applicant screening answers.
+    age: "",
+    gender: "",
+    smoking: "",
+    occupancy: "",
+    workStatus: "",
+    minimumStayMonths: "",
+    nationality: "",
+    moveInDate: "",
+    pet: "",
   }));
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
@@ -520,6 +530,15 @@ function EnquiryModal({ property, room, onClose }) {
         preferredDate: form.preferredDate,
         preferredTime: form.preferredTime,
         message: form.message,
+        age: form.age,
+        gender: form.gender,
+        smoking: form.smoking,
+        occupancy: form.occupancy,
+        workStatus: form.workStatus,
+        minimumStayMonths: form.minimumStayMonths,
+        nationality: form.nationality,
+        moveInDate: form.moveInDate,
+        pet: form.pet,
       });
       setSent(true);
       toast.success("Request sent! The operator will be in touch.");
@@ -535,7 +554,10 @@ function EnquiryModal({ property, room, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-start justify-between mb-4">
           <div>
             <h3 className="text-xl font-bold">Request a Viewing</h3>
@@ -627,6 +649,139 @@ function EnquiryModal({ property, room, onClose }) {
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
             />
+
+            {/* ---------- About you ---------- */}
+            <p className="pt-2 text-xs font-bold uppercase tracking-wide text-gray-400">
+              About you
+            </p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <ModalField label="Age">
+                <input
+                  type="number"
+                  min={16}
+                  max={120}
+                  className={field}
+                  placeholder="e.g. 27"
+                  required
+                  value={form.age}
+                  onChange={(e) => setForm({ ...form, age: e.target.value })}
+                />
+              </ModalField>
+              <ModalField label="Gender">
+                <select
+                  className={field}
+                  required
+                  value={form.gender}
+                  onChange={(e) => setForm({ ...form, gender: e.target.value })}
+                >
+                  <option value="">Select…</option>
+                  <option>Male</option>
+                  <option>Female</option>
+                  <option>Other</option>
+                  <option>Prefer not to say</option>
+                </select>
+              </ModalField>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <ModalField label="Nationality">
+                <input
+                  className={field}
+                  placeholder="e.g. British"
+                  required
+                  value={form.nationality}
+                  onChange={(e) => setForm({ ...form, nationality: e.target.value })}
+                />
+              </ModalField>
+              <ModalField label="Move-in date">
+                <input
+                  type="date"
+                  className={field}
+                  required
+                  value={form.moveInDate}
+                  onChange={(e) => setForm({ ...form, moveInDate: e.target.value })}
+                />
+              </ModalField>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <ModalField label="Single or couple">
+                <select
+                  className={field}
+                  required
+                  value={form.occupancy}
+                  onChange={(e) => setForm({ ...form, occupancy: e.target.value })}
+                >
+                  <option value="">Select…</option>
+                  <option>Single</option>
+                  <option>Couple</option>
+                </select>
+              </ModalField>
+              <ModalField label="Work status">
+                <select
+                  className={field}
+                  required
+                  value={form.workStatus}
+                  onChange={(e) => setForm({ ...form, workStatus: e.target.value })}
+                >
+                  <option value="">Select…</option>
+                  <option>Working</option>
+                  <option>Student</option>
+                </select>
+              </ModalField>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <ModalField label="Smoking">
+                <select
+                  className={field}
+                  required
+                  value={form.smoking}
+                  onChange={(e) => setForm({ ...form, smoking: e.target.value })}
+                >
+                  <option value="">Select…</option>
+                  <option>Yes</option>
+                  <option>No</option>
+                </select>
+              </ModalField>
+              <ModalField label="Pet">
+                <select
+                  className={field}
+                  required
+                  value={form.pet}
+                  onChange={(e) => setForm({ ...form, pet: e.target.value })}
+                >
+                  <option value="">Select…</option>
+                  <option>Yes</option>
+                  <option>No</option>
+                </select>
+              </ModalField>
+            </div>
+
+            <ModalField label="Minimum stay">
+              <select
+                className={field}
+                required
+                value={form.minimumStayMonths}
+                onChange={(e) => setForm({ ...form, minimumStayMonths: e.target.value })}
+              >
+                <option value="">Select…</option>
+                <option value="1">1 month</option>
+                <option value="3">3 months</option>
+                <option value="6">6 months</option>
+                <option value="9">9 months</option>
+                <option value="12">12 months</option>
+                <option value="18">18 months</option>
+                <option value="24">24 months</option>
+              </select>
+            </ModalField>
+
+            {/* ---------- Viewing preference ---------- */}
+            <p className="pt-2 text-xs font-bold uppercase tracking-wide text-gray-400">
+              Preferred viewing
+            </p>
+
             <div className="grid grid-cols-2 gap-3">
               <input
                 type="date"
@@ -669,6 +824,17 @@ function EnquiryModal({ property, room, onClose }) {
 /* ------------------------------------------------------------------ */
 /* Building blocks                                                     */
 /* ------------------------------------------------------------------ */
+
+/* Labelled wrapper for the enquiry form — selects and date inputs show no
+   placeholder, so they need a visible label to stay readable. */
+function ModalField({ label, children }) {
+  return (
+    <label className="block">
+      <span className="block mb-1 text-xs font-semibold text-gray-500">{label}</span>
+      {children}
+    </label>
+  );
+}
 
 function titleCase(s) {
   if (!s) return "";

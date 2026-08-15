@@ -11,6 +11,7 @@ import mongoose from "mongoose";
 // --- ADD THESE IMPORTS ---
 import bcrypt from "bcryptjs"; // or "bcrypt" depending on what you use
 import { sendEmail } from "../utils/sendEmail.js";
+import { findRoomOccupant, roomTakenMessage } from "../utils/roomAvailability.js";
 
 // Friendly gender label from the Tenant enum (MALE/FEMALE/OTHER/PREFER_NOT_SAY).
 const GENDER_LABEL = {
@@ -188,6 +189,56 @@ export const getMyRoom = async (req, res) => {
         uploadedAt: d.uploadedAt || null,
       }));
 
+    // The property-level agreement, so the tenant can read the terms they are
+    // signed up to and open the signed document.
+    //
+    // Withheld for HMOs on purpose: an HMO is let room by room, so
+    // property.contract is not this tenant's agreement — showing it would put
+    // another occupier's name and rent in front of them. Their own agreement
+    // belongs on their onboarding documents above.
+    let contract = null;
+    let contractDocuments = [];
+
+    if (tenancy.propertyId) {
+      const property = await Property.findOne({
+        _id: tenancy.propertyId,
+        organizationId: tenancy.organizationId,
+      })
+        .select("rentalType contract documents")
+        .lean();
+
+      if (property && property.rentalType !== "HMO") {
+        const c = property.contract || {};
+        const hasTerms = Boolean(c.startDate || c.endDate || c.rentAmount);
+
+        contractDocuments = (property.documents || [])
+          .filter((d) => d.type === "CONTRACT" && d.url)
+          .map((d) => ({
+            name: d.name || "Tenancy Agreement",
+            url: d.url,
+            uploadedAt: d.uploadedAt || null,
+          }));
+
+        if (hasTerms || contractDocuments.length) {
+          // Only the terms that concern the tenant. Reminder settings and
+          // internal notes stay operator-side.
+          contract = {
+            agreementType: c.agreementType || "",
+            startDate: c.startDate || null,
+            endDate: c.endDate || null,
+            rentAmount: c.rentAmount ?? null,
+            rentPeriod: c.rentPeriod || "MONTHLY",
+            noticeMonths: c.noticeMonths ?? null,
+            depositScheme: c.depositScheme || "NONE",
+            depositAmount: c.depositAmount ?? null,
+            landlordName: c.landlordName || "",
+            tenantName: c.tenantName || "",
+            rollsToPeriodic: c.rollsToPeriodic !== false,
+          };
+        }
+      }
+    }
+
     return res.status(200).json({
       success: true,
       data: {
@@ -203,6 +254,8 @@ export const getMyRoom = async (req, res) => {
           ? { name: org.name || "", logo: org.logo || "", phone: org.phone || "" }
           : null,
         documents,
+        contract,
+        contractDocuments,
       },
     });
   } catch (error) {
@@ -445,6 +498,16 @@ export const createTenancy = async (req, res) => {
 
     if (!property) return res.status(404).json({ success: false, message: "Property not found." });
     if (!room) return res.status(404).json({ success: false, message: "Room not found." });
+
+    // The room must actually be free. Verifying the room *exists* is not enough
+    // — without this two tenancies can sit on the same room at the same time.
+    const occupant = await findRoomOccupant({
+      roomId: payload.roomId,
+      organizationId,
+    });
+    if (occupant) {
+      return res.status(409).json({ success: false, message: roomTakenMessage(occupant) });
+    }
 
     // Update tenant org if needed
     if (payload.tenantId) {

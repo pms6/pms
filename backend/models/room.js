@@ -94,9 +94,25 @@ const roomSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Whether monthlyRent is advertised per calendar month or per week.
+    // The stored figure is always the one the landlord typed for that period.
+    rentPeriod: {
+      type: String,
+      enum: ["MONTHLY", "WEEKLY"],
+      default: "MONTHLY",
+    },
+
     securityDeposit: Number,
 
     holdingDeposit: Number,
+
+    // Headline answer to "Bills included?". SOME means defer to the individual
+    // flags in billsIncluded below; YES/NO set them all one way.
+    billsOption: {
+      type: String,
+      enum: ["YES", "NO", "SOME"],
+      default: "SOME",
+    },
 
     billsIncluded: {
       electricity: {
@@ -154,6 +170,24 @@ const roomSchema = new mongoose.Schema(
     },
 
     maximumTenancy: Number,
+
+    // Short term lets considered (roughly 1 week to 3 months).
+    shortTermLets: {
+      type: Boolean,
+      default: false,
+    },
+
+    daysAvailable: {
+      type: String,
+      enum: ["SEVEN_DAYS", "WEEKDAYS", "WEEKENDS"],
+      default: "SEVEN_DAYS",
+    },
+
+    // null = not answered.
+    referencesRequired: {
+      type: Boolean,
+      default: null,
+    },
 
     // ============================
     // Amenities
@@ -234,6 +268,78 @@ const roomSchema = new mongoose.Schema(
     listingCode: {
       type: String,
       unique: true,
+    },
+
+    // ============================
+    // Preferences for new flatmate
+    //
+    // Advertised preferences only. Note that some of these (notably gender)
+    // cannot lawfully be used to discriminate by a live-out landlord.
+    // ============================
+
+    preferences: {
+      smoking: {
+        type: String,
+        enum: ["NO_PREFERENCE", "YES", "NO"],
+        default: "NO_PREFERENCE",
+      },
+      gender: {
+        type: String,
+        enum: ["ANY", "MALE", "FEMALE"],
+        default: "ANY",
+      },
+      occupation: {
+        type: String,
+        enum: ["STUDENTS_ONLY", "NO_STUDENTS", "ALL"],
+        default: "ALL",
+      },
+      pets: {
+        type: String,
+        enum: ["NO_PREFERENCE", "YES", "NO"],
+        default: "NO",
+      },
+      minAge: Number,
+      maxAge: Number,
+      language: String,
+      couplesWelcome: {
+        type: Boolean,
+        default: false,
+      },
+      vegetarianPreferred: {
+        type: Boolean,
+        default: false,
+      },
+    },
+
+    // ============================
+    // Inventory
+    //
+    // Schedule of condition for this room. The property's own inventory covers
+    // shared and communal items.
+    // ============================
+
+    inventory: {
+      checkedOn: Date,
+      checkedBy: String,
+      items: [
+        {
+          item: String,
+          location: String,
+          quantity: {
+            type: Number,
+            default: 1,
+            min: 0,
+          },
+          condition: {
+            type: String,
+            enum: ["NEW", "GOOD", "FAIR", "POOR"],
+            default: "GOOD",
+          },
+          // Replacement value per unit, used for check-out deductions.
+          price: Number,
+          notes: String,
+        },
+      ],
     },
 
     // ============================

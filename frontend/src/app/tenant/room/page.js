@@ -16,6 +16,24 @@ const fmtDate = (d) =>
 const fmtMoney = (n) =>
   `£${Number(n || 0).toLocaleString("en-GB", { maximumFractionDigits: 0 })}`;
 
+// Mirrors the agreement types on Property.contract.
+const AGREEMENT_LABEL = {
+  AST: "Assured Shorthold Tenancy",
+  COMPANY_LET: "Company Let",
+  LICENCE: "Licence",
+  LODGER: "Lodger Agreement",
+  OTHER: "Other",
+};
+
+function Term({ label, value }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</p>
+      <p className="mt-0.5 break-words text-sm font-bold text-slate-900">{value || "—"}</p>
+    </div>
+  );
+}
+
 const Page = () => {
   const [room, setRoom] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -119,6 +137,86 @@ const Page = () => {
                     </>
                   )}
                 </p>
+              </section>
+            )}
+
+            {/* Tenancy agreement — the property contract the operator holds.
+                Withheld for HMOs server-side, since there the agreement is per
+                room and lives on the tenant's own onboarding documents. */}
+            {room.contract && (
+              <section className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <h4 className="text-sm font-semibold text-slate-900">Your Tenancy Agreement</h4>
+                  {room.contract.agreementType && (
+                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-600">
+                      {AGREEMENT_LABEL[room.contract.agreementType] || room.contract.agreementType}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <Term label="Start" value={fmtDate(room.contract.startDate)} />
+                  <Term label="End" value={fmtDate(room.contract.endDate)} />
+                  <Term
+                    label="Rent"
+                    value={
+                      room.contract.rentAmount
+                        ? `£${Number(room.contract.rentAmount).toLocaleString("en-GB")} ${(room.contract.rentPeriod || "MONTHLY").toLowerCase()}`
+                        : "—"
+                    }
+                  />
+                  <Term
+                    label="Notice"
+                    value={
+                      room.contract.noticeMonths
+                        ? `${room.contract.noticeMonths} month${room.contract.noticeMonths === 1 ? "" : "s"}`
+                        : "—"
+                    }
+                  />
+                  <Term
+                    label="Deposit"
+                    value={
+                      room.contract.depositAmount
+                        ? `£${Number(room.contract.depositAmount).toLocaleString("en-GB")}`
+                        : "—"
+                    }
+                  />
+                  <Term
+                    label="Deposit Scheme"
+                    value={
+                      room.contract.depositScheme && room.contract.depositScheme !== "NONE"
+                        ? room.contract.depositScheme
+                        : "—"
+                    }
+                  />
+                  <Term label="Landlord" value={room.contract.landlordName || "—"} />
+                  <Term label="Tenant" value={room.contract.tenantName || "—"} />
+                </div>
+
+                {room.contract.rollsToPeriodic && (
+                  <p className="mt-3 text-xs text-slate-500">
+                    Rolls into a periodic tenancy at the end of the fixed term.
+                  </p>
+                )}
+
+                {room.contractDocuments?.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap gap-2">
+                    {room.contractDocuments.map((d, i) => (
+                      <a
+                        key={d.url || i}
+                        href={d.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 transition hover:bg-slate-100"
+                      >
+                        <FileText className="h-4 w-4 shrink-0 text-orange-500" />
+                        <span className="truncate max-w-[220px] text-xs font-bold text-slate-900">
+                          {d.name || "Tenancy Agreement"}
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                )}
               </section>
             )}
 

@@ -10,6 +10,7 @@ import routes from "./routes/index.js";
 import cookieParser from "cookie-parser";
 import cron from "node-cron";
 import { sendAllPendingReminders } from "./cranjob/complianceReminder.js";
+import { sendAllContractReminders } from "./cranjob/contractReminder.js";
 
 const app = express();
 
@@ -50,6 +51,12 @@ cron.schedule("0 8 * * *", async () => {
   console.log("Running compliance reminders...");
   const result = await sendAllPendingReminders();
   console.log(`Reminders sent: ${result.sentCount}, Errors: ${result.errors.length}`);
+
+  console.log("Running contract expiry reminders...");
+  const contracts = await sendAllContractReminders();
+  console.log(
+    `Contract reminders sent: ${contracts.sentCount}, Skipped: ${contracts.skipped}, Errors: ${contracts.errors.length}`
+  );
 });
 
 // Routes

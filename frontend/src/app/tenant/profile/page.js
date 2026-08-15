@@ -14,6 +14,13 @@ const EMPTY_FORM = {
   occupation: "",
   bio: "",
   interests: [],
+  // Renting preferences — same answers the website request form asks for.
+  nationality: "",
+  moveInDate: "",
+  minimumStayMonths: "",
+  occupancy: "",
+  smoking: "",
+  pet: "",
 };
 
 // Map the stored tenant profile → the shape this form works with.
@@ -26,6 +33,12 @@ const profileToForm = (p) => ({
   occupation: p?.jobTitle || "",
   bio: p?.about || "",
   interests: Array.isArray(p?.interests) ? p.interests : [],
+  nationality: p?.nationality || "",
+  moveInDate: p?.moveInDate ? String(p.moveInDate).slice(0, 10) : "",
+  minimumStayMonths: p?.minimumStayMonths ? String(p.minimumStayMonths) : "",
+  occupancy: p?.occupancy || "",
+  smoking: p?.smoking || "",
+  pet: p?.pet || "",
 });
 
 export default function ProfilePage() {
@@ -84,6 +97,12 @@ export default function ProfilePage() {
         jobTitle: form.occupation,
         about: form.bio,
         interests: form.interests,
+        nationality: form.nationality,
+        moveInDate: form.moveInDate || null,
+        minimumStayMonths: form.minimumStayMonths,
+        occupancy: form.occupancy,
+        smoking: form.smoking,
+        pet: form.pet,
       });
       setStatus({ type: "success", message: "Profile saved successfully." });
     } catch (err) {
@@ -220,6 +239,82 @@ export default function ProfilePage() {
             </select>
           </div>
 
+          <Input
+            label="Nationality"
+            name="nationality"
+            value={form.nationality}
+            onChange={handleChange}
+          />
+
+        </div>
+
+        {/* Renting Preferences */}
+        <div className="mt-8 sm:mt-10">
+          <h2 className="text-lg sm:text-xl font-bold text-[#0F253B] mb-1">
+            Renting Preferences
+          </h2>
+          <p className="text-sm text-gray-500 mb-4 sm:mb-5">
+            The same details operators ask for when you request a viewing.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+            <Input
+              label="Preferred Move-in Date"
+              type="date"
+              name="moveInDate"
+              value={form.moveInDate}
+              onChange={handleChange}
+            />
+
+            <Select
+              label="Minimum Stay"
+              name="minimumStayMonths"
+              value={form.minimumStayMonths}
+              onChange={handleChange}
+              options={[
+                ["1", "1 month"],
+                ["3", "3 months"],
+                ["6", "6 months"],
+                ["9", "9 months"],
+                ["12", "12 months"],
+                ["18", "18 months"],
+                ["24", "24 months"],
+              ]}
+            />
+
+            <Select
+              label="Single or Couple"
+              name="occupancy"
+              value={form.occupancy}
+              onChange={handleChange}
+              options={[
+                ["SINGLE", "Single"],
+                ["COUPLE", "Couple"],
+              ]}
+            />
+
+            <Select
+              label="Smoking"
+              name="smoking"
+              value={form.smoking}
+              onChange={handleChange}
+              options={[
+                ["YES", "Yes"],
+                ["NO", "No"],
+              ]}
+            />
+
+            <Select
+              label="Pet"
+              name="pet"
+              value={form.pet}
+              onChange={handleChange}
+              options={[
+                ["YES", "Yes"],
+                ["NO", "No"],
+              ]}
+            />
+          </div>
         </div>
 
         {/* Profile Type */}
@@ -349,6 +444,26 @@ function Input({ label, ...props }) {
         {...props}
         className="w-full border rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#F47C3C] outline-none"
       />
+    </div>
+  );
+}
+
+// `options` is a list of [value, label] pairs.
+function Select({ label, options, ...props }) {
+  return (
+    <div>
+      <label className="block text-sm font-semibold mb-2">{label}</label>
+      <select
+        {...props}
+        className="w-full border rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#F47C3C] outline-none"
+      >
+        <option value="">Select…</option>
+        {options.map(([value, text]) => (
+          <option key={value} value={value}>
+            {text}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, X, Clock, MapPin, User, CheckCircle, XCircle, Phone, Mail } from "lucide-react";
+import { Plus, X, Clock, MapPin, User, CheckCircle, XCircle, Phone, Mail, CalendarClock } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
+import RescheduleModal from "../../Shared/RescheduleModal";
 import api from "@/app/api/api";
 import { useAuth } from "@/app/Context/AuthContext";
 
@@ -71,6 +72,24 @@ const useViewingsData = (filter = "") => {
     }
   };
 
+  const rescheduleViewing = async (id, payload) => {
+    const res = await api.patch(`/viewings/${id}/reschedule`, payload);
+    const updated = res.data?.data || res.data;
+    setAllViewings(prev => prev.map(v => v._id === id ? updated : v));
+    return updated;
+  };
+
+  const respondToRequest = async (id, action, note = "") => {
+    try {
+      const res = await api.patch(`/viewings/${id}/reschedule-request/respond`, { action, note });
+      const updated = res.data?.data || res.data;
+      setAllViewings(prev => prev.map(v => v._id === id ? updated : v));
+      return updated;
+    } catch (error) {
+      alert(error.response?.data?.message || "Failed to respond to the request");
+    }
+  };
+
   useEffect(() => {
     const init = async () => {
       setInitialLoading(true);
@@ -95,7 +114,9 @@ const useViewingsData = (filter = "") => {
     viewingsLoading, 
     initialLoading, 
     createViewing,
-    updateViewingStatus 
+    updateViewingStatus,
+    rescheduleViewing,
+    respondToRequest
   };
 };
 
@@ -205,7 +226,8 @@ export default function AdminViewings() {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
 
-  const { viewings, leads, properties, allRooms, viewingsLoading, initialLoading, createViewing, updateViewingStatus } = useViewingsData(filter);
+  const { viewings, leads, properties, allRooms, viewingsLoading, initialLoading, createViewing, updateViewingStatus, rescheduleViewing, respondToRequest } = useViewingsData(filter);
+  const [rescheduling, setRescheduling] = useState(null);
 
   const days = [...new Set(viewings.map(v => v.date))].sort();
 
@@ -261,6 +283,16 @@ export default function AdminViewings() {
                           <div className="flex items-center gap-3">
                             <div className="font-semibold text-lg text-[#0F253B]">{v.lead?.name || v.lead}</div>
                             <Badge tone={STATUS_TONE[v.status]} className="capitalize">{v.status}</Badge>
+                            {v.rescheduleHistory?.length > 0 && (
+                              <span
+                                title={v.rescheduleHistory
+                                  .map((h) => `${h.fromDate} ${h.fromTime} → ${h.toDate} ${h.toTime}${h.reason ? ` (${h.reason})` : ""}`)
+                                  .join("\n")}
+                                className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5"
+                              >
+                                Rescheduled {v.rescheduleHistory.length}×
+                              </span>
+                            )}
                           </div>
 
                           <div className="mt-2 text-sm text-gray-600 flex items-center gap-1.5">
@@ -286,6 +318,33 @@ export default function AdminViewings() {
                               )}
                             </div>
                           )}
+                          {v.rescheduleRequest?.status === "pending" && (
+                            <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                              <p className="text-xs font-bold text-amber-800">
+                                Tenant requested {v.rescheduleRequest.requestedDate} at{" "}
+                                {v.rescheduleRequest.requestedTime}
+                              </p>
+                              {v.rescheduleRequest.reason && (
+                                <p className="mt-0.5 text-xs text-amber-700 font-medium">
+                                  {v.rescheduleRequest.reason}
+                                </p>
+                              )}
+                              <div className="mt-2 flex gap-2">
+                                <button
+                                  onClick={() => respondToRequest(v._id, "approve")}
+                                  className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-green-700"
+                                >
+                                  Approve &amp; move
+                                </button>
+                                <button
+                                  onClick={() => respondToRequest(v._id, "decline")}
+                                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-100"
+                                >
+                                  Decline
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex flex-col items-end gap-2">
@@ -293,6 +352,13 @@ export default function AdminViewings() {
 
                           {v.status === "scheduled" && (
                             <div className="flex gap-1 mt-2">
+                              <button
+                                onClick={() => setRescheduling(v)}
+                                className="p-2 text-[#F47C3C] hover:bg-orange-50 rounded-xl transition-colors"
+                                title="Reschedule"
+                              >
+                                <CalendarClock size={20} />
+                              </button>
                               <button 
                                 onClick={() => updateViewingStatus(v._id, "done")}
                                 className="p-2 text-green-600 hover:bg-green-50 rounded-xl transition-colors"
@@ -319,6 +385,17 @@ export default function AdminViewings() {
 
           {viewings.length === 0 && <p className="text-center py-20 text-gray-400 text-lg">No viewings found.</p>}
         </div>
+      )}
+
+      {rescheduling && (
+        <RescheduleModal
+          viewing={rescheduling}
+          onClose={() => setRescheduling(null)}
+          onConfirm={async (payload) => {
+            await rescheduleViewing(rescheduling._id, payload);
+            setRescheduling(null);
+          }}
+        />
       )}
 
       {open && (

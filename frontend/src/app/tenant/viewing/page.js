@@ -54,6 +54,7 @@ export default function TenantViewingsPage() {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("scheduled");
   const [cancellingId, setCancellingId] = useState(null);
+  const [requesting, setRequesting] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -92,6 +93,14 @@ export default function TenantViewingsPage() {
     } finally {
       setCancellingId(null);
     }
+  };
+
+  // The tenant proposes; an operator approves or declines. Errors are thrown so
+  // the dialog can show them and keep the entered slot.
+  const requestReschedule = async (id, payload) => {
+    const res = await api.patch(`/viewings/my/${id}/reschedule-request`, payload);
+    const updated = res.data?.data;
+    setViewings((xs) => xs.map((v) => (v._id === id ? { ...v, ...updated } : v)));
   };
 
   return (
@@ -196,27 +205,193 @@ export default function TenantViewingsPage() {
                       )}
                     </div>
                     {v.notes && <p className="mt-2 text-sm text-slate-500">{v.notes}</p>}
+                    <RequestState request={v.rescheduleRequest} />
                   </div>
 
                   {v.status === "scheduled" && (
-                    <button
-                      onClick={() => cancel(v._id)}
-                      disabled={cancellingId === v._id}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-red-50 px-4 py-2 text-sm font-bold text-red-600 transition hover:bg-red-100 disabled:opacity-50"
-                    >
-                      {cancellingId === v._id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Ban className="h-4 w-4" />
-                      )}
-                      Cancel
-                    </button>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        onClick={() => setRequesting(v)}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 transition hover:bg-amber-100"
+                      >
+                        <CalendarDays className="h-4 w-4" />
+                        {v.rescheduleRequest?.status === "pending" ? "Change request" : "Reschedule"}
+                      </button>
+                      <button
+                        onClick={() => cancel(v._id)}
+                        disabled={cancellingId === v._id}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-red-50 px-4 py-2 text-sm font-bold text-red-600 transition hover:bg-red-100 disabled:opacity-50"
+                      >
+                        {cancellingId === v._id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Ban className="h-4 w-4" />
+                        )}
+                        Cancel
+                      </button>
+                    </div>
                   )}
                 </div>
               );
             })}
           </div>
         )}
+      </div>
+
+      {requesting && (
+        <RescheduleRequestModal
+          viewing={requesting}
+          onClose={() => setRequesting(null)}
+          onConfirm={async (payload) => {
+            await requestReschedule(requesting._id, payload);
+            setRequesting(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Reschedule request                                                  */
+/* ------------------------------------------------------------------ */
+
+// Shown on the card once a request exists, so the tenant knows where it stands.
+function RequestState({ request }) {
+  if (!request?.status) return null;
+
+  const when = formatWhen(request.requestedDate, request.requestedTime);
+
+  if (request.status === "pending") {
+    return (
+      <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
+        <span className="font-bold">Reschedule requested</span> — you asked for {when}. Waiting for
+        the operator to confirm.
+      </p>
+    );
+  }
+
+  if (request.status === "declined") {
+    return (
+      <p className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+        <span className="font-bold">Reschedule declined</span> — your request for {when} wasn&apos;t
+        accepted.{request.responseNote ? ` ${request.responseNote}` : ""} Your original slot stands.
+      </p>
+    );
+  }
+
+  return (
+    <p className="mt-2 rounded-xl bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
+      <span className="font-bold">Reschedule approved</span> — moved to {when}.
+      {request.responseNote ? ` ${request.responseNote}` : ""}
+    </p>
+  );
+}
+
+function RescheduleRequestModal({ viewing, onClose, onConfirm }) {
+  const [date, setDate] = useState(viewing?.rescheduleRequest?.requestedDate || viewing?.date || "");
+  const [time, setTime] = useState(viewing?.rescheduleRequest?.requestedTime || viewing?.time || "");
+  const [reason, setReason] = useState(viewing?.rescheduleRequest?.reason || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const unchanged = date === viewing?.date && time === viewing?.time;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!date || !time || unchanged) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onConfirm({ date, time, reason: reason.trim() });
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to send your request.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const field =
+    "w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none transition focus:bg-white focus:ring-2 focus:ring-amber-400";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-xl font-bold text-slate-900">Request a new time</h3>
+        <p className="mt-1 text-sm text-slate-500">
+          {viewing?.property?.name} — currently {formatWhen(viewing?.date, viewing?.time)}. The
+          operator has to confirm before your viewing moves.
+        </p>
+
+        {error && (
+          <div className="mt-4 rounded border-l-4 border-red-500 bg-red-50 p-3 text-xs font-bold text-red-700">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={submit} className="mt-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Preferred date
+              </label>
+              <input
+                type="date"
+                className={field}
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Preferred time
+              </label>
+              <input
+                type="time"
+                className={field}
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Reason (optional)
+            </label>
+            <textarea
+              rows={3}
+              className={`${field} resize-none`}
+              placeholder="Let them know why…"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || unchanged}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-500 py-3 text-sm font-bold text-white transition hover:bg-amber-600 disabled:opacity-50"
+            >
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {unchanged ? "Pick a new slot" : "Send Request"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

@@ -3,7 +3,16 @@ import mongoose from "mongoose";
 // A single rent charge (one billing period) for a tenancy. Charges are generated
 // month-by-month from the tenancy's rent + start date, and move to "paid" when
 // the tenant records a payment.
-export const RENT_CHARGE_STATUS = ["upcoming", "due", "overdue", "paid"];
+// "awaiting_confirmation" sits between a tenant saying they have paid and an
+// operator confirming it. A tenant must never be able to move a charge straight
+// to "paid" — that would let them clear their own balance without paying.
+export const RENT_CHARGE_STATUS = [
+  "upcoming",
+  "due",
+  "overdue",
+  "awaiting_confirmation",
+  "paid",
+];
 
 const rentChargeSchema = new mongoose.Schema(
   {
@@ -42,6 +51,18 @@ const rentChargeSchema = new mongoose.Schema(
     // How the payment was recorded (Card / Direct Debit / …) and when.
     method: { type: String, trim: true, default: "" },
     paidDate: { type: Date, default: null },
+
+    // The tenant's unverified claim that they have paid.
+    claimedAt: { type: Date, default: null },
+    claimedMethod: { type: String, trim: true, default: "" },
+
+    // Who confirmed it, once an operator did.
+    confirmedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    confirmedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

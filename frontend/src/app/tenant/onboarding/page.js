@@ -274,7 +274,9 @@ export default function TenantOnboardingPage() {
                       <p className="truncate text-sm font-bold text-slate-900">{o.tenancy?.property || "Property"}</p>
                       <p className="truncate text-[11px] font-medium text-slate-400">
                         {o.tenancy?.room && o.tenancy.room !== "—" ? `${o.tenancy.room} · ` : ""}
-                        {stages[o.stageIndex] || "Application"} · {pct}%
+                        {o.completedAt
+                          ? "Complete"
+                          : `${stages[o.stageIndex] || "Application"} · ${pct}%`}
                       </p>
                     </div>
                     <ChevronRight className={`h-4 w-4 ${active ? "text-indigo-500" : "text-slate-300"}`} />
@@ -360,12 +362,17 @@ export default function TenantOnboardingPage() {
               <h2 className="mb-8 text-xl font-bold">Onboarding Progress</h2>
               <div className="space-y-8">
                 {stages.map((title, index) => {
-                  const status =
-                    index < selected.stageIndex
-                      ? "completed"
-                      : index === selected.stageIndex
-                      ? "progress"
-                      : "pending";
+                  // Once onboarding is completed every stage is done, including
+                  // the last one. Without this the final stage stays "In
+                  // Progress" forever, because completing sets stageIndex to
+                  // the last index and `index === stageIndex` reads as current.
+                  const status = selected.completedAt
+                    ? "completed"
+                    : index < selected.stageIndex
+                    ? "completed"
+                    : index === selected.stageIndex
+                    ? "progress"
+                    : "pending";
                   return (
                     <div key={title} className="relative flex gap-4">
                       <div className="flex flex-col items-center">

@@ -80,7 +80,16 @@ export default uploadToCloudinary;
 // resource type for PDFs to succeed.
 // ---------------------------------------------------------------------------
 const DOC_MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
-const ALLOWED_DOC_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/jpg", "image/webp"];
+const ALLOWED_DOC_TYPES = [
+  "application/pdf",
+  // Word documents — contracts and tenancy agreements are usually .docx.
+  "application/msword", // .doc
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+];
 
 export const uploadFileToCloudinary = async (file) => {
   if (!cloudName || !uploadPreset) {
@@ -91,7 +100,7 @@ export const uploadFileToCloudinary = async (file) => {
   }
   const isAllowed = ALLOWED_DOC_TYPES.includes(file.type) || file.type.startsWith("image/");
   if (!isAllowed) {
-    throw new Error("Only PDF or image documents are allowed");
+    throw new Error("Only PDF, Word (.doc/.docx) or image documents are allowed");
   }
   if (file.size > DOC_MAX_FILE_SIZE) {
     throw new Error("File size must be less than 15MB");

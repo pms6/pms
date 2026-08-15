@@ -37,6 +37,31 @@ const tenantSchema = new mongoose.Schema(
 
     budget: Number,
     moveInDate: Date,
+
+    // Renting preferences — the same answers the website request form asks for,
+    // so a tenant can keep them on their profile rather than retyping each time.
+    // Age, gender and work status are already covered by birthdate, gender and
+    // occupationType above.
+    nationality: String,
+    smoking: {
+      type: String,
+      enum: ["", "YES", "NO"],
+      default: "",
+    },
+    occupancy: {
+      type: String,
+      enum: ["", "SINGLE", "COUPLE"],
+      default: "",
+    },
+    pet: {
+      type: String,
+      enum: ["", "YES", "NO"],
+      default: "",
+    },
+    minimumStayMonths: {
+      type: Number,
+      default: null,
+    },
   },
   { timestamps: true }
 );

@@ -255,6 +255,12 @@ export const updateProperty = async (req, res) => {
       address,
       location,
       description,
+      transport,
+      livingRoom,
+      amenities,
+      contract,
+      inventory,
+      documents,
       coverImage,
       gallery,
       status,
@@ -298,6 +304,12 @@ export const updateProperty = async (req, res) => {
     if (address) property.address = address;
     if (location) property.location = location;
     if (description !== undefined) property.description = description;
+    if (transport !== undefined) property.transport = transport;
+    if (livingRoom !== undefined) property.livingRoom = livingRoom;
+    if (amenities !== undefined) property.amenities = amenities;
+    if (contract) property.contract = { ...property.contract, ...contract };
+    if (inventory !== undefined) property.inventory = inventory;
+    if (documents !== undefined) property.documents = documents;
     if (coverImage !== undefined) property.coverImage = coverImage;
     if (gallery) property.gallery = gallery;
     if (status) property.status = status;

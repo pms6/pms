@@ -18,6 +18,7 @@ import paymentRoutes from "./payment.route.js"
 import publicRoutes from "./public.Route.js"
 import auditRoutes from "./auditLog.Route.js"
 import tenantRoute from "./tenant.Route.js"
+import expenseRoutes from "./expense.route.js"
 
 const router = express.Router();
 
@@ -50,6 +51,7 @@ router.use("/inspections", inspectionRoutes);
 router.use("/compliance", complianceRoutes);
 router.use("/welcome-pack", welcomePackRoutes);
 router.use("/payments", paymentRoutes);
+router.use("/expenses", expenseRoutes);
 router.use("/audit", auditRoutes);
 
 export default router;

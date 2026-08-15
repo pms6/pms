@@ -1,8 +1,20 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, X, Mail, Phone, PoundSterling, Trash2, Loader2 } from "lucide-react";
+import {
+  Plus,
+  X,
+  Mail,
+  Phone,
+  PoundSterling,
+  Trash2,
+  Loader2,
+  Eye,
+} from "lucide-react";
 import { PageHeader } from "../../Shared/ui";
+import { applicantEntries } from "../../Shared/applicant";
+import LeadDetailModal from "../../Shared/LeadDetailModal";
+import LostReasonModal from "../../Shared/LostReasonModal";
 import { LEAD_STAGES } from "../_data/dummy";
 import api from "../../api/api";
 
@@ -19,6 +31,7 @@ const SOURCES = ["Rightmove", "Zoopla", "SpareRoom", "OpenRent", "Website", "Ref
 function initials(name) {
   return (name || "?").split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
 }
+
 
 // Helper to get room display name
 const getRoomDisplayName = (room) => {
@@ -232,6 +245,8 @@ export default function AdminLeads() {
   const [error, setError] = useState("");
   const [draggingId, setDraggingId] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
+  const [detailLead, setDetailLead] = useState(null);
+  const [lostPrompt, setLostPrompt] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -254,23 +269,44 @@ export default function AdminLeads() {
     load();
   }, [load]);
 
-  const changeStatus = async (lead, status) => {
+  const changeStatus = async (lead, status, lostReason = "") => {
     const prev = lead.status;
-    setLeads((ls) => ls.map((l) => (l._id === lead._id ? { ...l, status } : l)));
+    const prevReason = lead.lostReason || "";
+    setLeads((ls) =>
+      ls.map((l) =>
+        l._id === lead._id
+          ? { ...l, status, lostReason: status === "lost" ? lostReason : "" }
+          : l
+      )
+    );
 
     try {
-      await api.patch(`/leads/${lead._id}/status`, { status });
+      await api.patch(`/leads/${lead._id}/status`, { status, lostReason });
     } catch (err) {
-      setLeads((ls) => ls.map((l) => (l._id === lead._id ? { ...l, status: prev } : l)));
+      setLeads((ls) =>
+        ls.map((l) =>
+          l._id === lead._id ? { ...l, status: prev, lostReason: prevReason } : l
+        )
+      );
       alert(err.response?.data?.message || "Failed to move lead");
+      return false;
     }
+
+    return true;
+  };
+
+  // Losing a lead has to say why — the backend rejects "lost" with no reason —
+  // so that one move goes through the prompt first.
+  const requestStatusChange = (lead, status) => {
+    if (status === "lost") setLostPrompt({ lead, status });
+    else changeStatus(lead, status);
   };
 
   const handleDrop = (colKey) => {
     const lead = leads.find((l) => l._id === draggingId);
     setDragOverCol(null);
     setDraggingId(null);
-    if (lead && lead.status !== colKey) changeStatus(lead, colKey);
+    if (lead && lead.status !== colKey) requestStatusChange(lead, colKey);
   };
 
   const removeLead = async (lead) => {
@@ -359,9 +395,16 @@ export default function AdminLeads() {
                     // Build full location string
                     const propertyName = property?.name || l.interestedIn || "Any Property";
                     
-                    const locationInfo = roomDisplay 
+                    const locationInfo = roomDisplay
                       ? `${roomDisplay} • ${propertyName}`
                       : propertyName;
+
+                    // The card has room for a handful of chips; the rest live
+                    // in the detail modal.
+                    const answers = applicantEntries(l.applicant);
+                    const chips = answers.filter((a) =>
+                      ["age", "gender", "workStatus", "occupancy"].includes(a.key)
+                    );
 
                     return (
                       <div
@@ -389,6 +432,13 @@ export default function AdminLeads() {
                             <p className="text-[11px] text-gray-400 font-medium">{l.source}</p>
                           </div>
                           <button
+                            onClick={() => setDetailLead(l)}
+                            title="View details"
+                            className="text-gray-300 hover:text-[#F47C3C] opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                          >
+                            <Eye size={15} />
+                          </button>
+                          <button
                             onClick={() => removeLead(l)}
                             className="text-gray-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all shrink-0"
                           >
@@ -413,6 +463,37 @@ export default function AdminLeads() {
                           )}
                         </div>
 
+                        {chips.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2.5">
+                            {chips.map((c) => (
+                              <span
+                                key={c.key}
+                                title={`${c.label}: ${c.value}`}
+                                className="text-[10px] font-bold text-gray-500 bg-gray-100 rounded-full px-2 py-0.5"
+                              >
+                                {c.value}
+                              </span>
+                            ))}
+                            {answers.length > chips.length && (
+                              <button
+                                onClick={() => setDetailLead(l)}
+                                className="text-[10px] font-bold text-[#F47C3C] bg-[#F47C3C]/10 rounded-full px-2 py-0.5 hover:bg-[#F47C3C]/20 transition-all"
+                              >
+                                +{answers.length - chips.length} more
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {l.status === "lost" && l.lostReason && (
+                          <p
+                            title={l.lostReason}
+                            className="mt-2.5 text-[11px] font-medium text-red-700 bg-red-50 border-l-2 border-red-300 rounded-r px-2 py-1.5 line-clamp-2"
+                          >
+                            {l.lostReason}
+                          </p>
+                        )}
+
                         <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-50 text-gray-300">
                           {l.email && (
                             <a href={`mailto:${l.email}`} title={l.email}>
@@ -433,7 +514,7 @@ export default function AdminLeads() {
 
                         <select
                           value={l.status}
-                          onChange={(e) => changeStatus(l, e.target.value)}
+                          onChange={(e) => requestStatusChange(l, e.target.value)}
                           className="mt-3 w-full text-[11px] font-bold text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-[#F47C3C] outline-none cursor-pointer capitalize"
                         >
                           {LEAD_STAGES.map((s) => (
@@ -456,6 +537,22 @@ export default function AdminLeads() {
             );
           })}
         </div>
+      )}
+
+      {lostPrompt && (
+        <LostReasonModal
+          lead={lostPrompt.lead}
+          onCancel={() => setLostPrompt(null)}
+          onConfirm={async (reason) => {
+            // Keep the prompt open if the save failed, so the reason isn't lost.
+            const ok = await changeStatus(lostPrompt.lead, lostPrompt.status, reason);
+            if (ok) setLostPrompt(null);
+          }}
+        />
+      )}
+
+      {detailLead && (
+        <LeadDetailModal lead={detailLead} onClose={() => setDetailLead(null)} />
       )}
 
       {open && (

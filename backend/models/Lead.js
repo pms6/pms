@@ -69,6 +69,24 @@ const leadSchema = new mongoose.Schema(
       default: 0,
     },
 
+    // ============================
+    // Applicant details
+    // ============================
+    // Screening answers collected on the website request form. Optional at the
+    // schema level so leads created by an operator on the Leads board (which
+    // asks none of this) still save.
+    applicant: {
+      age: { type: Number, default: null },
+      gender: { type: String, trim: true, default: "" },
+      smoking: { type: String, enum: ["", "Yes", "No"], default: "" },
+      occupancy: { type: String, enum: ["", "Single", "Couple"], default: "" },
+      workStatus: { type: String, enum: ["", "Working", "Student"], default: "" },
+      minimumStayMonths: { type: Number, default: null },
+      nationality: { type: String, trim: true, default: "" },
+      moveInDate: { type: String, default: "" }, // YYYY-MM-DD
+      pet: { type: String, enum: ["", "Yes", "No"], default: "" },
+    },
+
     assignedTo: {
       type: String,
       trim: true,
@@ -82,6 +100,19 @@ const leadSchema = new mongoose.Schema(
     },
 
     notes: String,
+
+    // Why the lead was lost. Captured when it moves into the "lost" stage and
+    // cleared if it moves back out, so a live lead never carries a stale reason.
+    lostReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    lostAt: {
+      type: Date,
+      default: null,
+    },
 
     // ============================
     // Soft delete

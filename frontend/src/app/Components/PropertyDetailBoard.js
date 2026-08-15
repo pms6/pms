@@ -1,15 +1,15 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { ArrowLeft, MapPin, UserRound, Plus, Pencil, Trash2, BedDouble, PoundSterling, Users, X, CalendarClock, Wrench, ClipboardCheck, ShieldCheck, Star, ChevronRight, Loader2, UploadCloud } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
+import { ArrowLeft, MapPin, UserRound, Plus, Pencil, Trash2, BedDouble, PoundSterling, Users, CalendarClock, Wrench, ClipboardCheck, ShieldCheck, Star, ChevronRight } from "lucide-react";
 import { Badge } from "../Shared/ui";
 import TenancyPanel from "../admin/_components/TenancyPanel";
+import { ContractSection, ContractModal } from "./PropertyContract";
 import RoomManagementPanel from "../admin/_components/RoomManagementPanel";
 import { RENTAL_TYPES, LETTING_STATUS_TONE, viewings, maintenance, inspections, deposits, reviews, money } from "../admin/_data/dummy";
 import api from "@/app/api/api";
-import uploadToCloudinary from "@/app/utils/uploadToCloudinary";
 
 // API Service for Property Details
 const apiService = {
@@ -33,26 +33,6 @@ const apiService = {
     }
   },
 
-  async createRoom(roomData) {
-    try {
-      const response = await api.post('/rooms', roomData);
-      return response.data;
-    } catch (error) {
-      console.error('Create room error:', error);
-      throw error.response?.data || error;
-    }
-  },
-
-  async updateRoom(id, roomData) {
-    try {
-      const response = await api.put(`/rooms/${id}`, roomData);
-      return response.data;
-    } catch (error) {
-      console.error('Update room error:', error);
-      throw error.response?.data || error;
-    }
-  },
-
   async deleteRoom(id) {
     try {
       const response = await api.delete(`/rooms/${id}`);
@@ -69,6 +49,16 @@ const apiService = {
       return response.data;
     } catch (error) {
       console.error('Update room status error:', error);
+      throw error.response?.data || error;
+    }
+  },
+
+  async updateProperty(id, payload) {
+    try {
+      const response = await api.put(`/properties/${id}`, payload);
+      return response.data;
+    } catch (error) {
+      console.error('Update property error:', error);
       throw error.response?.data || error;
     }
   }
@@ -100,310 +90,6 @@ const typeTone = (v) => {
   const found = RENTAL_TYPES.find((t) => t.v === v);
   return found?.tone || "orange";
 };
-
-const FIELD = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
-const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
-
-// Room Modal Component (matches backend schema)
-function RoomModal({ initial, propertyId, onClose, onSave }) {
-  const isEdit = Boolean(initial);
-  const [form, setForm] = useState({
-    title: initial?.title || "",
-    roomName: initial?.roomName || "",
-    roomNumber: initial?.roomNumber || "",
-    description: initial?.description || "",
-    monthlyRent: initial?.monthlyRent ?? "",
-    securityDeposit: initial?.securityDeposit ?? "",
-    holdingDeposit: initial?.holdingDeposit ?? "",
-    status: initial?.status || "AVAILABLE",
-    availableFrom: initial?.availableFrom ? new Date(initial.availableFrom).toISOString().split('T')[0] : "",
-    floor: initial?.floor || "",
-    furnished: initial?.furnished !== undefined ? initial.furnished : true,
-    billsIncluded: initial?.billsIncluded || { gas: false, electricity: false, water: false, internet: false },
-    roomType: initial?.roomType || "STANDARD",
-    occupancy: initial?.occupancy || "SINGLE",
-    notes: initial?.notes || "",
-  });
-  const [images, setImages] = useState(initial?.images || []);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [uploadingImages, setUploadingImages] = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const inputRef = useRef(null);
-
-  const set = (k) => (e) => {
-    const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
-    setForm({ ...form, [k]: value });
-  };
-
-  // Upload selected files to Cloudinary and append them as { url, alt } objects
-  // (matching the Room model's images schema).
-  const handleImageUpload = async (files) => {
-    if (!files || files.length === 0) return;
-    setUploadingImages(true);
-    setError("");
-    try {
-      const uploaded = [];
-      for (const file of Array.from(files)) {
-        if (!file.type.startsWith("image/")) continue;
-        if (file.size > 10 * 1024 * 1024) {
-          setError(`File ${file.name} exceeds 10MB limit`);
-          continue;
-        }
-        const result = await uploadToCloudinary(file);
-        uploaded.push({ url: result.url, alt: file.name });
-      }
-      if (uploaded.length) setImages((prev) => [...prev, ...uploaded]);
-    } catch (err) {
-      setError(err.message || "Failed to upload images");
-    } finally {
-      setUploadingImages(false);
-    }
-  };
-
-  const removeImage = (index) => setImages((prev) => prev.filter((_, i) => i !== index));
-
-  const onDrop = (e) => {
-    e.preventDefault();
-    setDragging(false);
-    handleImageUpload(e.dataTransfer.files);
-  };
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!form.roomName.trim()) {
-      setError("Room name is required");
-      return;
-    }
-    if (!form.monthlyRent || Number(form.monthlyRent) <= 0) {
-      setError("Monthly rent is required and must be greater than 0");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const roomData = {
-        propertyId,
-        title: form.title || form.roomName,
-        roomName: form.roomName.trim(),
-        roomNumber: form.roomNumber || undefined,
-        description: form.description || undefined,
-        roomType: form.roomType,
-        occupancy: form.occupancy,
-        furnished: form.furnished,
-        floor: form.floor || undefined,
-        monthlyRent: Number(form.monthlyRent),
-        securityDeposit: form.securityDeposit ? Number(form.securityDeposit) : undefined,
-        holdingDeposit: form.holdingDeposit ? Number(form.holdingDeposit) : undefined,
-        billsIncluded: form.billsIncluded,
-        status: form.status,
-        availableFrom: form.availableFrom || undefined,
-        notes: form.notes || undefined,
-        images,
-      };
-
-      let response;
-      if (isEdit && initial._id) {
-        response = await apiService.updateRoom(initial._id, roomData);
-      } else {
-        response = await apiService.createRoom(roomData);
-      }
-
-      // Transform response to match frontend room structure
-      const savedRoom = {
-        id: response.data._id,
-        _id: response.data._id,
-        name: response.data.roomName,
-        title: response.data.title,
-        rent: response.data.monthlyRent,
-        moneyHeld: response.data.securityDeposit || 0,
-        status: response.data.status,
-        tenant: response.data.currentTenant?.name || null,
-        availableFrom: response.data.availableFrom,
-        floor: response.data.floor,
-        furnished: response.data.furnished,
-        billsIncluded: response.data.billsIncluded,
-        notes: response.data.notes,
-        image: response.data.images?.[0]?.url || null,
-        images: response.data.images || [],
-        roomType: response.data.roomType,
-        occupancy: response.data.occupancy,
-        securityDeposit: response.data.securityDeposit,
-        holdingDeposit: response.data.holdingDeposit,
-        roomNumber: response.data.roomNumber,
-        _apiData: response.data
-      };
-
-      onSave(savedRoom);
-    } catch (err) {
-      setError(err.message || 'Failed to save room');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-xl font-bold text-[#0F253B]">{isEdit ? "Edit Room" : "Add Room"}</h3>
-          <button onClick={onClose} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
-        </div>
-        {error && <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">{error}</div>}
-        <form onSubmit={submit} className="space-y-4">
-          <div>
-            <label className={LABEL}>Room Name *</label>
-            <input className={FIELD} value={form.roomName} onChange={set("roomName")} placeholder="Room 1" required />
-          </div>
-          <div>
-            <label className={LABEL}>Room Title (optional)</label>
-            <input className={FIELD} value={form.title} onChange={set("title")} placeholder="e.g., Spacious Double Room" />
-          </div>
-          <div>
-            <label className={LABEL}>Room Number (optional)</label>
-            <input className={FIELD} value={form.roomNumber} onChange={set("roomNumber")} placeholder="e.g., 101, A1" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={LABEL}>Monthly Rent (£) *</label>
-              <input type="number" min="0" step="0.01" className={FIELD} value={form.monthlyRent} onChange={set("monthlyRent")} placeholder="650" required />
-            </div>
-            <div>
-              <label className={LABEL}>Security Deposit (£)</label>
-              <input type="number" min="0" step="0.01" className={FIELD} value={form.securityDeposit} onChange={set("securityDeposit")} placeholder="750" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={LABEL}>Room Type</label>
-              <select className={FIELD} value={form.roomType} onChange={set("roomType")}>
-                <option value="STANDARD">Standard</option>
-                <option value="ENSUITE">Ensuite</option>
-                <option value="STUDIO">Studio</option>
-                <option value="MASTER">Master</option>
-                <option value="DOUBLE">Double</option>
-                <option value="SINGLE">Single</option>
-              </select>
-            </div>
-            <div>
-              <label className={LABEL}>Occupancy</label>
-              <select className={FIELD} value={form.occupancy} onChange={set("occupancy")}>
-                <option value="SINGLE">Single</option>
-                <option value="DOUBLE">Double</option>
-                <option value="TWIN">Twin</option>
-                <option value="FAMILY">Family</option>
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={LABEL}>Status</label>
-              <select className={FIELD} value={form.status} onChange={set("status")}>
-                <option value="AVAILABLE">Available</option>
-                <option value="AVAILABLE_SOON">Available Soon</option>
-                <option value="RESERVED">Reserved</option>
-                <option value="OCCUPIED">Occupied</option>
-                <option value="MAINTENANCE">Maintenance</option>
-              </select>
-            </div>
-            <div>
-              <label className={LABEL}>Available From</label>
-              <input type="date" className={FIELD} value={form.availableFrom} onChange={set("availableFrom")} />
-            </div>
-          </div>
-          <div>
-            <label className={LABEL}>Floor</label>
-            <input className={FIELD} value={form.floor} onChange={set("floor")} placeholder="e.g., First, 2" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={LABEL}>Furnished</label>
-              <select className={FIELD} value={form.furnished ? "true" : "false"} onChange={(e) => setForm({ ...form, furnished: e.target.value === "true" })}>
-                <option value="true">Furnished</option>
-                <option value="false">Unfurnished</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className={LABEL}>Bills Included</label>
-            <div className="grid grid-cols-2 gap-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={form.billsIncluded.gas} onChange={(e) => setForm({ ...form, billsIncluded: { ...form.billsIncluded, gas: e.target.checked } })} />
-                Gas
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={form.billsIncluded.electricity} onChange={(e) => setForm({ ...form, billsIncluded: { ...form.billsIncluded, electricity: e.target.checked } })} />
-                Electricity
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={form.billsIncluded.water} onChange={(e) => setForm({ ...form, billsIncluded: { ...form.billsIncluded, water: e.target.checked } })} />
-                Water
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={form.billsIncluded.internet} onChange={(e) => setForm({ ...form, billsIncluded: { ...form.billsIncluded, internet: e.target.checked } })} />
-                Internet
-              </label>
-            </div>
-          </div>
-          <div>
-            <label className={LABEL}>Room Notes</label>
-            <textarea className={`${FIELD} min-h-24 resize-none`} value={form.notes} onChange={set("notes")} placeholder="Add room features, access notes, or viewing instructions" />
-          </div>
-
-          {/* Room Images (Cloudinary upload) */}
-          <div>
-            <label className={LABEL}>Room Images {uploadingImages && <Loader2 size={14} className="inline animate-spin ml-2" />}</label>
-            <div
-              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={onDrop}
-              onClick={() => inputRef.current?.click()}
-              className={`border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all ${dragging ? "border-[#F47C3C] bg-orange-50" : "border-gray-200 hover:border-[#F47C3C] hover:bg-gray-50"}`}
-            >
-              <div className="w-10 h-10 mx-auto rounded-xl bg-orange-50 text-[#F47C3C] flex items-center justify-center mb-2">
-                {uploadingImages ? <Loader2 size={20} className="animate-spin" /> : <UploadCloud size={20} />}
-              </div>
-              <p className="text-sm font-bold text-[#0F253B]">Drag &amp; drop images</p>
-              <p className="text-xs text-gray-400 font-medium">or click to browse (max 10MB each)</p>
-              <input
-                ref={inputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => handleImageUpload(e.target.files)}
-                disabled={uploadingImages}
-              />
-            </div>
-
-            {images.length > 0 && (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-3">
-                {images.map((im, i) => (
-                  <div key={im.url || i} className="relative group aspect-square rounded-xl overflow-hidden border border-gray-100">
-                    <img src={im.url} alt={im.alt || `room-${i}`} className="w-full h-full object-cover" />
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); removeImage(i); }}
-                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X size={12} />
-                    </button>
-                    {i === 0 && <span className="absolute bottom-1 left-1 text-[9px] font-bold bg-[#0F253B] text-white px-1.5 py-0.5 rounded">Cover</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <button type="submit" disabled={loading || uploadingImages} className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-            {(loading || uploadingImages) && <Loader2 size={18} className="animate-spin" />}
-            {loading ? 'Saving...' : uploadingImages ? 'Uploading Images...' : isEdit ? 'Save Room' : 'Add Room'}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
 
 // Info Component
 function Info({ label, value }) {
@@ -461,9 +147,14 @@ function RoomDetail({ room, property, onEdit, onManage }) {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Selected Room</p>
                 <h2 className="text-xl font-bold text-[#0F253B]">{room.name}</h2>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button onClick={onManage} className="px-3 py-1.5 bg-[#0F253B] hover:bg-[#1c3e5e] text-white text-xs font-bold rounded-lg">Manage</button>
-                <button onClick={onEdit} className="p-2 text-gray-400 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg" title="Edit room"><Pencil size={17} /></button>
+                <button
+                  onClick={onEdit}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-100 hover:bg-gray-50 text-[#0F253B] text-xs font-bold rounded-lg transition-all"
+                >
+                  <Pencil size={14} /> Edit Room
+                </button>
               </div>
             </div>
             <p className="text-2xl font-bold text-[#0F253B] mt-4">{room.rent ? money(room.rent) : "-"}<span className="text-xs font-medium text-gray-400">/mo</span></p>
@@ -533,14 +224,15 @@ function RoomDetail({ room, property, onEdit, onManage }) {
  */
 export default function PropertyDetailBoard({ basePath = "/admin/properties" }) {
   const { id } = useParams();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [property, setProperty] = useState(null);
   const [rooms, setRooms] = useState([]);
-  const [modal, setModal] = useState(null);
   const [selectedRoomId, setSelectedRoomId] = useState(null);
   const [tenancy, setTenancy] = useState(null);
   const [manageRoom, setManageRoom] = useState(null);
+  const [editingContract, setEditingContract] = useState(false);
 
   const fetchPropertyData = async () => {
     try {
@@ -568,6 +260,8 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
         description: propertyData.description,
         letting: propertyData.letting || null,
         block: propertyData.block || null,
+        contract: propertyData.contract || null,
+        documents: propertyData.documents || [],
         _apiData: propertyData
       };
 
@@ -625,17 +319,10 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const saveRoom = (room) => {
-    setRooms((prev) => {
-      const existing = prev.some((r) => r.id === room.id);
-      if (existing) {
-        return prev.map((r) => (r.id === room.id ? room : r));
-      }
-      return [...prev, room];
-    });
-    setSelectedRoomId(room.id);
-    setModal(null);
-  };
+  // Add/edit happen on their own pages now — navigating back remounts this
+  // board, so the list refetches rather than being patched in place.
+  const roomsHref = `${basePath}/${id}/rooms`;
+  const editRoom = (room) => router.push(`${roomsHref}/${room.id}`);
 
   const removeRoom = async (room) => {
     if (!confirm(`Delete ${room.name}?`)) return;
@@ -718,9 +405,17 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
 
   return (
     <div className="space-y-5">
-      <Link href={basePath} className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]">
-        <ArrowLeft size={16} /> Back to properties
-      </Link>
+      <div className="flex items-center justify-between gap-3">
+        <Link href={basePath} className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]">
+          <ArrowLeft size={16} /> Back to properties
+        </Link>
+        <Link
+          href={`${basePath}/${id}/edit`}
+          className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-100 hover:bg-gray-50 text-[#0F253B] font-bold text-sm rounded-xl transition-all"
+        >
+          <Pencil size={16} /> Edit Property
+        </Link>
+      </div>
 
       {/* Cover */}
       <div className="relative rounded-3xl overflow-hidden h-56 bg-gradient-to-br from-[#0F253B] to-[#1c3e5e]">
@@ -759,13 +454,18 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
         <>
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-[#0F253B]">Rooms <span className="text-gray-300 font-medium">({rooms.length})</span></h2>
-            <button onClick={() => setModal({})} className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
+            <Link href={`${roomsHref}/new`} className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
               <Plus size={18} /> Add Room
-            </button>
+            </Link>
           </div>
 
           {rooms.length === 0 ? (
-            <div className="text-center py-16 text-gray-400 font-medium border-2 border-dashed border-gray-100 rounded-2xl">No rooms yet — add your first room.</div>
+            <div className="text-center py-16 border-2 border-dashed border-gray-100 rounded-2xl">
+              <p className="text-gray-400 font-medium">No rooms yet — add your first room.</p>
+              <Link href={`${roomsHref}/new`} className="inline-block mt-4 px-6 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all">
+                Add Room
+              </Link>
+            </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {rooms.map((r) => (
@@ -789,7 +489,7 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
                     <p className="text-xs text-gray-400 font-medium mt-1">Held {money(r.moneyHeld || 0)}</p>
                     {r.tenant && <p className="text-xs text-[#0F253B] font-semibold mt-1 flex items-center gap-1"><UserRound size={12} className="text-[#F47C3C]" />{r.tenant}</p>}
                     <div className="mt-3 flex justify-end gap-1">
-                      <button onClick={(e) => { e.stopPropagation(); setModal(r); }} className="p-2 text-gray-400 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg"><Pencil size={15} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); editRoom(r); }} className="p-2 text-gray-400 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg"><Pencil size={15} /></button>
                       <button onClick={(e) => { e.stopPropagation(); removeRoom(r); }} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={15} /></button>
                     </div>
                   </div>
@@ -797,7 +497,7 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
               ))}
             </div>
           )}
-          {selectedRoom && <RoomDetail room={selectedRoom} property={property} onEdit={() => setModal(selectedRoom)} onManage={() => setManageRoom(selectedRoom)} />}
+          {selectedRoom && <RoomDetail room={selectedRoom} property={property} onEdit={() => editRoom(selectedRoom)} onManage={() => setManageRoom(selectedRoom)} />}
         </>
       ) : (
         /* Non-HMO → letting / settings summary */
@@ -827,6 +527,12 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
         </div>
       )}
 
+      {/* Contract */}
+      <ContractSection
+        property={property}
+        onEdit={() => setEditingContract(true)}
+      />
+
       {/* Active Tenancies */}
       {activeTenancies.length > 0 && (
         <div>
@@ -850,21 +556,24 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
         </div>
       )}
 
-      {modal !== null && (
-        <RoomModal
-          initial={modal.id ? (modal._apiData || modal) : null}
-          propertyId={property.id}
-          onClose={() => setModal(null)}
-          onSave={saveRoom}
-        />
-      )}
-
       {tenancy && (
         <TenancyPanel tenancy={tenancy} propertyName={property.name} onClose={() => setTenancy(null)} />
       )}
 
       {manageRoom && (
-        <RoomManagementPanel room={manageRoom} property={property} onEdit={() => setModal(manageRoom)} onClose={() => setManageRoom(null)} />
+        <RoomManagementPanel room={manageRoom} property={property} onEdit={() => editRoom(manageRoom)} onClose={() => setManageRoom(null)} />
+      )}
+
+      {editingContract && (
+        <ContractModal
+          property={property}
+          onClose={() => setEditingContract(false)}
+          onSave={async (payload) => {
+            await apiService.updateProperty(property._id, payload);
+            setEditingContract(false);
+            await fetchPropertyData();
+          }}
+        />
       )}
     </div>
   );

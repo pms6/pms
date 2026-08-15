@@ -281,6 +281,16 @@ export const createEnquiry = async (req, res) => {
       preferredDate,
       preferredTime,
       budget,
+      // Applicant screening answers from the website request form.
+      age,
+      gender,
+      smoking,
+      occupancy,
+      workStatus,
+      minimumStayMonths,
+      nationality,
+      moveInDate,
+      pet,
     } = req.body;
 
     if (!propertyId) {
@@ -348,12 +358,58 @@ export const createEnquiry = async (req, res) => {
       });
     }
 
+    // Applicant screening answers. Anything outside the allowed set is dropped
+    // rather than rejected — a stray value shouldn't cost the operator a lead.
+    const oneOf = (value, allowed) => {
+      const match = allowed.find(
+        (a) => a.toLowerCase() === String(value ?? "").trim().toLowerCase()
+      );
+      return match || "";
+    };
+    const positiveInt = (value) => {
+      const n = Number(value);
+      return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
+    };
+
+    const applicant = {
+      age: positiveInt(age),
+      gender: String(gender ?? "").trim(),
+      smoking: oneOf(smoking, ["Yes", "No"]),
+      occupancy: oneOf(occupancy, ["Single", "Couple"]),
+      workStatus: oneOf(workStatus, ["Working", "Student"]),
+      minimumStayMonths: positiveInt(minimumStayMonths),
+      nationality: String(nationality ?? "").trim(),
+      moveInDate: String(moveInDate ?? "").trim(),
+      pet: oneOf(pet, ["Yes", "No"]),
+    };
+
     // Fold the free-text viewing details into the lead's notes so the operator
     // sees everything on the existing Leads board (no schema change needed).
     const noteParts = [];
     if (message) noteParts.push(message);
     if (preferredDate) noteParts.push(`Preferred date: ${preferredDate}`);
     if (preferredTime) noteParts.push(`Preferred time: ${preferredTime}`);
+
+    // Mirror the applicant answers into notes too — the Leads board renders
+    // notes today but not the structured `applicant` fields.
+    const applicantLines = [
+      ["Age", applicant.age],
+      ["Gender", applicant.gender],
+      ["Smoking", applicant.smoking],
+      ["Single or couple", applicant.occupancy],
+      ["Work status", applicant.workStatus],
+      ["Minimum stay", applicant.minimumStayMonths ? `${applicant.minimumStayMonths} months` : ""],
+      ["Nationality", applicant.nationality],
+      ["Move-in date", applicant.moveInDate],
+      ["Pet", applicant.pet],
+    ].filter(([, value]) => value !== "" && value !== null);
+
+    if (applicantLines.length) {
+      noteParts.push(
+        ["Applicant details:", ...applicantLines.map(([k, v]) => `  ${k}: ${v}`)].join("\n")
+      );
+    }
+
     noteParts.push(`Submitted by account: ${req.user.email}`);
 
     const lead = await Lead.create({
@@ -369,6 +425,7 @@ export const createEnquiry = async (req, res) => {
       budget: budget ? Number(budget) : 0,
       status: "new",
       notes: noteParts.join("\n"),
+      applicant,
     });
 
     return res.status(201).json({

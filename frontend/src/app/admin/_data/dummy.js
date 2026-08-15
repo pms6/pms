@@ -43,6 +43,19 @@ export const RENTAL_TYPES = [
   { v: "Block", desc: "A block of units managed together", tone: "amber" },
 ];
 
+// The API stores rentalType as an enum (see models/Property.js); RENTAL_TYPES
+// above holds the labels the admin UI shows. Map between the two at the edges —
+// posting a label straight through fails the schema's enum validation.
+export const RENTAL_TYPE_API = {
+  "HMO": "HMO",
+  "Single Let": "SINGLE_LET",
+  "Short-term Let": "SHORT_TERM",
+  "Block": "BLOCK",
+};
+
+export const rentalTypeLabel = (apiValue) =>
+  RENTAL_TYPES.find((t) => RENTAL_TYPE_API[t.v] === apiValue)?.v || apiValue;
+
 export const TENANT_TYPES = ["ANY", "PROFESSIONAL", "STUDENT", "SOCIAL"];
 export const GUARANTOR_REQ = ["Not Required", "Sometimes Required", "Always Required"];
 export const LETTING_STATUS = ["Available", "Available Soon", "Occupied"];

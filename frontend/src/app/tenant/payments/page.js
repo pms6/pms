@@ -29,7 +29,8 @@ const fmtDate = (d) =>
       })
     : "—";
 
-const label = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+const LABELS = { awaiting_confirmation: "Awaiting confirmation" };
+const label = (s) => LABELS[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
 
 // "Rent (1 Jul)" style description from a due date.
 const chargeTitle = (d) =>
@@ -37,6 +38,7 @@ const chargeTitle = (d) =>
 
 const StatusIcon = ({ status }) => {
   if (status === "paid") return <CheckCircle className="text-emerald-500 w-4 h-4" />;
+  if (status === "awaiting_confirmation") return <Clock className="text-sky-500 w-4 h-4" />;
   if (status === "due" || status === "overdue")
     return <AlertCircle className="text-rose-500 w-4 h-4" />;
   return <Clock className="text-amber-500 w-4 h-4" />;
@@ -187,8 +189,10 @@ export default function RentPage() {
                           className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-indigo-700 disabled:opacity-50"
                         >
                           {payingId === item._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                          Pay now
+                          I've paid
                         </button>
+                      ) : item.status === "awaiting_confirmation" ? (
+                        <span className="text-xs font-medium text-sky-600">Reported — awaiting confirmation</span>
                       ) : item.status === "paid" ? (
                         <span className="text-xs font-medium text-slate-400">
                           {item.method ? `Paid · ${item.method}` : "Paid"}
@@ -229,7 +233,7 @@ export default function RentPage() {
                     className="mt-3 w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:opacity-50"
                   >
                     {payingId === item._id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                    Pay now
+                    I've paid
                   </button>
                 )}
               </div>
