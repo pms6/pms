@@ -1,6 +1,33 @@
 // controllers/inspectionController.js
 import Inspection from "../models/Inspection.js";
 
+// ---------------------------------------------------------------------------
+// Report payload sanitizers
+//
+// Findings and photos come straight from the inspector's report form, so drop
+// the empty rows and keep only the fields the schema knows about — otherwise a
+// stray key from the client ends up persisted alongside the real data.
+// ---------------------------------------------------------------------------
+const sanitizePhotos = (photos) =>
+  (Array.isArray(photos) ? photos : [])
+    .filter((photo) => photo?.url)
+    .map((photo) => ({
+      url: photo.url,
+      publicId: photo.publicId || "",
+      caption: photo.caption || "",
+      uploadedAt: photo.uploadedAt || new Date(),
+    }));
+
+const sanitizeFindings = (findings) =>
+  (Array.isArray(findings) ? findings : [])
+    .filter((finding) => finding?.item?.trim())
+    .map((finding) => ({
+      item: finding.item.trim(),
+      status: finding.status || "PASS",
+      comment: finding.comment || "",
+      photos: sanitizePhotos(finding.photos),
+    }));
+
 // =============================================
 // CREATE NEW INSPECTION
 // =============================================
@@ -108,6 +135,7 @@ export const getInspections = async (req, res) => {
       .populate("propertyId", "name propertyCode")
       .populate("roomId", "roomName roomNumber title")
       .populate("inspector", "name email")
+      .populate("completedBy", "name email")
       .sort({ date: 1 })
       .skip(skip)
       .limit(Number(limit));
@@ -151,7 +179,8 @@ export const getInspection = async (req, res) => {
     })
       .populate("propertyId", "name propertyCode address")
       .populate("roomId", "roomName roomNumber title")
-      .populate("inspector", "name email");
+      .populate("inspector", "name email")
+      .populate("completedBy", "name email");
 
     if (!inspection) {
       return res.status(404).json({
@@ -190,6 +219,15 @@ export const updateInspection = async (req, res) => {
     const { date, ...restData } = req.body;
     const updateData = { ...restData };
 
+    // Report fields are only touched when the client actually sends them, so a
+    // plain schedule edit (title/date/type/…) can't wipe a submitted report.
+    if (restData.findings !== undefined) {
+      updateData.findings = sanitizeFindings(restData.findings);
+    }
+    if (restData.photos !== undefined) {
+      updateData.photos = sanitizePhotos(restData.photos);
+    }
+
     if (date) {
       const inspectionDate = new Date(date);
       updateData.date = inspectionDate;
@@ -206,6 +244,7 @@ export const updateInspection = async (req, res) => {
       { path: "propertyId", select: "name propertyCode" },
       { path: "roomId", select: "roomName roomNumber" },
       { path: "inspector", select: "name email" },
+      { path: "completedBy", select: "name email" },
     ]);
 
     if (!inspection) {
@@ -281,24 +320,31 @@ export const completeInspection = async (req, res) => {
       });
     }
 
-    const { findings, notes } = req.body || {}; // Safe destructuring
+    // Safe destructuring — the report is optional, an inspection can be closed
+    // out with nothing but a status change.
+    const { findings, notes, photos, outcome } = req.body || {};
 
     const inspection = await Inspection.findOneAndUpdate(
-      { 
-        _id: id, 
-        organizationId: orgId, 
-        isDeleted: false 
+      {
+        _id: id,
+        organizationId: orgId,
+        isDeleted: false
       },
       {
         status: "COMPLETED",
-        findings: findings || [],        // Default to empty array
-        notes: notes || "",              // Default to empty string
+        findings: sanitizeFindings(findings),
+        photos: sanitizePhotos(photos),
+        notes: notes || "",
+        outcome: outcome || "",
+        completedAt: new Date(),
+        completedBy: req.user._id,
       },
-      { new: true }
+      { new: true, runValidators: true }
     ).populate([
-      { path: "propertyId", select: "name" },
-      { path: "roomId", select: "roomName" },
-      { path: "inspector", select: "name" },
+      { path: "propertyId", select: "name propertyCode" },
+      { path: "roomId", select: "roomName roomNumber title" },
+      { path: "inspector", select: "name email" },
+      { path: "completedBy", select: "name email" },
     ]);
 
     if (!inspection) {

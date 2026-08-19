@@ -1,6 +1,19 @@
 // models/Inspection.js
 import mongoose from "mongoose";
 
+// Photo evidence captured by the inspector. `publicId` is kept so the image can
+// be removed from Cloudinary later; `caption` labels what the shot shows
+// (e.g. "damp patch — rear bedroom ceiling").
+const photoSchema = new mongoose.Schema(
+  {
+    url: { type: String, required: true, trim: true },
+    publicId: { type: String, trim: true, default: "" },
+    caption: { type: String, trim: true, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 const inspectionSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -50,8 +63,29 @@ const inspectionSchema = new mongoose.Schema(
         item: String,
         status: { type: String, enum: ["PASS", "FAIL", "NEEDS_ATTENTION"] },
         comment: String,
+        // Per-finding evidence, separate from the general `photos` gallery.
+        photos: [photoSchema],
       },
     ],
+
+    // General photo evidence for the visit as a whole.
+    photos: [photoSchema],
+
+    // Overall verdict recorded when the report is submitted. Blank until then,
+    // which is why "" is a valid enum value.
+    outcome: {
+      type: String,
+      enum: ["", "PASS", "ACTION_REQUIRED", "FAIL"],
+      default: "",
+    },
+
+    // Report submission audit — set by completeInspection, preserved on later
+    // edits of the report so the original sign-off is not lost.
+    completedAt: { type: Date },
+    completedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
 
     // Reminder Support
     reminderSent: { type: Boolean, default: false },
