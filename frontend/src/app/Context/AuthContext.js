@@ -17,6 +17,18 @@ const normalizeUser = (user, profile) => {
   };
 };
 
+// Helper: store token so the interceptor can use it
+const persistToken = (token) => {
+  if (typeof window === "undefined") return;
+  if (token) {
+    localStorage.setItem("token", token);
+    api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+  } else {
+    localStorage.removeItem("token");
+    delete api.defaults.headers.common["Authorization"];
+  }
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -34,7 +46,9 @@ export const AuthProvider = ({ children }) => {
 
   // LOGIN — server sets the httpOnly cookie; we then hydrate from /auth/me.
   const login = async (email, password) => {
-    await api.post("/auth/login", { email, password });
+    const { data } = await api.post("/auth/login", { email, password });
+    // Backend returns token in body → store it so /me works even if cookie fails
+    persistToken(data.token);
     return loadMe();
   };
 
@@ -56,7 +70,8 @@ export const AuthProvider = ({ children }) => {
   // VERIFY OTP — activates the account, creates the profile, and logs the
   // user in (sets the cookie). We hydrate afterwards.
   const verifyOtp = async ({ email, otp, targetRole }) => {
-    await api.post("/auth/verify-otp", { email, otp, targetRole });
+    const { data } = await api.post("/auth/verify-otp", { email, otp, targetRole });
+    persistToken(data.token);
     return loadMe();
   };
 
@@ -95,21 +110,27 @@ export const AuthProvider = ({ children }) => {
     try {
       await api.post("/auth/logout");
     } catch {
-      // ignore network/logout errors; clear local state regardless
+      // ignore
     }
+    persistToken(null);
     setUser(null);
     setProfile(null);
   };
 
-  // Boot: restore the session from the cookie. If none, /auth/me 401s and we
-  // simply stay logged out.
+  // Boot: try to restore session
   useEffect(() => {
     let active = true;
     (async () => {
       try {
+        // If we already have a token in localStorage, make sure the header is set
+        const existing = localStorage.getItem("token");
+        if (existing) {
+          api.defaults.headers.common["Authorization"] = `Bearer ${existing}`;
+        }
         await loadMe();
       } catch {
         if (active) {
+          persistToken(null);
           setUser(null);
           setProfile(null);
         }
