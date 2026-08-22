@@ -1,4 +1,4 @@
-// routes/public.Route.js
+// routes/public.route.js
 //
 // Public marketing / listings API. These endpoints are intentionally NOT behind
 // `protect` so anonymous visitors can browse. The ONE exception is POST

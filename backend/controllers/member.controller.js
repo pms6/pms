@@ -96,6 +96,28 @@ export const MemberController = {
                         message: "User is already a member of this organization" 
                     });
                 }
+
+                // Removing a team member deletes the OrganizationMember row but
+                // leaves the User account behind. Re-inviting that address then
+                // lands here, and the invite used to send "you already have an
+                // account" — except the password was only ever shown in the
+                // original invite email, so nobody could log in.
+                //
+                // A user with no membership anywhere is exactly that orphan, so
+                // issue fresh credentials. Someone who IS a member of another
+                // organization keeps their existing password: they have a
+                // working login and it is not ours to reset.
+                const otherMemberships = await OrganizationMember.countDocuments({
+                    userId: user._id
+                });
+
+                if (otherMemberships === 0) {
+                    newPassword = generatePassword();
+                    const salt = await bcrypt.genSalt(env.bcryptSaltRounds);
+                    user.password = await bcrypt.hash(newPassword, salt);
+                    user.isVerified = true;
+                    await user.save();
+                }
             }
 
             // STEP 2: Create organization member record

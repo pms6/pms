@@ -2,6 +2,17 @@ import { sendAllPendingReminders } from "../cranjob/complianceReminder.js";
 import Compliance from "../models/Compliance.js";
 import Property from "../models/Property.js";
 import { resolveTenantProperty } from "../utils/tenantProperty.js";
+import { expiryState } from "../utils/reminders.js";
+
+// The stored `status` is only recomputed in the model's pre-save hook, so a
+// record nobody has touched since it was created still reports whatever it was
+// then. Recompute it on the way out so the dashboard badge, the filters and the
+// reminder emails all agree on what is expiring.
+const withLiveStatus = (doc) => {
+  const record = doc.toObject ? doc.toObject() : doc;
+  const { status, days } = expiryState(record.expiryDate, record.reminderDaysBefore);
+  return { ...record, status, daysUntilExpiry: days };
+};
 
 // GET the signed-in TENANT's compliance certificates — scoped to THEIR property
 // only (gas safety, EICR, EPC, etc.), never the whole organization's records.
@@ -21,7 +32,7 @@ export const getMyCompliance = async (req, res) => {
       .populate("propertyId", "name propertyCode address")
       .sort({ expiryDate: 1 });
 
-    res.json({ success: true, data: compliances });
+    res.json({ success: true, data: compliances.map(withLiveStatus) });
   } catch (error) {
     console.error("Get My Compliance Error:", error);
     res.status(500).json({ success: false, message: "Failed to load compliance documents." });
@@ -39,7 +50,7 @@ export const getCompliances = async (req, res) => {
 
     res.json({
       success: true,
-      data: compliances,
+      data: compliances.map(withLiveStatus),
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -103,14 +114,32 @@ export const createCompliance = async (req, res) => {
   }
 };
 
-// NEW: Send Reminders (for Cron Job)
+// Manual "Send Reminders" trigger from the admin compliance dashboard.
+//
+// Scoped to the caller's own organization — the unscoped sweep belongs to the
+// nightly cron job, and letting one admin fire it would mail every other
+// tenant's owner too. De-duplication is handled inside the job, so pressing
+// this twice in the same reminder window sends one email, not two.
 export const sendComplianceReminders = async (req, res) => {
   try {
-    const result = await sendAllPendingReminders();
+    const { organizationId } = req.user;
+
+    if (!organizationId) {
+      return res.status(403).json({
+        success: false,
+        message: "No organization found for this account",
+      });
+    }
+
+    const result = await sendAllPendingReminders({ organizationId });
+
     res.json({
       success: true,
-      message: "Reminder process completed",
+      message: result.sentCount
+        ? `Sent ${result.sentCount} reminder${result.sentCount === 1 ? "" : "s"}`
+        : "No certificates are due a reminder right now",
       sent: result.sentCount,
+      skipped: result.skipped,
       errors: result.errors,
     });
   } catch (error) {

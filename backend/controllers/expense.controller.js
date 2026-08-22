@@ -101,7 +101,14 @@ export const getExpenses = async (req, res) => {
       ];
     }
 
-    const expenses = await Expense.find(filter).sort({ date: -1, createdAt: -1 }).lean();
+    // createdBy is populated so the detail view can name who recorded the
+    // expense — it is the one field on the record that is otherwise an opaque
+    // ObjectId. Property and supplier stay denormalised strings, as the model
+    // intends. This is one extra $in query for the whole list, not one per row.
+    const expenses = await Expense.find(filter)
+      .populate("createdBy", "email")
+      .sort({ date: -1, createdAt: -1 })
+      .lean();
 
     return res.status(200).json({
       success: true,

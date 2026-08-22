@@ -238,8 +238,9 @@ export default function TeamBoard() {
                             <select
                                 name="role"
                                 className="w-full p-3 border rounded-lg"
-                                defaultValue="AGENT"
+                                defaultValue="OWNER"
                             >
+                                <option value="OWNER">OWNER</option>
                                 <option value="AGENT">Agent</option>
                                 <option value="MANAGER">Manager</option>
                                 <option value="FINANCE">Finance</option>

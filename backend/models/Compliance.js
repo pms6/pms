@@ -65,6 +65,14 @@ const complianceSchema = new mongoose.Schema(
       default: true,
     },
 
+    // Set when a reminder goes out, so the daily job emails once per reminder
+    // window rather than every morning until the certificate expires. Mirrors
+    // Property.contract.lastReminderSentAt.
+    lastReminderSentAt: {
+      type: Date,
+      default: null,
+    },
+
     notes: {
       type: String,
       trim: true,

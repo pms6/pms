@@ -23,6 +23,7 @@ import {
   Package,
   UserRound,
   Receipt,
+  ListChecks,
 } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 
@@ -50,6 +51,7 @@ const NAV = [
   { href: "/admin/feedback", label: "Feedback", icon: MessageSquare },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardCheck },
   { href: "/admin/users", label: "Team", icon: Users },
+  { href: "/admin/tasks", label: "Task Management", icon: ListChecks },
   { href: "/admin/settings", label: "Account", icon: Settings },
 ];
 

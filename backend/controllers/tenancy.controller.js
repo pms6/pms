@@ -762,4 +762,194 @@ export const inviteAllTenants = async (req, res) => {
 };
 
 // Expose allowed statuses
+// ---------------------------------------------------------------------------
+// Tenant directory
+// ---------------------------------------------------------------------------
+
+const startOfToday = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const endOfToday = () => {
+  const d = new Date();
+  d.setHours(23, 59, 59, 999);
+  return d;
+};
+
+/**
+ * Statuses that outlive the fixed term. A periodic tenancy runs until notice is
+ * served, and one that is becoming periodic is about to do the same, so for
+ * both a fixedTermEnd in the past does NOT mean the tenancy has ended.
+ *
+ * Deliberately keyed on status rather than the periodicStart date: records
+ * exist carrying an explicit "Fixed Term" status alongside a periodicStart,
+ * and status is the field the occupancy screen actually sets.
+ */
+const ROLLS_ON = new Set(["Periodic", "Becoming Periodic"]);
+
+/**
+ * Whether a tenancy is running now, has finished, or has not started yet.
+ *
+ * There is no "Ended" entry in TENANCY_STATUS, so a finished tenancy is
+ * recognised from its dates rather than a flag: the fixed term has run out and
+ * nothing rolled it on.
+ */
+export const occupancyState = (tenancy) => {
+  if (tenancy.isDeleted) return "past";
+
+  if (tenancy.startDate && new Date(tenancy.startDate) > endOfToday()) {
+    return "upcoming";
+  }
+
+  if (ROLLS_ON.has(tenancy.status)) return "current";
+
+  if (tenancy.fixedTermEnd && new Date(tenancy.fixedTermEnd) < startOfToday()) {
+    return "past";
+  }
+
+  return "current";
+};
+
+const DAY_MS = 86400000;
+
+const daysBetweenDates = (from, to) => {
+  const a = new Date(from);
+  const b = new Date(to);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
+  a.setHours(0, 0, 0, 0);
+  b.setHours(0, 0, 0, 0);
+  return Math.round((b - a) / DAY_MS);
+};
+
+// @desc    Every tenancy the organization has on record — current, past and
+//          upcoming — each enriched with the property, room, tenant profile and
+//          onboarding file behind it.
+// @route   GET /api/v1/tenancies/directory
+// @access  Organization staff only
+export const getTenantDirectory = async (req, res) => {
+  try {
+    // protect() also resolves an organizationId for TENANT accounts (from their
+    // own Tenant record), so without this check a tenant could call this and
+    // read the whole directory — employment, income, guarantor and identity
+    // documents included.
+    if (req.user?.role !== "Organization") {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to view the tenant directory.",
+      });
+    }
+
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) {
+      return res.status(401).json({ success: false, message: "Organization ID required" });
+    }
+
+    // Deleted tenancies are kept: an ended tenancy is exactly what "past
+    // tenants" means, so this is the one read that must not filter them out.
+    const tenancies = await Tenancy.find({ organizationId })
+      .populate("propertyId", "name propertyCode address rentalType tenantType coverImage status")
+      .populate(
+        "roomId",
+        "roomName roomNumber roomLabel roomType occupancy floor roomSize bathroomType monthlyRent rentPeriod securityDeposit status furnished images roomAmenities billsOption billsIncluded"
+      )
+      .populate("tenantId", "firstName lastName profileImage occupationType jobTitle birthdate gender about nationality")
+      .sort({ startDate: -1, createdAt: -1 })
+      .lean();
+
+    // The onboarding file carries employment, referencing, guarantor and
+    // documents. Fetched in one query and indexed by tenancyId rather than
+    // once per tenancy, so the directory stays a fixed number of round trips.
+    const onboardings = await Onboarding.find({
+      organizationId,
+      isDeleted: false,
+      tenancyId: { $ne: null },
+    })
+      .select(
+        "name email phone dob nationality currentAddress employment rightToRent references guarantor depositScheme documents holdingDeposit completedAt tenancyId"
+      )
+      .lean();
+
+    const onboardingByTenancy = new Map(onboardings.map((o) => [String(o.tenancyId), o]));
+
+    const data = tenancies.map((t) => {
+      const property = t.propertyId || null;
+      const room = t.roomId || null;
+      const profile = t.tenantId || null;
+      const onboarding = onboardingByTenancy.get(String(t._id)) || null;
+
+      // A fixed term is bounded; a periodic tenancy is not, so there is nothing
+      // to count down to.
+      const effectiveEnd = ROLLS_ON.has(t.status) ? null : t.fixedTermEnd || null;
+
+      return {
+        _id: t._id,
+        occupancyState: occupancyState(t),
+
+        // Name and email live on the tenancy itself, so they stay readable even
+        // when no Tenant profile was ever created (added straight from
+        // Occupancy rather than through onboarding).
+        name: t.tenant || onboarding?.name || "—",
+        email: t.tenantEmail || onboarding?.email || "",
+        phone: onboarding?.phone || "",
+        profileImage: profile?.profileImage || "",
+
+        tenantProfile: profile
+          ? {
+              _id: profile._id,
+              firstName: profile.firstName || "",
+              lastName: profile.lastName || "",
+              occupationType: profile.occupationType || "",
+              jobTitle: profile.jobTitle || "",
+              birthdate: profile.birthdate || null,
+              gender: GENDER_LABEL[profile.gender] || "",
+              nationality: profile.nationality || "",
+              about: profile.about || "",
+            }
+          : null,
+
+        // Falls back to the denormalised strings for older tenancies created
+        // before propertyId/roomId were captured.
+        property: property ? { ...property, linked: true } : { name: t.property || "—", linked: false },
+        room: room ? { ...room, linked: true } : { roomName: t.unit || "—", linked: false },
+
+        tenancy: {
+          status: t.status,
+          rent: t.rent || 0,
+          startDate: t.startDate || null,
+          fixedTermEnd: t.fixedTermEnd || null,
+          periodicStart: t.periodicStart || null,
+          availability: t.availability || "",
+          onboarded: Boolean(t.onboarded),
+          invitedAt: t.invitedAt || null,
+          isDeleted: Boolean(t.isDeleted),
+          deletedAt: t.deletedAt || null,
+          createdAt: t.createdAt,
+          // Positive = days still to run; negative = days since it ended.
+          daysRemaining: effectiveEnd ? daysBetweenDates(new Date(), effectiveEnd) : null,
+          durationDays: t.startDate && effectiveEnd ? daysBetweenDates(t.startDate, effectiveEnd) : null,
+        },
+
+        onboarding,
+      };
+    });
+
+    const stats = data.reduce(
+      (acc, row) => {
+        acc.total++;
+        acc[row.occupancyState]++;
+        if (row.occupancyState === "current") acc.currentRentRoll += row.tenancy.rent || 0;
+        return acc;
+      },
+      { total: 0, current: 0, past: 0, upcoming: 0, currentRentRoll: 0 }
+    );
+
+    return res.status(200).json({ success: true, data, stats });
+  } catch (error) {
+    console.error("Get Tenant Directory Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to load the tenant directory." });
+  }
+};
+
 export const tenancyStatuses = TENANCY_STATUS;

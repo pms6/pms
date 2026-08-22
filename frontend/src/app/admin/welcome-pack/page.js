@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Plus, Wifi, PhoneCall, Video, Trash2, Edit2, Eye, X, Building2, FileText, Loader2 } from "lucide-react";
+import { Plus, Wifi, PhoneCall, Video, Trash2, Edit2, Eye, X, Building2, FileText, Loader2, CalendarClock, EyeOff, Clock } from "lucide-react";
 import { PageHeader } from "../../Shared/ui";
 import api from "../../api/api";
 import { uploadFileToCloudinary } from "@/app/utils/uploadToCloudinary";
@@ -12,11 +12,81 @@ const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-wide
 // Pull an id string out of a value that may be a populated object or a raw id.
 const idOf = (v) => (typeof v === "object" && v !== null ? v._id : v) || "";
 
+const DAY_MS = 86400000;
+
+// Presets for the duration shortcut. "" = no end date (runs indefinitely),
+// "custom" = the operator types the end date themselves.
+const DURATIONS = [
+  { value: "", label: "Always visible (no end date)" },
+  { value: "7", label: "1 week" },
+  { value: "14", label: "2 weeks" },
+  { value: "30", label: "1 month" },
+  { value: "60", label: "2 months" },
+  { value: "90", label: "3 months" },
+  { value: "180", label: "6 months" },
+  { value: "365", label: "1 year" },
+  { value: "custom", label: "Custom end date…" },
+];
+
+// Date <-> "YYYY-MM-DD", the format <input type="date"> speaks.
+const toInputDate = (value) => {
+  if (!value) return "";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0];
+};
+
+const todayInput = () => new Date().toISOString().split("T")[0];
+
+// Inclusive day count, so 21 Aug -> 20 Sep reads as 31 days, matching what the
+// duration picker put in.
+const daysBetween = (from, until) =>
+  Math.round((new Date(until) - new Date(from)) / DAY_MS) + 1;
+
+// Recover which preset an existing window corresponds to, so reopening a saved
+// card shows "1 month" rather than always dropping to Custom. The duration is
+// never stored — it is derived from the two dates every time.
+const durationFromWindow = (from, until) => {
+  if (!until) return "";
+  if (!from) return "custom";
+  const days = daysBetween(from, until);
+  return DURATIONS.some((d) => d.value === String(days)) ? String(days) : "custom";
+};
+
+// End date implied by a start date + preset length (inclusive of the start day).
+const addDuration = (from, days) => {
+  const d = new Date(from);
+  if (Number.isNaN(d.getTime())) return "";
+  d.setDate(d.getDate() + Number(days) - 1);
+  return d.toISOString().split("T")[0];
+};
+
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-GB") : "—");
+
+// Same rule as visibilityStatus() in the backend controller, for cards created
+// or edited in-session before the list is refetched.
+const visibilityOf = (card) => {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (card.visibleFrom && new Date(card.visibleFrom) > new Date(today.getTime() + DAY_MS - 1)) return "scheduled";
+  if (card.visibleUntil && new Date(card.visibleUntil) < today) return "expired";
+  return "live";
+};
+
+const VISIBILITY_BADGE = {
+  live: { label: "Live in Tenant Hub", cls: "text-emerald-600", Icon: Eye },
+  scheduled: { label: "Scheduled", cls: "text-amber-600", Icon: Clock },
+  expired: { label: "No longer visible", cls: "text-gray-400", Icon: EyeOff },
+};
+
 function CardModal({ properties, initialData, onClose, onSave }) {
   const [form, setForm] = useState({
     propertyId: "", roomId: "", title: "", description: "", wifiNetwork: "",
-    wifiPassword: "", emergencyNumber: "", videoUrl: "", documentUrl: "", documentName: ""
+    wifiPassword: "", emergencyNumber: "", videoUrl: "", documentUrl: "", documentName: "",
+    // New cards start visible today with no end date — the least surprising
+    // default, and the same behaviour every existing card already has.
+    visibleFrom: todayInput(), visibleUntil: ""
   });
+  // Not persisted: only drives which end date the presets fill in.
+  const [duration, setDuration] = useState("");
   const [rooms, setRooms] = useState([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [file, setFile] = useState(null);
@@ -50,12 +120,50 @@ function CardModal({ properties, initialData, onClose, onSave }) {
         emergencyNumber: initialData.emergencyNumber || "",
         videoUrl: initialData.videoUrl || "",
         documentUrl: initialData.documentUrl || "",
-        documentName: initialData.documentName || ""
+        documentName: initialData.documentName || "",
+        visibleFrom: toInputDate(initialData.visibleFrom),
+        visibleUntil: toInputDate(initialData.visibleUntil)
       });
+      setDuration(durationFromWindow(initialData.visibleFrom, initialData.visibleUntil));
       setFile(null);
       loadRooms(extractedPropertyId);
     }
   }, [initialData, loadRooms]);
+
+  // The three window controls stay in step: picking a preset recomputes the end
+  // date, and moving the start date slides a preset window along with it.
+  const onDurationChange = (e) => {
+    const value = e.target.value;
+    setDuration(value);
+    if (value === "") setForm((f) => ({ ...f, visibleUntil: "" }));
+    else if (value !== "custom") {
+      setForm((f) => ({
+        ...f,
+        visibleUntil: addDuration(f.visibleFrom || todayInput(), value),
+        visibleFrom: f.visibleFrom || todayInput(),
+      }));
+    }
+  };
+
+  const onVisibleFromChange = (e) => {
+    const visibleFrom = e.target.value;
+    setForm((f) => ({
+      ...f,
+      visibleFrom,
+      visibleUntil:
+        duration && duration !== "custom" && visibleFrom
+          ? addDuration(visibleFrom, duration)
+          : f.visibleUntil,
+    }));
+  };
+
+  // Typing an end date by hand switches the preset to Custom rather than
+  // leaving a stale label above a window it no longer describes.
+  const onVisibleUntilChange = (e) => {
+    const visibleUntil = e.target.value;
+    setForm((f) => ({ ...f, visibleUntil }));
+    setDuration(visibleUntil ? durationFromWindow(form.visibleFrom, visibleUntil) : "");
+  };
 
   // When the property changes, reset the room selection and reload rooms.
   const onPropertyChange = (e) => {
@@ -72,6 +180,9 @@ function CardModal({ properties, initialData, onClose, onSave }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!form.propertyId) return alert("Please map this card to a property!");
+    if (form.visibleFrom && form.visibleUntil && form.visibleUntil < form.visibleFrom) {
+      return alert("The visible-until date cannot be before the visible-from date.");
+    }
     setSaving(true);
 
     let updatedForm = { ...form };
@@ -186,6 +297,73 @@ function CardModal({ properties, initialData, onClose, onSave }) {
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* VISIBILITY WINDOW — how long the tenant can see this card */}
+          <div className="p-4 bg-orange-50/40 rounded-2xl border border-orange-100 space-y-3">
+            <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#0F253B] uppercase tracking-widest">
+              <CalendarClock size={13} className="text-[#F47C3C]" />
+              Visible to Tenant
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className={LABEL}>Visible From</label>
+                <input
+                  type="date"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-semibold text-[#0F253B]"
+                  value={form.visibleFrom}
+                  onChange={onVisibleFromChange}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Duration</label>
+                <select
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-semibold text-[#0F253B]"
+                  value={duration}
+                  onChange={onDurationChange}
+                >
+                  {DURATIONS.map((d) => (
+                    <option key={d.value || "always"} value={d.value}>{d.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={LABEL}>Visible Until</label>
+                <input
+                  type="date"
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-semibold text-[#0F253B] disabled:opacity-50 disabled:cursor-not-allowed"
+                  value={form.visibleUntil}
+                  min={form.visibleFrom || undefined}
+                  onChange={onVisibleUntilChange}
+                  disabled={duration === ""}
+                  placeholder="No end date"
+                />
+              </div>
+            </div>
+
+            <p className="text-[10px] font-semibold text-gray-500 leading-relaxed">
+              {form.visibleUntil ? (
+                <>
+                  Tenants see this card from{" "}
+                  <span className="font-bold text-[#F47C3C]">{fmtDate(form.visibleFrom) }</span>
+                  {" until "}
+                  <span className="font-bold text-[#F47C3C]">{fmtDate(form.visibleUntil)}</span>
+                  {form.visibleFrom && (
+                    <> · {daysBetween(form.visibleFrom, form.visibleUntil)} days</>
+                  )}
+                  . After that it disappears from their Welcome Pack.
+                </>
+              ) : (
+                <>
+                  Tenants see this card from{" "}
+                  <span className="font-bold text-[#F47C3C]">
+                    {form.visibleFrom ? fmtDate(form.visibleFrom) : "immediately"}
+                  </span>{" "}
+                  onwards, with no end date.
+                </>
+              )}
+            </p>
           </div>
 
           <button type="submit" disabled={saving} className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2">
@@ -310,6 +488,10 @@ export default function WelcomePack() {
               const roomName = typeof card.roomId === "object" && card.roomId !== null
                 ? (card.roomId.roomName || card.roomId.title)
                 : null;
+              // Prefer the status the server derived; fall back to the local
+              // rule for a card just created in-session.
+              const visibility = card.visibility || visibilityOf(card);
+              const badge = VISIBILITY_BADGE[visibility] || VISIBILITY_BADGE.live;
 
               return (
                 <div key={card._id} className="bg-white border border-gray-100 rounded-3xl p-6 flex flex-col justify-between hover:shadow-md transition-all">
@@ -362,8 +544,28 @@ export default function WelcomePack() {
                     </div>
                   </div>
                   
-                  <div className="mt-5 pt-3 border-t border-gray-50 flex items-center gap-1 text-[10px] text-gray-400 font-semibold uppercase tracking-wider">
-                    <Eye size={12}/> Live in Tenant Hub
+                  <div className="mt-5 pt-3 border-t border-gray-50 space-y-1.5">
+                    <div className={`flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider ${badge.cls}`}>
+                      <badge.Icon size={12} /> {badge.label}
+                    </div>
+                    <p className="flex items-center gap-1 text-[10px] text-gray-400 font-medium">
+                      <CalendarClock size={11} />
+                      {card.visibleUntil ? (
+                        <>
+                          {fmtDate(card.visibleFrom)} → {fmtDate(card.visibleUntil)}
+                          {card.visibleFrom && (
+                            <span className="text-gray-300">
+                              {" · "}{daysBetween(card.visibleFrom, card.visibleUntil)}d
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {card.visibleFrom ? `From ${fmtDate(card.visibleFrom)}` : "Always"}
+                          <span className="text-gray-300">{" · no end date"}</span>
+                        </>
+                      )}
+                    </p>
                   </div>
                 </div>
               );

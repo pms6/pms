@@ -1,4 +1,4 @@
-// routes/lead.Route.js
+// routes/lead.route.js
 import express from "express";
 import {
   createLead,

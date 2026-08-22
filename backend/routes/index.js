@@ -6,19 +6,20 @@ import roomRoutes from "./room.route.js";
 import leadRoutes from "./lead.route.js";
 import memberRoutes from "./member.route.js";
 import ownerRoutes from "./owner.route.js";
-import viewingRoutes from "./viewing.Route.js";
+import viewingRoutes from "./viewing.route.js";
 import onboardingRoutes from "./onboarding.route.js";
 import tenancyRoutes from "./tenancy.route.js";
 import supplierRoutes from "./supplier.route.js";
 import maintenanceRoutes from "./maintenance.route.js";
-import inspectionRoutes from "./inspection.Route.js";
-import complianceRoutes from "./compliance.Route.js"
+import inspectionRoutes from "./inspection.route.js";
+import complianceRoutes from "./compliance.route.js"
 import welcomePackRoutes from "./welcomePack.route.js"
 import paymentRoutes from "./payment.route.js"
-import publicRoutes from "./public.Route.js"
-import auditRoutes from "./auditLog.Route.js"
-import tenantRoute from "./tenant.Route.js"
+import publicRoutes from "./public.route.js"
+import auditRoutes from "./auditLog.route.js"
+import tenantRoute from "./tenant.route.js"
 import expenseRoutes from "./expense.route.js"
+import taskRoutes from "./task.route.js"
 
 const router = express.Router();
 
@@ -52,6 +53,7 @@ router.use("/compliance", complianceRoutes);
 router.use("/welcome-pack", welcomePackRoutes);
 router.use("/payments", paymentRoutes);
 router.use("/expenses", expenseRoutes);
+router.use("/tasks", taskRoutes);
 router.use("/audit", auditRoutes);
 
 export default router;

@@ -12,7 +12,7 @@ import {
   forgotPassword,
   verifyResetOtp,
   resetPassword,
-} from "../controllers/auth.Controller.js";
+} from "../controllers/auth.controller.js";
 import { protect } from "../middleware/auth.js";
 
 const router = express.Router();

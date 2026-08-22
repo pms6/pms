@@ -1,6 +1,7 @@
 // controllers/payment.controller.js
 import RentCharge from "../models/RentCharge.js";
 import Tenancy from "../models/Tenancy.js";
+import Onboarding from "../models/Onboarding.js";
 
 const monthKey = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -260,5 +261,167 @@ export const confirmCharge = async (req, res) => {
   } catch (error) {
     console.error("Confirm Charge Error:", error);
     return res.status(500).json({ success: false, message: "Failed to update the charge." });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Operator-side finance views
+//
+// Everything above this line is tenant-facing. The handlers below are the
+// organization's own ledger, used by the Finance portal. protect() resolves an
+// organizationId for TENANT accounts too, so each one checks the role rather
+// than merely the presence of an org.
+// ---------------------------------------------------------------------------
+const denyTenant = (req, res) => {
+  if (req.user?.role !== "Organization") {
+    res.status(403).json({ success: false, message: "Not authorized." });
+    return true;
+  }
+  if (!req.user?.organizationId) {
+    res.status(401).json({ success: false, message: "Organization ID required" });
+    return true;
+  }
+  return false;
+};
+
+// @desc    Whole-organization rent ledger + summary
+// @route   GET /api/v1/payments
+// @access  Organization staff
+export const getCharges = async (req, res) => {
+  try {
+    if (denyTenant(req, res)) return;
+    const organizationId = req.user.organizationId;
+
+    // Generate any missing months first, so the ledger is current rather than
+    // only filling in when an individual tenant happens to open their page.
+    const tenancies = await Tenancy.find({ organizationId, isDeleted: false }).lean();
+    for (const t of tenancies) {
+      await ensureCharges(t);
+    }
+
+    const today = new Date();
+    const charges = await RentCharge.find({ organizationId }).sort({ dueDate: -1 }).lean();
+
+    // Re-derive due/overdue/upcoming and persist, the same way getMyPayments
+    // does, so the stored ledger stays accurate as time passes.
+    const updates = [];
+    for (const c of charges) {
+      const next = computeStatus(c, today);
+      if (next !== c.status) {
+        c.status = next;
+        updates.push({
+          updateOne: { filter: { _id: c._id }, update: { $set: { status: next } } },
+        });
+      }
+    }
+    if (updates.length) await RentCharge.bulkWrite(updates);
+
+    const summary = charges.reduce(
+      (acc, c) => {
+        acc.total++;
+        acc.byStatus[c.status] = (acc.byStatus[c.status] || 0) + 1;
+        const amt = Number(c.amount) || 0;
+        acc.billed += amt;
+        if (c.status === "paid") acc.collected += amt;
+        else acc.outstanding += amt;
+        if (c.status === "overdue") acc.overdue += amt;
+        if (c.status === "awaiting_confirmation") acc.awaiting += amt;
+        return acc;
+      },
+      { total: 0, billed: 0, collected: 0, outstanding: 0, overdue: 0, awaiting: 0, byStatus: {} }
+    );
+    summary.collectionRate = summary.billed
+      ? Math.round((summary.collected / summary.billed) * 100)
+      : 0;
+
+    // Money in per calendar month, for the revenue chart.
+    const byMonth = {};
+    for (const c of charges) {
+      const key = c.periodKey || "";
+      if (!key) continue;
+      if (!byMonth[key]) byMonth[key] = { periodKey: key, billed: 0, collected: 0 };
+      byMonth[key].billed += Number(c.amount) || 0;
+      if (c.status === "paid") byMonth[key].collected += Number(c.amount) || 0;
+    }
+
+    let data = charges;
+    const { status, search } = req.query;
+    if (status) data = data.filter((c) => c.status === status);
+    if (search) {
+      const needle = String(search).toLowerCase();
+      data = data.filter(
+        (c) =>
+          (c.tenantEmail || "").toLowerCase().includes(needle) ||
+          (c.property || "").toLowerCase().includes(needle) ||
+          (c.room || "").toLowerCase().includes(needle)
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      total: data.length,
+      data,
+      summary,
+      byMonth: Object.values(byMonth).sort((a, b) => a.periodKey.localeCompare(b.periodKey)),
+    });
+  } catch (error) {
+    console.error("Get Charges Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to load the rent ledger." });
+  }
+};
+
+// @desc    Deposit register — what is held, under which scheme, for whom
+// @route   GET /api/v1/payments/deposits
+// @access  Organization staff
+//
+// Deposit data lives on the Onboarding record (tenancy.deposit for the amount,
+// depositScheme for the provider/reference/protection status), so the register
+// is built from there rather than from a table that does not exist.
+export const getDeposits = async (req, res) => {
+  try {
+    if (denyTenant(req, res)) return;
+    const organizationId = req.user.organizationId;
+
+    const onboardings = await Onboarding.find({ organizationId, isDeleted: false })
+      .select("name email tenancy depositScheme holdingDeposit completedAt tenancyId createdAt")
+      .sort({ completedAt: -1, createdAt: -1 })
+      .lean();
+
+    const data = onboardings
+      .filter((o) => Number(o.tenancy?.deposit) > 0 || Number(o.holdingDeposit) > 0)
+      .map((o) => ({
+        _id: o._id,
+        tenant: o.name || "",
+        email: o.email || "",
+        property: o.tenancy?.property || "",
+        room: o.tenancy?.room || "",
+        deposit: Number(o.tenancy?.deposit) || 0,
+        holdingDeposit: Number(o.holdingDeposit) || 0,
+        provider: o.depositScheme?.provider || "",
+        reference: o.depositScheme?.ref || "",
+        status: o.depositScheme?.status || "not_started",
+        startDate: o.tenancy?.startDate || "",
+        movedIn: Boolean(o.completedAt),
+        completedAt: o.completedAt || null,
+        tenancyId: o.tenancyId || null,
+      }));
+
+    const summary = data.reduce(
+      (acc, d) => {
+        acc.count++;
+        acc.total += d.deposit;
+        acc.holding += d.holdingDeposit;
+        acc.byStatus[d.status] = (acc.byStatus[d.status] || 0) + 1;
+        if (d.status === "protected") acc.protected += d.deposit;
+        else acc.unprotected += d.deposit;
+        return acc;
+      },
+      { count: 0, total: 0, holding: 0, protected: 0, unprotected: 0, byStatus: {} }
+    );
+
+    return res.status(200).json({ success: true, data, summary });
+  } catch (error) {
+    console.error("Get Deposits Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to load the deposit register." });
   }
 };

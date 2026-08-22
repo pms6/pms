@@ -11,6 +11,8 @@ import {
   Trash2,
   Loader2,
   CalendarRange,
+  Eye,
+  Paperclip,
 } from "lucide-react";
 import { PageHeader } from "../../Shared/ui";
 import api from "../../api/api";
@@ -71,6 +73,132 @@ function Kpi({ icon: Icon, label, value, tone = "light" }) {
       </div>
       <p className="text-2xl font-bold mt-4">{value}</p>
       <p className={`text-[11px] font-bold uppercase tracking-widest mt-1 ${subC}`}>{label}</p>
+    </div>
+  );
+}
+
+// A receipt is worth showing inline when it is an image; PDFs and anything else
+// get a link. Cloudinary URLs carry /image/upload/ even without a file
+// extension, so check both.
+const isImageReceipt = (url) => {
+  if (!url) return false;
+  const clean = String(url).split("?")[0];
+  return /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(clean) || /\/image\/upload\//.test(clean);
+};
+
+const fmtDateTime = (d) => {
+  if (!d) return "—";
+  const parsed = new Date(d);
+  return Number.isNaN(parsed.getTime())
+    ? "—"
+    : parsed.toLocaleString("en-GB", {
+        day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+      });
+};
+
+const fmtDateLong = (d) => {
+  if (!d) return "—";
+  const parsed = new Date(d);
+  return Number.isNaN(parsed.getTime())
+    ? "—"
+    : parsed.toLocaleDateString("en-GB", {
+        weekday: "short", day: "numeric", month: "long", year: "numeric",
+      });
+};
+
+function Field({ label, value, span = false }) {
+  return (
+    <div className={span ? "sm:col-span-2" : ""}>
+      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{label}</p>
+      <p className="text-sm font-bold text-[#0F253B] mt-1 break-words whitespace-pre-line">
+        {value || <span className="text-gray-300">—</span>}
+      </p>
+    </div>
+  );
+}
+
+// Read-only view of one expense: everything on the record, including the fields
+// the table has no room for (payment method, reference, notes, receipt, and who
+// recorded it).
+function ExpenseDetailModal({ expense, onClose }) {
+  const e = expense;
+  // createdBy is populated to { _id, email }; older rows may still be a bare id.
+  const recordedBy = typeof e.createdBy === "object" && e.createdBy !== null ? e.createdBy.email : "";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl max-h-[92vh] overflow-y-auto"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        {/* Headline: the amount is the thing you came to see */}
+        <div className="p-7 pb-5 border-b border-gray-100">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <span className="inline-block px-2.5 py-1 rounded-lg bg-orange-50 text-[#F47C3C] text-[11px] font-bold uppercase tracking-widest">
+                {e.category || "Uncategorised"}
+              </span>
+              <p className="text-3xl font-bold text-[#0F253B] mt-3">{money(e.amount)}</p>
+              <p className="text-sm font-medium text-gray-400 mt-1">{fmtDateLong(e.date)}</p>
+            </div>
+            <button onClick={onClose} className="text-gray-300 hover:text-gray-500 shrink-0" title="Close">
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-7 space-y-6">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C] mb-3">Details</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Property" value={e.property} />
+              <Field label="Supplier" value={e.supplier} />
+              <Field label="Payment method" value={e.paymentMethod} />
+              <Field label="Reference" value={e.reference} />
+              <Field label="Description" value={e.description} span />
+              <Field label="Notes" value={e.notes} span />
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C] mb-3">Receipt</p>
+            {e.fileUrl ? (
+              <div className="space-y-3">
+                {isImageReceipt(e.fileUrl) && (
+                  <a href={e.fileUrl} target="_blank" rel="noopener noreferrer" className="block">
+                    <img
+                      src={e.fileUrl}
+                      alt={e.fileName || "Receipt"}
+                      className="max-h-72 w-auto rounded-xl border border-gray-100 object-contain bg-gray-50"
+                    />
+                  </a>
+                )}
+                <a
+                  href={e.fileUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-3 py-2 border border-gray-200 hover:bg-gray-50 rounded-xl text-xs font-bold text-[#0F253B] transition-all"
+                >
+                  <Paperclip size={14} className="text-[#F47C3C]" />
+                  {e.fileName || "Open receipt"}
+                </a>
+              </div>
+            ) : (
+              <p className="text-sm font-medium text-gray-300">No receipt attached.</p>
+            )}
+          </div>
+
+          <div className="pt-5 border-t border-gray-100">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C] mb-3">Record</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Recorded by" value={recordedBy} />
+              <Field label="Recorded on" value={fmtDateTime(e.createdAt)} />
+              <Field label="Last updated" value={fmtDateTime(e.updatedAt)} />
+              <Field label="Entry ID" value={e._id} />
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -242,6 +370,8 @@ export default function AdminExpenses() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
+  // The entry whose full detail is open, or null.
+  const [viewRow, setViewRow] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -530,7 +660,11 @@ export default function AdminExpenses() {
               </thead>
               <tbody className="divide-y divide-gray-50 text-sm font-medium text-[#0F253B]">
                 {rows.map((r) => (
-                  <tr key={r._id} className="hover:bg-gray-50/70 transition-colors">
+                  <tr
+                    key={r._id}
+                    onClick={() => setViewRow(r)}
+                    className="hover:bg-gray-50/70 transition-colors cursor-pointer"
+                  >
                     <td className="p-4 text-xs text-gray-500">
                       {new Date(r.date).toLocaleDateString("en-GB")}
                     </td>
@@ -542,6 +676,7 @@ export default function AdminExpenses() {
                           href={r.fileUrl}
                           target="_blank"
                           rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
                           className="ml-2 text-[10px] font-bold text-[#F47C3C] hover:underline"
                         >
                           receipt
@@ -552,13 +687,22 @@ export default function AdminExpenses() {
                     <td className="p-4 text-xs text-gray-500">{r.supplier || "—"}</td>
                     <td className="p-4 text-right font-bold">{money(r.amount)}</td>
                     <td className="p-4 text-right">
-                      <button
-                        onClick={() => removeExpense(r)}
-                        className="p-1.5 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                        title="Delete"
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setViewRow(r); }}
+                          className="p-1.5 text-gray-300 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg transition-all"
+                          title="View details"
+                        >
+                          <Eye size={15} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeExpense(r); }}
+                          className="p-1.5 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                          title="Delete"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -567,6 +711,10 @@ export default function AdminExpenses() {
           </div>
         )}
       </div>
+
+      {viewRow && (
+        <ExpenseDetailModal expense={viewRow} onClose={() => setViewRow(null)} />
+      )}
 
       {showModal && (
         <ExpenseModal

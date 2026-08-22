@@ -1,29 +1,12 @@
 import Property from "../models/Property.js";
-import Organization from "../models/Organization.js";
-import User from "../models/User.js";
-import env from "../config/env.js";
 import { sendEmail } from "../utils/sendEmail.js";
-
-const DAY_MS = 1000 * 60 * 60 * 24;
-
-/**
- * Days from today until `date`. Both ends are floored to midnight so a contract
- * ending later today reads as 0 rather than a fraction.
- */
-export const daysUntil = (date) => {
-  const end = new Date(date);
-  end.setHours(0, 0, 0, 0);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.round((end - today) / DAY_MS);
-};
+import { daysUntil, resolveOrgRecipients } from "../utils/reminders.js";
 
 /**
- * Contract expiry state, derived from endDate every time it is asked for.
- *
- * Compliance stores its status in the document and recomputes it only in a
- * pre-save hook, which means a record that expires while nobody touches it
- * keeps reporting "warning" forever. Deriving it here avoids that entirely.
+ * Contract expiry state, derived from endDate every time it is asked for, so
+ * a contract that expires while nobody touches the record cannot go stale.
+ * Adds a "none" state that the generic expiryState() has no need for: a
+ * property may simply have no contract terms recorded yet.
  */
 export const contractStatus = (contract) => {
   if (!contract?.endDate) return { status: "none", days: null };
@@ -34,22 +17,6 @@ export const contractStatus = (contract) => {
   if (days < 0) return { status: "expired", days };
   if (days <= window) return { status: "warning", days };
   return { status: "valid", days };
-};
-
-/**
- * Who should hear about this property's contract. The organization owner's
- * account email, falling back to the configured mailbox so a reminder is never
- * silently dropped. (The compliance job hardcodes a single address for every
- * organization — this resolves it per property instead.)
- */
-const resolveRecipient = async (organizationId) => {
-  if (!organizationId) return env.mail.user || null;
-
-  const org = await Organization.findById(organizationId).select("userId name").lean();
-  if (!org?.userId) return env.mail.user || null;
-
-  const owner = await User.findById(org.userId).select("email").lean();
-  return owner?.email || env.mail.user || null;
 };
 
 /**
@@ -94,8 +61,9 @@ export const sendAllContractReminders = async () => {
           continue;
         }
 
-        const recipient = await resolveRecipient(property.organizationId);
-        if (!recipient) {
+        // Owner in `to`, active co-owners and managers copied in.
+        const { to, cc } = await resolveOrgRecipients(property.organizationId);
+        if (!to) {
           result.errors.push({ propertyId: property._id, error: "No recipient email" });
           continue;
         }
@@ -122,7 +90,8 @@ export const sendAllContractReminders = async () => {
         `;
 
         await sendEmail({
-          email: recipient,
+          email: to,
+          cc,
           subject: `Contract Expiring Soon — ${property.name} (${days} day${days === 1 ? "" : "s"})`,
           html: emailHtml,
         });
@@ -145,3 +114,5 @@ export const sendAllContractReminders = async () => {
 
   return result;
 };
+
+export { daysUntil };

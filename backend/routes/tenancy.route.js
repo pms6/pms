@@ -3,6 +3,7 @@ import express from "express";
 import {
   getTenancies,
   getTenancyStats,
+  getTenantDirectory,
   getMyHousemates,
   getMyRoom,
   createTenancy,
@@ -26,6 +27,11 @@ router.get("/my-room", getMyRoom);
 
 // Occupancy overview stats (summary cards)
 router.get("/stats", getTenancyStats);
+
+// Full tenant directory — current, past and upcoming tenancies with the
+// property, room, profile and onboarding file behind each one. Staff only;
+// the controller rejects TENANT accounts explicitly.
+router.get("/directory", getTenantDirectory);
 
 // Bulk onboarding invite
 router.post("/invite-all", inviteAllTenants);

@@ -29,11 +29,27 @@ transporter.verify((err) => {
   }
 });
 
-export const sendEmail = async ({ email, subject, html }) => {
+// Accepts one address or several. `email` stays a plain string for the OTP and
+// invite callers; `cc` lets the reminder jobs copy in the rest of the team
+// without sending a separate message to each of them.
+const addressList = (value) =>
+  (Array.isArray(value) ? value : [value])
+    .filter(Boolean)
+    .map((address) => String(address).trim().toLowerCase())
+    .filter(Boolean)
+    .join(", ");
+
+export const sendEmail = async ({ email, cc, subject, html }) => {
   try {
+    const to = addressList(email);
+    if (!to) throw new Error("No recipient address");
+
+    const ccList = addressList(cc);
+
     const info = await transporter.sendMail({
       from: `"PMS" <${env.mail.user}>`,
-      to: email.trim().toLowerCase(),
+      to,
+      ...(ccList ? { cc: ccList } : {}),
       subject,
       html,
     });

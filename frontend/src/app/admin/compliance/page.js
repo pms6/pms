@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Building2, Download, X, Bell, CalendarClock, FileText, Eye, ScrollText } from "lucide-react";
+import { Plus, Building2, Download, X, Bell, BellRing, CalendarClock, FileText, Eye, ScrollText, Loader2 } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
 import api from "../../api/api";
 import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
@@ -237,6 +237,8 @@ export default function AdminCompliance() {
   const [propertyFilter, setPropertyFilter] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [showModal, setShowModal] = useState(false);
+  const [sendingReminders, setSendingReminders] = useState(false);
+  const [reminderMsg, setReminderMsg] = useState("");
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -317,6 +319,25 @@ export default function AdminCompliance() {
     }
   };
 
+  // Fire the expiry reminders for this organization now, rather than waiting
+  // for the nightly 8am job. The backend de-duplicates per reminder window, so
+  // a certificate already emailed this cycle is skipped rather than re-sent.
+  const sendReminders = async () => {
+    setSendingReminders(true);
+    setReminderMsg("");
+    try {
+      const { data } = await api.post("/compliance/send-reminders");
+      setReminderMsg(data.message || "Reminder process completed");
+      loadData(); // pick up the new lastReminderSentAt stamps
+    } catch (err) {
+      setReminderMsg(
+        err.response?.data?.message || "Failed to send reminders"
+      );
+    } finally {
+      setSendingReminders(false);
+    }
+  };
+
   const exportCSV = () => {
     const headers = "Property,Type,Status,Carried Out,Expiry Date,Reminder Window\n";
     const rows = filteredRows
@@ -357,18 +378,47 @@ export default function AdminCompliance() {
         title="Compliance Dashboard"
         subtitle="Manage dynamic safety checklists, carbon metrics, and adaptive renewal periods"
         action={
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
-          >
-            <Plus size={18} /> Add Document
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={sendReminders}
+              disabled={sendingReminders}
+              title="Email the organization owner (managers copied in) about every certificate now inside its reminder window"
+              className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed text-[#0F253B] font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
+            >
+              {sendingReminders ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <BellRing size={16} className="text-[#F47C3C]" />
+              )}
+              {sendingReminders ? "Sending..." : "Send Reminders"}
+            </button>
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
+            >
+              <Plus size={18} /> Add Document
+            </button>
+          </div>
         }
       />
 
       {error && (
         <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
           {error}
+        </div>
+      )}
+
+      {reminderMsg && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-sm font-medium text-[#0F253B]">
+          <span className="flex items-center gap-2">
+            <BellRing size={15} className="text-[#F47C3C]" /> {reminderMsg}
+          </span>
+          <button
+            onClick={() => setReminderMsg("")}
+            className="text-gray-400 hover:text-gray-600"
+          >
+            <X size={15} />
+          </button>
         </div>
       )}
 
@@ -482,12 +532,30 @@ export default function AdminCompliance() {
                     </td>
                     <td className="p-4 text-xs font-bold text-red-600">
                       {new Date(row.expiryDate).toLocaleDateString("en-GB")}
+                      {typeof row.daysUntilExpiry === "number" && (
+                        <div className="text-[10px] font-semibold text-gray-400 mt-0.5">
+                          {row.daysUntilExpiry < 0
+                            ? Math.abs(row.daysUntilExpiry) + "d overdue"
+                            : row.daysUntilExpiry === 0
+                            ? "expires today"
+                            : "in " + row.daysUntilExpiry + "d"}
+                        </div>
+                      )}
                     </td>
                     <td className="p-4 text-right">
                       {row.autoReminder ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#F47C3C] bg-orange-50 px-2 py-0.5 rounded-md">
-                          <CalendarClock size={10} /> Alert active ({row.reminderDaysBefore}d prior)
-                        </span>
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#F47C3C] bg-orange-50 px-2 py-0.5 rounded-md">
+                            <CalendarClock size={10} /> Alert active ({row.reminderDaysBefore}d prior)
+                          </span>
+                          {row.lastReminderSentAt ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600">
+                              <Bell size={10} /> Emailed {fmtDate(row.lastReminderSentAt)}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-gray-300 font-medium">Not yet emailed</span>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-[10px] text-gray-300 font-medium">Inactive</span>
                       )}

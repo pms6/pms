@@ -9,8 +9,30 @@ import {
   ExternalLink,
   FileText,
   Check,
+  CalendarClock,
 } from "lucide-react";
 import api from "@/app/api/api";
+
+const DAY_MS = 86400000;
+
+// How much longer this card stays in the pack. The server only sends cards
+// whose window covers today, so this is never negative — it exists to tell the
+// tenant a guide is temporary before it quietly disappears.
+//
+// Both dates are compared at midnight so "expires today" reads as 0 days left
+// rather than a fraction of one.
+const daysLeft = (until) => {
+  if (!until) return null;
+  const end = new Date(until);
+  if (Number.isNaN(end.getTime())) return null;
+  end.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((end - today) / DAY_MS);
+};
+
+const fmtDate = (d) =>
+  d ? new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "";
 
 // Turn a YouTube watch/short URL into an embeddable one; pass others through.
 const toEmbed = (url) => {
@@ -174,6 +196,27 @@ export default function WelcomePage() {
                         )}
                       </p>
                     )}
+                    {(() => {
+                      const left = daysLeft(pack.visibleUntil);
+                      if (left === null) return null;
+                      const urgent = left <= 7;
+                      return (
+                        <span
+                          className={`mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md ${
+                            urgent
+                              ? "text-amber-700 bg-amber-50"
+                              : "text-slate-500 bg-slate-100"
+                          }`}
+                        >
+                          <CalendarClock size={11} />
+                          {left === 0
+                            ? "Available until today"
+                            : left === 1
+                            ? "Available until tomorrow"
+                            : `Available until ${fmtDate(pack.visibleUntil)} · ${left} days left`}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <button
                     onClick={() => setExpandedId(expanded ? null : pack._id)}
