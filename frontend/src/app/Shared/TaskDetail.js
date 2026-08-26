@@ -160,9 +160,9 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
               value={(task.assignees || []).map((a) => displayName(a.email)).join(", ")}
               icon={UserRound}
             />
-            <Meta label="Start date" value={fmtDate(task.startDate)} icon={CalendarDays} />
-            <Meta label="Due date" value={fmtDate(task.dueDate)} icon={CalendarClock} />
-            <Meta label="Created" value={fmtDate(task.createdAt)} />
+            <Meta label="Start date" value={fmtDateTime(task.startDate)} icon={CalendarDays} />
+            <Meta label="Due date" value={fmtDateTime(task.dueDate)} icon={CalendarClock} />
+            <Meta label="Created" value={fmtDateTime(task.createdAt)} />
             <Meta label="Created by" value={task.createdByEmail} />
             <Meta label="Last updated" value={fmtDateTime(task.updatedAt)} />
             <Meta label="Completed" value={task.completedAt ? fmtDateTime(task.completedAt) : ""} />

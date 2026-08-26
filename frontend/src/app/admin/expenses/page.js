@@ -12,6 +12,7 @@ import {
   Loader2,
   CalendarRange,
   Eye,
+  Pencil,
   Paperclip,
 } from "lucide-react";
 import { PageHeader } from "../../Shared/ui";
@@ -106,6 +107,14 @@ const fmtDateLong = (d) => {
       });
 };
 
+// Dates are stored at UTC midnight, so read them back in UTC — a local-time
+// slice would shift the day west of Greenwich.
+const toDateInput = (d) => {
+  if (!d) return "";
+  const parsed = new Date(d);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+};
+
 function Field({ label, value, span = false }) {
   return (
     <div className={span ? "sm:col-span-2" : ""}>
@@ -120,7 +129,7 @@ function Field({ label, value, span = false }) {
 // Read-only view of one expense: everything on the record, including the fields
 // the table has no room for (payment method, reference, notes, receipt, and who
 // recorded it).
-function ExpenseDetailModal({ expense, onClose }) {
+function ExpenseDetailModal({ expense, onClose, onEdit }) {
   const e = expense;
   // createdBy is populated to { _id, email }; older rows may still be a bare id.
   const recordedBy = typeof e.createdBy === "object" && e.createdBy !== null ? e.createdBy.email : "";
@@ -141,9 +150,17 @@ function ExpenseDetailModal({ expense, onClose }) {
               <p className="text-3xl font-bold text-[#0F253B] mt-3">{money(e.amount)}</p>
               <p className="text-sm font-medium text-gray-400 mt-1">{fmtDateLong(e.date)}</p>
             </div>
-            <button onClick={onClose} className="text-gray-300 hover:text-gray-500 shrink-0" title="Close">
-              <X size={20} />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => onEdit(e)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 hover:bg-gray-50 rounded-xl text-xs font-bold text-[#0F253B] transition-all"
+              >
+                <Pencil size={14} className="text-[#F47C3C]" /> Edit
+              </button>
+              <button onClick={onClose} className="text-gray-300 hover:text-gray-500" title="Close">
+                <X size={20} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -203,37 +220,54 @@ function ExpenseDetailModal({ expense, onClose }) {
   );
 }
 
-function ExpenseModal({ properties, onClose, onSave }) {
-  const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    amount: "",
-    category: "Maintenance",
-    description: "",
-    propertyId: "",
-    supplier: "",
-    paymentMethod: "",
-    reference: "",
-    notes: "",
-  });
+// Add and edit share one form. `expense` is null when adding; when it is set the
+// fields are seeded from the record and the save is a PUT.
+function ExpenseModal({ expense, properties, onClose, onSave }) {
+  const isEdit = Boolean(expense);
+
+  const [form, setForm] = useState(() => ({
+    date: toDateInput(expense?.date) || new Date().toISOString().slice(0, 10),
+    amount: expense?.amount ?? "",
+    category: expense?.category || "Maintenance",
+    description: expense?.description || "",
+    // propertyId comes back as a bare id string on the list rows.
+    propertyId: expense?.propertyId ? String(expense.propertyId) : "",
+    supplier: expense?.supplier || "",
+    paymentMethod: expense?.paymentMethod || "",
+    reference: expense?.reference || "",
+    notes: expense?.notes || "",
+  }));
   const [file, setFile] = useState(null);
+  // Set when the user detaches the receipt an edited expense already had, so the
+  // save clears it rather than leaving the old file in place.
+  const [dropReceipt, setDropReceipt] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // The receipt already on the record, unless it has been detached or replaced.
+  const keepingReceipt = isEdit && Boolean(expense.fileUrl) && !dropReceipt && !file;
 
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     try {
-      let fileUrl = "";
-      let fileName = "";
+      const payload = { ...form };
+
       if (file) {
         const uploaded = await uploadFileToCloudinary(file);
-        fileUrl = uploaded.url;
-        fileName = uploaded.name || file.name;
+        payload.fileUrl = uploaded.url;
+        payload.fileName = uploaded.name || file.name;
+      } else if (dropReceipt || !isEdit) {
+        payload.fileUrl = "";
+        payload.fileName = "";
       }
-      await onSave({ ...form, fileUrl, fileName });
+      // Editing with no receipt change sends neither key, so the update leaves
+      // whatever is on the record alone.
+
+      await onSave(payload);
     } catch (err) {
       setError(err.response?.data?.message || err.message || "Failed to save the expense.");
     } finally {
@@ -248,7 +282,7 @@ function ExpenseModal({ properties, onClose, onSave }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-5">
-          <h3 className="text-xl font-bold text-[#0F253B]">Add Expense</h3>
+          <h3 className="text-xl font-bold text-[#0F253B]">{isEdit ? "Edit Expense" : "Add Expense"}</h3>
           <button onClick={onClose} className="text-gray-300 hover:text-gray-500">
             <X size={20} />
           </button>
@@ -332,15 +366,71 @@ function ExpenseModal({ properties, onClose, onSave }) {
             <input className={FIELD} value={form.reference} onChange={set("reference")} placeholder="Invoice number" />
           </div>
 
+          {/* Notes round-trip through the form, so the field has to be here —
+              without it an edit would blank whatever the record already held. */}
+          <div>
+            <label className={LABEL}>Notes</label>
+            <textarea
+              rows={2}
+              className={`${FIELD} resize-none`}
+              value={form.notes}
+              onChange={set("notes")}
+              placeholder="Anything worth remembering about this expense"
+            />
+          </div>
+
           <div>
             <label className={LABEL}>Receipt / Invoice</label>
+
+            {keepingReceipt && (
+              <div className="mb-2 flex items-center justify-between gap-3 px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl">
+                <a
+                  href={expense.fileUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-xs font-bold text-[#0F253B] truncate hover:underline"
+                >
+                  <Paperclip size={14} className="text-[#F47C3C] shrink-0" />
+                  <span className="truncate">{expense.fileName || "Current receipt"}</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setDropReceipt(true)}
+                  className="text-[11px] font-bold text-gray-400 hover:text-red-600 shrink-0"
+                >
+                  Remove
+                </button>
+              </div>
+            )}
+
+            {isEdit && dropReceipt && !file && (
+              <p className="mb-2 text-[11px] font-bold text-red-500">
+                Receipt will be removed when you save.{" "}
+                <button
+                  type="button"
+                  onClick={() => setDropReceipt(false)}
+                  className="text-gray-400 hover:text-[#0F253B] underline"
+                >
+                  Undo
+                </button>
+              </p>
+            )}
+
             <input
               type="file"
               accept=".doc,.docx,.pdf,image/*"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
               className="w-full text-sm font-medium text-gray-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-[#0F253B] file:text-white file:font-bold file:text-xs hover:file:bg-[#1b3a58] file:cursor-pointer"
             />
-            {file && <p className="mt-1.5 text-[11px] text-gray-400 font-medium">Selected: {file.name}</p>}
+            {file ? (
+              <p className="mt-1.5 text-[11px] text-gray-400 font-medium">Selected: {file.name}</p>
+            ) : (
+              keepingReceipt && (
+                <p className="mt-1.5 text-[11px] text-gray-400 font-medium">
+                  Choose a file to replace the current receipt.
+                </p>
+              )
+            )}
           </div>
 
           <button
@@ -349,7 +439,7 @@ function ExpenseModal({ properties, onClose, onSave }) {
             className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {saving && <Loader2 size={18} className="animate-spin" />}
-            {saving ? "Saving…" : "Add Expense"}
+            {saving ? "Saving…" : isEdit ? "Save Changes" : "Add Expense"}
           </button>
         </form>
       </div>
@@ -372,6 +462,8 @@ export default function AdminExpenses() {
   const [showModal, setShowModal] = useState(false);
   // The entry whose full detail is open, or null.
   const [viewRow, setViewRow] = useState(null);
+  // The entry being edited, or null when the form is adding.
+  const [editRow, setEditRow] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -407,14 +499,34 @@ export default function AdminExpenses() {
     loadData();
   }, [loadData]);
 
-  const createExpense = async (form) => {
-    await api.post("/expenses", {
+  // One save path for both modes — the modal decides which by whether it was
+  // given an expense. Errors bubble up so the modal can show them in place.
+  const saveExpense = async (form) => {
+    const payload = {
       ...form,
       propertyId: form.propertyId || null,
       amount: Number(form.amount),
-    });
-    setShowModal(false);
+    };
+
+    if (editRow) {
+      await api.put(`/expenses/${editRow._id}`, payload);
+    } else {
+      await api.post("/expenses", payload);
+    }
+
+    closeForm();
     await loadData();
+  };
+
+  const openEdit = (row) => {
+    setViewRow(null);
+    setEditRow(row);
+    setShowModal(true);
+  };
+
+  const closeForm = () => {
+    setShowModal(false);
+    setEditRow(null);
   };
 
   const removeExpense = async (row) => {
@@ -466,7 +578,7 @@ export default function AdminExpenses() {
         subtitle="Outgoings by month, filtered by year"
         action={
           <button
-            onClick={() => setShowModal(true)}
+            onClick={() => { setEditRow(null); setShowModal(true); }}
             className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
           >
             <Plus size={18} /> Add Expense
@@ -696,6 +808,13 @@ export default function AdminExpenses() {
                           <Eye size={15} />
                         </button>
                         <button
+                          onClick={(e) => { e.stopPropagation(); openEdit(r); }}
+                          className="p-1.5 text-gray-300 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg transition-all"
+                          title="Edit"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <button
                           onClick={(e) => { e.stopPropagation(); removeExpense(r); }}
                           className="p-1.5 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                           title="Delete"
@@ -713,14 +832,21 @@ export default function AdminExpenses() {
       </div>
 
       {viewRow && (
-        <ExpenseDetailModal expense={viewRow} onClose={() => setViewRow(null)} />
+        <ExpenseDetailModal
+          expense={viewRow}
+          onClose={() => setViewRow(null)}
+          onEdit={openEdit}
+        />
       )}
 
       {showModal && (
         <ExpenseModal
+          // Remounts when switching entries, so the form reseeds from the new row.
+          key={editRow?._id || "new"}
+          expense={editRow}
           properties={properties}
-          onClose={() => setShowModal(false)}
-          onSave={createExpense}
+          onClose={closeForm}
+          onSave={saveExpense}
         />
       )}
     </div>
