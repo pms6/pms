@@ -101,18 +101,18 @@ const useViewingsData = (filter = "") => {
   }, [organizationId]);
 
   // Frontend filtering
-  const filteredViewings = filter 
+  const filteredViewings = filter
     ? allViewings.filter(v => v.status === filter)
     : allViewings;
 
-  return { 
+  return {
     viewings: filteredViewings,
     allViewings,
-    leads, 
-    properties, 
-    allRooms, 
-    viewingsLoading, 
-    initialLoading, 
+    leads,
+    properties,
+    allRooms,
+    viewingsLoading,
+    initialLoading,
     createViewing,
     updateViewingStatus,
     rescheduleViewing,
@@ -151,7 +151,7 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
   const field = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium";
   const labelCls = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
 
-  const availableRooms = form.property 
+  const availableRooms = form.property
     ? allRooms.filter(r => r.propertyId === form.property || r.propertyId?._id === form.property)
     : [];
 
@@ -175,10 +175,12 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={labelCls}>Date</label>
+            <div>
+              <label className={labelCls}>Date</label>
               <input type="date" className={field} value={form.date} onChange={handleChange("date")} required />
             </div>
-            <div><label className={labelCls}>Time</label>
+            <div>
+              <label className={labelCls}>Time</label>
               <input type="time" className={field} value={form.time} onChange={handleChange("time")} required />
             </div>
           </div>
@@ -226,7 +228,19 @@ export default function AdminViewings() {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
 
-  const { viewings, leads, properties, allRooms, viewingsLoading, initialLoading, createViewing, updateViewingStatus, rescheduleViewing, respondToRequest } = useViewingsData(filter);
+  const {
+    viewings,
+    leads,
+    properties,
+    allRooms,
+    viewingsLoading,
+    initialLoading,
+    createViewing,
+    updateViewingStatus,
+    rescheduleViewing,
+    respondToRequest
+  } = useViewingsData(filter);
+
   const [rescheduling, setRescheduling] = useState(null);
 
   const days = [...new Set(viewings.map(v => v.date))].sort();
@@ -240,7 +254,10 @@ export default function AdminViewings() {
         title="Viewings"
         subtitle="Scheduled property viewings"
         action={
-          <button onClick={() => setOpen(true)} className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
+          <button
+            onClick={() => setOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
+          >
             <Plus size={18} /> Schedule
           </button>
         }
@@ -252,7 +269,9 @@ export default function AdminViewings() {
             key={s || "all"}
             onClick={() => setFilter(s)}
             className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all capitalize ${
-              filter === s ? "bg-[#0F253B] text-white border-[#0F253B]" : "bg-white text-gray-500 border-gray-100 hover:bg-gray-50"
+              filter === s
+                ? "bg-[#0F253B] text-white border-[#0F253B]"
+                : "bg-white text-gray-500 border-gray-100 hover:bg-gray-50"
             }`}
           >
             {s || "All"}
@@ -266,13 +285,18 @@ export default function AdminViewings() {
         <div className="space-y-6">
           {days.map(day => (
             <div key={day}>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-3">{prettyDay(day)}</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-3">
+                {prettyDay(day)}
+              </p>
               <div className="space-y-3">
                 {viewings
                   .filter(v => v.date === day)
                   .sort((a, b) => a.time.localeCompare(b.time))
                   .map(v => (
-                    <div key={v._id} className="bg-white border border-gray-100 rounded-3xl p-5 hover:shadow-lg transition-all">
+                    <div
+                      key={v._id}
+                      className="bg-white border border-gray-100 rounded-3xl p-5 hover:shadow-lg transition-all"
+                    >
                       <div className="flex items-start gap-5">
                         <div className="flex-shrink-0 w-20 text-center pt-1">
                           <Clock size={22} className="text-[#F47C3C] mx-auto" />
@@ -281,12 +305,21 @@ export default function AdminViewings() {
 
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-3">
-                            <div className="font-semibold text-lg text-[#0F253B]">{v.lead?.name || v.lead}</div>
-                            <Badge tone={STATUS_TONE[v.status]} className="capitalize">{v.status}</Badge>
+                            <div className="font-semibold text-lg text-[#0F253B]">
+                              {v.lead?.name || v.lead}
+                            </div>
+                            <Badge tone={STATUS_TONE[v.status]} className="capitalize">
+                              {v.status}
+                            </Badge>
                             {v.rescheduleHistory?.length > 0 && (
                               <span
                                 title={v.rescheduleHistory
-                                  .map((h) => `${h.fromDate} ${h.fromTime} → ${h.toDate} ${h.toTime}${h.reason ? ` (${h.reason})` : ""}`)
+                                  .map(
+                                    (h) =>
+                                      `${h.fromDate} ${h.fromTime} → ${h.toDate} ${h.toTime}${
+                                        h.reason ? ` (${h.reason})` : ""
+                                      }`
+                                  )
                                   .join("\n")}
                                 className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5"
                               >
@@ -318,6 +351,7 @@ export default function AdminViewings() {
                               )}
                             </div>
                           )}
+
                           {v.rescheduleRequest?.status === "pending" && (
                             <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3">
                               <p className="text-xs font-bold text-amber-800">
@@ -350,6 +384,7 @@ export default function AdminViewings() {
                         <div className="flex flex-col items-end gap-2">
                           <div className="text-xs text-gray-500 font-medium">{v.agent}</div>
 
+                          {/* Scheduled: full actions */}
                           {v.status === "scheduled" && (
                             <div className="flex gap-1 mt-2">
                               <button
@@ -359,19 +394,32 @@ export default function AdminViewings() {
                               >
                                 <CalendarClock size={20} />
                               </button>
-                              <button 
+                              <button
                                 onClick={() => updateViewingStatus(v._id, "done")}
                                 className="p-2 text-green-600 hover:bg-green-50 rounded-xl transition-colors"
                                 title="Mark as Done"
                               >
                                 <CheckCircle size={20} />
                               </button>
-                              <button 
+                              <button
                                 onClick={() => updateViewingStatus(v._id, "cancelled")}
                                 className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition-colors"
                                 title="Cancel Viewing"
                               >
                                 <XCircle size={20} />
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Done: only allow re-open (undo mistaken Done) */}
+                          {v.status === "done" && (
+                            <div className="flex gap-1 mt-2">
+                              <button
+                                onClick={() => updateViewingStatus(v._id, "scheduled")}
+                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
+                                title="Re-open (undo Done)"
+                              >
+                                <Clock size={20} />
                               </button>
                             </div>
                           )}
@@ -383,7 +431,9 @@ export default function AdminViewings() {
             </div>
           ))}
 
-          {viewings.length === 0 && <p className="text-center py-20 text-gray-400 text-lg">No viewings found.</p>}
+          {viewings.length === 0 && (
+            <p className="text-center py-20 text-gray-400 text-lg">No viewings found.</p>
+          )}
         </div>
       )}
 

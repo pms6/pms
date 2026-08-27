@@ -422,12 +422,15 @@ export const respondToRescheduleRequest = async (req, res) => {
 
 // @desc    Mark viewing as done / cancelled
 // @route   PATCH /api/viewings/:id/status
+// @desc    Mark viewing as done / cancelled / scheduled (admin correction)
+// @route   PATCH /api/viewings/:id/status
 export const updateViewingStatus = async (req, res) => {
   try {
     const { status } = req.body;
     const orgId = req.user.organizationId;
 
-    if (!["done", "cancelled"].includes(status)) {
+    // Allow "scheduled" so admin can correct a mistaken "done" click
+    if (!["scheduled", "done", "cancelled"].includes(status)) {
       return res.status(400).json({ message: "Invalid status" });
     }
 
@@ -438,7 +441,7 @@ export const updateViewingStatus = async (req, res) => {
     ).populate([
       { path: "lead", select: "name email phone" },
       { path: "property", select: "name" },
-      { path: "room", select: "roomName roomNumber" },
+      { path: "room", select: "roomName roomNumber title" },
     ]);
 
     if (!viewing) {
