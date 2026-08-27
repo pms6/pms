@@ -92,6 +92,17 @@ const expenseSchema = new mongoose.Schema(
     fileUrl: { type: String, default: "" },
     fileName: { type: String, default: "" },
 
+    // Receipt / invoice files (multiple).
+    // Legacy single-file fields kept for backward compatibility with old rows.
+    fileUrl: { type: String, default: "" },
+    fileName: { type: String, default: "" },
+    files: [
+      {
+        url: { type: String, default: "" },
+        name: { type: String, default: "" },
+      },
+    ],
+
     // ============================
     // Soft delete
     // ============================

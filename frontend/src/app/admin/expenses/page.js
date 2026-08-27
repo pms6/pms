@@ -87,6 +87,18 @@ const isImageReceipt = (url) => {
   return /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(clean) || /\/image\/upload\//.test(clean);
 };
 
+// Normalise legacy single-file records into a files array.
+const getExpenseFiles = (e) => {
+  if (!e) return [];
+  if (Array.isArray(e.files) && e.files.length) {
+    return e.files.filter((f) => f?.url);
+  }
+  if (e.fileUrl) {
+    return [{ url: e.fileUrl, name: e.fileName || "Receipt" }];
+  }
+  return [];
+};
+
 const fmtDateTime = (d) => {
   if (!d) return "—";
   const parsed = new Date(d);
@@ -133,6 +145,7 @@ function ExpenseDetailModal({ expense, onClose, onEdit }) {
   const e = expense;
   // createdBy is populated to { _id, email }; older rows may still be a bare id.
   const recordedBy = typeof e.createdBy === "object" && e.createdBy !== null ? e.createdBy.email : "";
+  const files = getExpenseFiles(e);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -178,30 +191,36 @@ function ExpenseDetailModal({ expense, onClose, onEdit }) {
           </div>
 
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C] mb-3">Receipt</p>
-            {e.fileUrl ? (
-              <div className="space-y-3">
-                {isImageReceipt(e.fileUrl) && (
-                  <a href={e.fileUrl} target="_blank" rel="noopener noreferrer" className="block">
-                    <img
-                      src={e.fileUrl}
-                      alt={e.fileName || "Receipt"}
-                      className="max-h-72 w-auto rounded-xl border border-gray-100 object-contain bg-gray-50"
-                    />
-                  </a>
-                )}
-                <a
-                  href={e.fileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-3 py-2 border border-gray-200 hover:bg-gray-50 rounded-xl text-xs font-bold text-[#0F253B] transition-all"
-                >
-                  <Paperclip size={14} className="text-[#F47C3C]" />
-                  {e.fileName || "Open receipt"}
-                </a>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C] mb-3">
+              Receipt{files.length !== 1 ? "s" : ""} ({files.length})
+            </p>
+            {files.length > 0 ? (
+              <div className="space-y-4">
+                {files.map((f, idx) => (
+                  <div key={`${f.url}-${idx}`} className="space-y-2">
+                    {isImageReceipt(f.url) && (
+                      <a href={f.url} target="_blank" rel="noopener noreferrer" className="block">
+                        <img
+                          src={f.url}
+                          alt={f.name || `Receipt ${idx + 1}`}
+                          className="max-h-72 w-auto rounded-xl border border-gray-100 object-contain bg-gray-50"
+                        />
+                      </a>
+                    )}
+                    <a
+                      href={f.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-3 py-2 border border-gray-200 hover:bg-gray-50 rounded-xl text-xs font-bold text-[#0F253B] transition-all"
+                    >
+                      <Paperclip size={14} className="text-[#F47C3C]" />
+                      {f.name || `Open receipt ${idx + 1}`}
+                    </a>
+                  </div>
+                ))}
               </div>
             ) : (
-              <p className="text-sm font-medium text-gray-300">No receipt attached.</p>
+              <p className="text-sm font-medium text-gray-300">No receipts attached.</p>
             )}
           </div>
 
@@ -237,17 +256,32 @@ function ExpenseModal({ expense, properties, onClose, onSave }) {
     reference: expense?.reference || "",
     notes: expense?.notes || "",
   }));
-  const [file, setFile] = useState(null);
-  // Set when the user detaches the receipt an edited expense already had, so the
-  // save clears it rather than leaving the old file in place.
-  const [dropReceipt, setDropReceipt] = useState(false);
+
+  // Existing files kept from the record (user can remove individual ones).
+  const [existingFiles, setExistingFiles] = useState(() => getExpenseFiles(expense));
+  // Newly selected File objects to upload.
+  const [newFiles, setNewFiles] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  // The receipt already on the record, unless it has been detached or replaced.
-  const keepingReceipt = isEdit && Boolean(expense.fileUrl) && !dropReceipt && !file;
+  const removeExisting = (idx) => {
+    setExistingFiles((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const removeNew = (idx) => {
+    setNewFiles((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const onFileChange = (e) => {
+    const selected = Array.from(e.target.files || []);
+    if (selected.length) {
+      setNewFiles((prev) => [...prev, ...selected]);
+    }
+    // Allow selecting the same file again later.
+    e.target.value = "";
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -256,16 +290,28 @@ function ExpenseModal({ expense, properties, onClose, onSave }) {
     try {
       const payload = { ...form };
 
-      if (file) {
-        const uploaded = await uploadFileToCloudinary(file);
-        payload.fileUrl = uploaded.url;
-        payload.fileName = uploaded.name || file.name;
-      } else if (dropReceipt || !isEdit) {
+      // Upload any newly chosen files.
+      const uploaded = [];
+      for (const file of newFiles) {
+        const result = await uploadFileToCloudinary(file);
+        uploaded.push({
+          url: result.url,
+          name: result.name || file.name,
+        });
+      }
+
+      const allFiles = [...existingFiles, ...uploaded];
+
+      // Prefer the new multi-file shape. Also keep legacy single-file fields
+      // populated so older code paths still work.
+      payload.files = allFiles;
+      if (allFiles.length > 0) {
+        payload.fileUrl = allFiles[0].url;
+        payload.fileName = allFiles[0].name;
+      } else {
         payload.fileUrl = "";
         payload.fileName = "";
       }
-      // Editing with no receipt change sends neither key, so the update leaves
-      // whatever is on the record alone.
 
       await onSave(payload);
     } catch (err) {
@@ -380,57 +426,71 @@ function ExpenseModal({ expense, properties, onClose, onSave }) {
           </div>
 
           <div>
-            <label className={LABEL}>Receipt / Invoice</label>
+            <label className={LABEL}>Receipts / Invoices</label>
 
-            {keepingReceipt && (
-              <div className="mb-2 flex items-center justify-between gap-3 px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl">
-                <a
-                  href={expense.fileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-xs font-bold text-[#0F253B] truncate hover:underline"
-                >
-                  <Paperclip size={14} className="text-[#F47C3C] shrink-0" />
-                  <span className="truncate">{expense.fileName || "Current receipt"}</span>
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setDropReceipt(true)}
-                  className="text-[11px] font-bold text-gray-400 hover:text-red-600 shrink-0"
-                >
-                  Remove
-                </button>
+            {/* Existing files that will be kept */}
+            {existingFiles.length > 0 && (
+              <div className="mb-2 space-y-1.5">
+                {existingFiles.map((f, idx) => (
+                  <div
+                    key={`${f.url}-${idx}`}
+                    className="flex items-center justify-between gap-3 px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl"
+                  >
+                    <a
+                      href={f.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-xs font-bold text-[#0F253B] truncate hover:underline"
+                    >
+                      <Paperclip size={14} className="text-[#F47C3C] shrink-0" />
+                      <span className="truncate">{f.name || `Receipt ${idx + 1}`}</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => removeExisting(idx)}
+                      className="text-[11px] font-bold text-gray-400 hover:text-red-600 shrink-0"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
 
-            {isEdit && dropReceipt && !file && (
-              <p className="mb-2 text-[11px] font-bold text-red-500">
-                Receipt will be removed when you save.{" "}
-                <button
-                  type="button"
-                  onClick={() => setDropReceipt(false)}
-                  className="text-gray-400 hover:text-[#0F253B] underline"
-                >
-                  Undo
-                </button>
-              </p>
+            {/* Newly selected files (not yet uploaded) */}
+            {newFiles.length > 0 && (
+              <div className="mb-2 space-y-1.5">
+                {newFiles.map((file, idx) => (
+                  <div
+                    key={`${file.name}-${idx}`}
+                    className="flex items-center justify-between gap-3 px-3 py-2 bg-orange-50/60 border border-orange-100 rounded-xl"
+                  >
+                    <span className="inline-flex items-center gap-2 text-xs font-bold text-[#0F253B] truncate">
+                      <Paperclip size={14} className="text-[#F47C3C] shrink-0" />
+                      <span className="truncate">{file.name}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeNew(idx)}
+                      className="text-[11px] font-bold text-gray-400 hover:text-red-600 shrink-0"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
 
             <input
               type="file"
               accept=".doc,.docx,.pdf,image/*"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              multiple
+              onChange={onFileChange}
               className="w-full text-sm font-medium text-gray-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-[#0F253B] file:text-white file:font-bold file:text-xs hover:file:bg-[#1b3a58] file:cursor-pointer"
             />
-            {file ? (
-              <p className="mt-1.5 text-[11px] text-gray-400 font-medium">Selected: {file.name}</p>
-            ) : (
-              keepingReceipt && (
-                <p className="mt-1.5 text-[11px] text-gray-400 font-medium">
-                  Choose a file to replace the current receipt.
-                </p>
-              )
-            )}
+            <p className="mt-1.5 text-[11px] text-gray-400 font-medium">
+              You can select multiple files. Images and PDFs are supported.
+            </p>
           </div>
 
           <button
@@ -771,60 +831,57 @@ export default function AdminExpenses() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-sm font-medium text-[#0F253B]">
-                {rows.map((r) => (
-                  <tr
-                    key={r._id}
-                    onClick={() => setViewRow(r)}
-                    className="hover:bg-gray-50/70 transition-colors cursor-pointer"
-                  >
-                    <td className="p-4 text-xs text-gray-500">
-                      {new Date(r.date).toLocaleDateString("en-GB")}
-                    </td>
-                    <td className="p-4 text-xs font-bold">{r.category}</td>
-                    <td className="p-4 text-xs">
-                      {r.description || "—"}
-                      {r.fileUrl && (
-                        <a
-                          href={r.fileUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="ml-2 text-[10px] font-bold text-[#F47C3C] hover:underline"
-                        >
-                          receipt
-                        </a>
-                      )}
-                    </td>
-                    <td className="p-4 text-xs text-gray-500">{r.property || "—"}</td>
-                    <td className="p-4 text-xs text-gray-500">{r.supplier || "—"}</td>
-                    <td className="p-4 text-right font-bold">{money(r.amount)}</td>
-                    <td className="p-4 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setViewRow(r); }}
-                          className="p-1.5 text-gray-300 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg transition-all"
-                          title="View details"
-                        >
-                          <Eye size={15} />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); openEdit(r); }}
-                          className="p-1.5 text-gray-300 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg transition-all"
-                          title="Edit"
-                        >
-                          <Pencil size={15} />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); removeExpense(r); }}
-                          className="p-1.5 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                          title="Delete"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((r) => {
+                  const fileCount = getExpenseFiles(r).length;
+                  return (
+                    <tr
+                      key={r._id}
+                      onClick={() => setViewRow(r)}
+                      className="hover:bg-gray-50/70 transition-colors cursor-pointer"
+                    >
+                      <td className="p-4 text-xs text-gray-500">
+                        {new Date(r.date).toLocaleDateString("en-GB")}
+                      </td>
+                      <td className="p-4 text-xs font-bold">{r.category}</td>
+                      <td className="p-4 text-xs">
+                        {r.description || "—"}
+                        {fileCount > 0 && (
+                          <span className="ml-2 text-[10px] font-bold text-[#F47C3C]">
+                            {fileCount === 1 ? "receipt" : `${fileCount} receipts`}
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-4 text-xs text-gray-500">{r.property || "—"}</td>
+                      <td className="p-4 text-xs text-gray-500">{r.supplier || "—"}</td>
+                      <td className="p-4 text-right font-bold">{money(r.amount)}</td>
+                      <td className="p-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setViewRow(r); }}
+                            className="p-1.5 text-gray-300 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg transition-all"
+                            title="View details"
+                          >
+                            <Eye size={15} />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openEdit(r); }}
+                            className="p-1.5 text-gray-300 hover:text-[#F47C3C] hover:bg-orange-50 rounded-lg transition-all"
+                            title="Edit"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); removeExpense(r); }}
+                            className="p-1.5 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                            title="Delete"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

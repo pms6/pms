@@ -18,6 +18,7 @@ const EDITABLE_KEYS = [
   "notes",
   "fileUrl",
   "fileName",
+  "files",
 ];
 
 const pickPayload = (body) => {
