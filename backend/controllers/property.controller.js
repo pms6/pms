@@ -1,24 +1,9 @@
 // controllers/propertyController.js
 import Property from "../models/Property.js";
 import Room from "../models/Room.js";
-
-/**
- * Generate Property Code
- * Example: PROP-000001
- *
- * Derives the next number from the HIGHEST existing code, not the document
- * count — otherwise deleting a property makes count+1 collide with a code that
- * still exists (propertyCode is unique), throwing a duplicate-key error.
- */
-const generatePropertyCode = async () => {
-  const last = await Property.findOne({ propertyCode: /^PROP-\d+$/ })
-    .sort({ propertyCode: -1 })
-    .select("propertyCode")
-    .lean();
-
-  const lastNum = last ? parseInt(last.propertyCode.slice(5), 10) || 0 : 0;
-  return `PROP-${String(lastNum + 1).padStart(6, "0")}`;
-};
+// PROP-000001 sequencing lives in utils/codes.js so approved property
+// submissions land in the same sequence as properties created in-app.
+import { generatePropertyCode } from "../utils/codes.js";
 
 /**
  * Create Property

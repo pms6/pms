@@ -279,6 +279,38 @@ const propertySchema = new mongoose.Schema(
         String
     ],
 
+    // ============================
+    // Source
+    //
+    // Set when a property arrives through an organization's public page
+    // (/list-property/<organization>) rather than being created in the app.
+    // Those pages need no sign-in, so this is the only record of who sent the
+    // property in and how to reach them. Absent on anything created in-app.
+    // ============================
+
+    source:{
+        via:{
+            type:String,
+            enum:[
+                "PUBLIC_FORM",
+                "CSV_IMPORT"
+            ]
+        },
+        name:String,
+        company:String,
+        email:String,
+        phone:String,
+        role:{
+            type:String,
+            enum:[
+                "AGENT",
+                "LANDLORD",
+                "OTHER"
+            ]
+        },
+        receivedAt:Date
+    },
+
     status: {
         type: String,
         enum: [

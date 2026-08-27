@@ -1,24 +1,9 @@
 // controllers/roomController.js
 import Room from "../models/Room.js";
 import Property from "../models/Property.js";
-
-/**
- * Generate Room Code
- * Example: RM-000001
- *
- * Derives the next number from the HIGHEST existing code, not the document
- * count — otherwise deleting a room makes count+1 collide with a code that
- * still exists (listingCode is unique), throwing a duplicate-key error.
- */
-const generateRoomCode = async () => {
-  const last = await Room.findOne({ listingCode: /^RM-\d+$/ })
-    .sort({ listingCode: -1 })
-    .select("listingCode")
-    .lean();
-
-  const lastNum = last ? parseInt(last.listingCode.slice(3), 10) || 0 : 0;
-  return `RM-${String(lastNum + 1).padStart(6, "0")}`;
-};
+// RM-000001 sequencing lives in utils/codes.js so rooms created by approving a
+// property submission land in the same sequence as rooms created in-app.
+import { generateRoomCode } from "../utils/codes.js";
 
 /**
  * Create Room

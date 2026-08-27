@@ -53,6 +53,16 @@ const apiService = {
     }
   },
 
+  async deleteProperty(id) {
+    try {
+      const response = await api.delete(`/properties/${id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Delete property error:', error);
+      throw error.response?.data || error;
+    }
+  },
+
   async updateProperty(id, payload) {
     try {
       const response = await api.put(`/properties/${id}`, payload);
@@ -233,6 +243,11 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
   const [tenancy, setTenancy] = useState(null);
   const [manageRoom, setManageRoom] = useState(null);
   const [editingContract, setEditingContract] = useState(false);
+  // Deleting archives the property, so it is confirmed in a dialog rather than
+  // fired straight off the header button.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   const fetchPropertyData = async () => {
     try {
@@ -403,19 +418,116 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
     "MAINTENANCE": "red"
   };
 
+  // What blocks a delete — mirrors the check deleteProperty runs server-side.
+  const occupiedRooms = rooms.filter((r) => r.status === "OCCUPIED");
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
         <Link href={basePath} className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]">
           <ArrowLeft size={16} /> Back to properties
         </Link>
-        <Link
-          href={`${basePath}/${id}/edit`}
-          className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-100 hover:bg-gray-50 text-[#0F253B] font-bold text-sm rounded-xl transition-all"
-        >
-          <Pencil size={16} /> Edit Property
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`${basePath}/${id}/edit`}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-100 hover:bg-gray-50 text-[#0F253B] font-bold text-sm rounded-xl transition-all"
+          >
+            <Pencil size={16} /> Edit Property
+          </Link>
+          <button
+            type="button"
+            onClick={() => { setDeleteError(""); setConfirmingDelete(true); }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-100 hover:bg-red-50 hover:border-red-200 text-red-600 font-bold text-sm rounded-xl transition-all"
+          >
+            <Trash2 size={16} /> Delete
+          </button>
+        </div>
       </div>
+
+      {confirmingDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => !deleting && setConfirmingDelete(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                <Trash2 size={18} />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-[#0F253B]">
+                  Delete {property.name}?
+                </h2>
+                <p className="text-sm text-gray-500 font-medium mt-1">
+                  It is archived rather than erased — its {rooms.length} room
+                  {rooms.length === 1 ? "" : "s"}, tenancies and history stay in
+                  the database, and it disappears from the properties list and
+                  the public site.
+                </p>
+              </div>
+            </div>
+
+            {/* The API refuses to delete a property while any room is still
+                OCCUPIED. Say so before the button is pressed rather than after,
+                and name the rooms that are in the way. */}
+            {occupiedRooms.length > 0 && (
+              <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl">
+                <p className="text-xs font-bold text-amber-800">
+                  {occupiedRooms.length} room
+                  {occupiedRooms.length === 1 ? " is" : "s are"} still occupied
+                </p>
+                <p className="text-[11px] font-medium text-amber-700 mt-1">
+                  {occupiedRooms.map((r) => r.name).join(", ")} — a property
+                  cannot be deleted while anyone is living in it. End those
+                  tenancies, or set the room
+                  {occupiedRooms.length === 1 ? "" : "s"} to another status
+                  first.
+                </p>
+              </div>
+            )}
+
+            {deleteError && (
+              <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setConfirmingDelete(false)}
+                className="px-4 py-2.5 bg-white border border-gray-100 hover:bg-gray-50 text-[#0F253B] font-bold text-sm rounded-xl disabled:opacity-60 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting || occupiedRooms.length > 0}
+                onClick={async () => {
+                  setDeleting(true);
+                  setDeleteError("");
+                  try {
+                    await apiService.deleteProperty(id);
+                    router.push(basePath);
+                  } catch (err) {
+                    // The API refuses while any room is still OCCUPIED — show
+                    // that reason rather than a generic failure.
+                    setDeleteError(err.message || "Failed to delete this property.");
+                    setDeleting(false);
+                  }
+                }}
+                className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-xl disabled:opacity-60 transition-all"
+              >
+                {deleting ? "Deleting…" : "Delete property"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Cover */}
       <div className="relative rounded-3xl overflow-hidden h-56 bg-gradient-to-br from-[#0F253B] to-[#1c3e5e]">

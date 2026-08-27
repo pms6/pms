@@ -56,6 +56,9 @@ const env = {
     cloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
     apiKey: process.env.CLOUDINARY_API_KEY || "",
     apiSecret: process.env.CLOUDINARY_API_SECRET || "",
+    // Unsigned preset used to copy remote CSV media into our account
+    // (see utils/cloudinaryMirror.js). No API secret needed for this.
+    uploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET || "",
   },
 
   mail: {
