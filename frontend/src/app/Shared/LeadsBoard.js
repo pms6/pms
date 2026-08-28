@@ -241,21 +241,21 @@ export default function LeadsBoard({ title = "Leads", subtitle = "Your enquiry p
                           <button
                             onClick={() => setDetailLead(l)}
                             title="View details"
-                            className="text-gray-300 hover:text-[#F47C3C] opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                            className="text-gray-400 hover:text-[#F47C3C] opacity-0 group-hover:opacity-100 transition-all shrink-0"
                           >
                             <Eye size={15} />
                           </button>
                           <button
                             onClick={() => setFormState({ lead: l })}
                             title="Edit lead"
-                            className="text-gray-300 hover:text-[#0F253B] opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                            className="text-gray-400 hover:text-[#0F253B] opacity-0 group-hover:opacity-100 transition-all shrink-0"
                           >
                             <Edit2 size={15} />
                           </button>
                           <button
                             onClick={() => removeLead(l)}
                             title="Delete lead"
-                            className="text-gray-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                            className="text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all shrink-0"
                           >
                             <Trash2 size={15} />
                           </button>
