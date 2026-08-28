@@ -33,6 +33,7 @@ const useViewingsData = (filter = "") => {
   const organizationId = user?.organization?._id || user?.organizationId;
   const userId = user?._id;
 
+  const [submitting, setSubmitting] = useState(false);
   const [allViewings, setAllViewings] = useState([]);
   const [leads, setLeads] = useState([]);
   const [properties, setProperties] = useState([]);
@@ -188,11 +189,16 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;          // ignore extra clicks
+
+    setSubmitting(true);
     try {
       await onCreate(form);
       onClose();
     } catch (error) {
       alert(error.response?.data?.message || "Failed to schedule viewing");
+    } finally {
+      setSubmitting(false);          // re-enable only on error
     }
   };
 
@@ -299,9 +305,10 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
 
           <button
             type="submit"
-            className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98]"
+            disabled={submitting}
+            className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
           >
-            Schedule Viewing
+            {submitting ? "Scheduling…" : "Schedule Viewing"}
           </button>
         </form>
       </div>
