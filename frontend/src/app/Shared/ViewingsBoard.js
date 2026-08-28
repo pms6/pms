@@ -60,7 +60,7 @@ const useViewingsData = (filter = "") => {
     try {
       const [lRes, pRes, rRes] = await Promise.all([
         api.get("/leads"),
-        api.get("/properties"),
+        api.get("/properties", { params: { limit: 1000 } }),
         api.get("/rooms"),
       ]);
       setLeads(lRes.data?.data || lRes.data || []);
