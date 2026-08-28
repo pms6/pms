@@ -33,7 +33,6 @@ const useViewingsData = (filter = "") => {
   const organizationId = user?.organization?._id || user?.organizationId;
   const userId = user?._id;
 
-  const [submitting, setSubmitting] = useState(false);
   const [allViewings, setAllViewings] = useState([]);
   const [leads, setLeads] = useState([]);
   const [properties, setProperties] = useState([]);
@@ -150,15 +149,21 @@ const useViewingsData = (filter = "") => {
 const STATUS_TONE = { scheduled: "orange", done: "green", cancelled: "gray" };
 
 function prettyDay(iso) {
+  if (!iso) return "";
   const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" });
+  return d.toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
 }
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
   const [form, setForm] = useState({
-    date: todayISO(),
+    date: "", // empty on server → no hydration mismatch
     time: "10:00",
     lead: "",
     property: "",
@@ -166,6 +171,12 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
     agent: "",
     status: "scheduled",
   });
+  const [submitting, setSubmitting] = useState(false);
+
+  // Set today's date only on the client
+  useEffect(() => {
+    setForm((prev) => ({ ...prev, date: todayISO() }));
+  }, []);
 
   const handleChange = (k) => (e) => {
     const value = e.target.value;
@@ -182,14 +193,15 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
     "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
 
   const availableRooms = form.property
-    ? allRooms.filter(
-        (r) => r.propertyId === form.property || r.propertyId?._id === form.property
-      )
+    ? allRooms.filter((r) => {
+        const pid = r.propertyId?._id ?? r.propertyId;
+        return String(pid) === String(form.property);
+      })
     : [];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (submitting) return;          // ignore extra clicks
+    if (submitting) return; // block extra clicks
 
     setSubmitting(true);
     try {
@@ -198,7 +210,7 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
     } catch (error) {
       alert(error.response?.data?.message || "Failed to schedule viewing");
     } finally {
-      setSubmitting(false);          // re-enable only on error
+      setSubmitting(false);
     }
   };
 
@@ -213,7 +225,7 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
       >
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-bold text-[#0F253B]">Schedule Viewing</h3>
-          <button onClick={onClose}>
+          <button onClick={onClose} type="button">
             <X size={20} />
           </button>
         </div>
@@ -286,7 +298,8 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
                 <option value="">Select room…</option>
                 {availableRooms.map((r) => (
                   <option key={r._id} value={r._id}>
-                    {r.roomName || r.title} {r.roomNumber ? `(${r.roomNumber})` : ""}
+                    {r.roomName || r.title}{" "}
+                    {r.roomNumber ? `(${r.roomNumber})` : ""}
                   </option>
                 ))}
               </select>
@@ -343,7 +356,8 @@ export default function ViewingsBoard({
 
   if (authLoading || initialLoading)
     return <div className="p-8 text-center text-gray-500">Loading data...</div>;
-  if (!user) return <div className="p-8 text-center text-red-500">Please log in.</div>;
+  if (!user)
+    return <div className="p-8 text-center text-red-500">Please log in.</div>;
 
   return (
     <div className="space-y-5">
@@ -397,7 +411,9 @@ export default function ViewingsBoard({
                       <div className="flex items-start gap-5">
                         <div className="flex-shrink-0 w-20 text-center pt-1">
                           <Clock size={22} className="text-[#F47C3C] mx-auto" />
-                          <div className="font-bold text-xl mt-1 text-[#0F253B]">{v.time}</div>
+                          <div className="font-bold text-xl mt-1 text-[#0F253B]">
+                            {v.time}
+                          </div>
                         </div>
 
                         <div className="flex-1 min-w-0">
@@ -405,7 +421,10 @@ export default function ViewingsBoard({
                             <div className="font-semibold text-lg text-[#0F253B]">
                               {v.lead?.name || v.lead}
                             </div>
-                            <Badge tone={STATUS_TONE[v.status]} className="capitalize">
+                            <Badge
+                              tone={STATUS_TONE[v.status]}
+                              className="capitalize"
+                            >
                               {v.status}
                             </Badge>
                             {v.rescheduleHistory?.length > 0 && (
@@ -429,7 +448,9 @@ export default function ViewingsBoard({
                             <MapPin size={16} className="text-gray-400" />
                             <span>{v.property?.name || v.property}</span>
                             {v.room && <span className="text-gray-400">•</span>}
-                            <span>{v.room?.roomName || v.room?.title || v.room}</span>
+                            <span>
+                              {v.room?.roomName || v.room?.title || v.room}
+                            </span>
                           </div>
 
                           {v.lead && (
@@ -452,7 +473,8 @@ export default function ViewingsBoard({
                           {v.rescheduleRequest?.status === "pending" && (
                             <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3">
                               <p className="text-xs font-bold text-amber-800">
-                                Tenant requested {v.rescheduleRequest.requestedDate} at{" "}
+                                Tenant requested{" "}
+                                {v.rescheduleRequest.requestedDate} at{" "}
                                 {v.rescheduleRequest.requestedTime}
                               </p>
                               {v.rescheduleRequest.reason && (
@@ -462,13 +484,17 @@ export default function ViewingsBoard({
                               )}
                               <div className="mt-2 flex gap-2">
                                 <button
-                                  onClick={() => respondToRequest(v._id, "approve")}
+                                  onClick={() =>
+                                    respondToRequest(v._id, "approve")
+                                  }
                                   className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-green-700"
                                 >
                                   Approve &amp; move
                                 </button>
                                 <button
-                                  onClick={() => respondToRequest(v._id, "decline")}
+                                  onClick={() =>
+                                    respondToRequest(v._id, "decline")
+                                  }
                                   className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-800 transition hover:bg-amber-100"
                                 >
                                   Decline
@@ -479,13 +505,11 @@ export default function ViewingsBoard({
                         </div>
 
                         <div className="flex flex-col items-end gap-2">
-                          {/* `agent` is who is SHOWING the property — free
-                              text on the form. "Scheduled by" is the member
-                              who actually booked it. */}
-                          <div className="text-xs text-gray-500 font-medium">{v.agent}</div>
+                          <div className="text-xs text-gray-500 font-medium">
+                            {v.agent}
+                          </div>
                           <AddedBy record={v} verb="Scheduled by" />
 
-                          {/* Scheduled: full actions */}
                           {v.status === "scheduled" && (
                             <div className="flex gap-1 mt-2">
                               <button
@@ -496,14 +520,18 @@ export default function ViewingsBoard({
                                 <CalendarClock size={20} />
                               </button>
                               <button
-                                onClick={() => updateViewingStatus(v._id, "done")}
+                                onClick={() =>
+                                  updateViewingStatus(v._id, "done")
+                                }
                                 className="p-2 text-green-600 hover:bg-green-50 rounded-xl transition-colors"
                                 title="Mark as Done"
                               >
                                 <CheckCircle size={20} />
                               </button>
                               <button
-                                onClick={() => updateViewingStatus(v._id, "cancelled")}
+                                onClick={() =>
+                                  updateViewingStatus(v._id, "cancelled")
+                                }
                                 className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition-colors"
                                 title="Cancel Viewing"
                               >
@@ -512,12 +540,12 @@ export default function ViewingsBoard({
                             </div>
                           )}
 
-                          {/* Done: put it back on the schedule, to undo a
-                              mistaken "Done" click. */}
                           {v.status === "done" && (
                             <div className="flex gap-1 mt-2">
                               <button
-                                onClick={() => updateViewingStatus(v._id, "scheduled")}
+                                onClick={() =>
+                                  updateViewingStatus(v._id, "scheduled")
+                                }
                                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
                                 title="Re-open (undo Done)"
                               >
@@ -534,7 +562,9 @@ export default function ViewingsBoard({
           ))}
 
           {viewings.length === 0 && (
-            <p className="text-center py-20 text-gray-400 text-lg">No viewings found.</p>
+            <p className="text-center py-20 text-gray-400 text-lg">
+              No viewings found.
+            </p>
           )}
         </div>
       )}
