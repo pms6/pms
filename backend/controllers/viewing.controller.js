@@ -2,6 +2,16 @@ import Viewing from "../models/Viewing.js";
 import Lead from "../models/Lead.js";
 import Room from "../models/Room.js";
 
+// Every staff-facing response shapes a viewing the same way. createdBy is here
+// so the board can name whoever scheduled it: rows created before
+// createdByEmail existed have only the ref to go on.
+const POPULATE = [
+  { path: "lead", select: "name email phone" },
+  { path: "property", select: "name" },
+  { path: "room", select: "roomName roomNumber title" },
+  { path: "createdBy", select: "email" },
+];
+
 // @desc    Get the signed-in TENANT's own viewings (matched by their leads).
 // @route   GET /api/viewings/my
 //
@@ -93,9 +103,7 @@ export const getViewings = async (req, res) => {
     if (status) query.status = status;
 
     const viewings = await Viewing.find(query)
-      .populate("lead", "name email phone")
-      .populate("property", "name")
-      .populate("room", "roomName roomNumber title")
+      .populate(POPULATE)
       .sort({ date: 1, time: 1 });
 
     res.json(viewings);
@@ -128,15 +136,15 @@ export const createViewing = async (req, res) => {
       ...req.body,
       organizationId: organizationId,
       createdBy: createdBy,        // optional
+      // Who scheduled it. Taken from the session, never the body, so the board
+      // names the member who actually did it.
+      createdByEmail: req.user.email || "",
+      createdByRole: req.user.organizationRole || "",
     });
 
     const savedViewing = await viewing.save();
 
-    const populated = await savedViewing.populate([
-      { path: "lead", select: "name email phone" },
-      { path: "property", select: "name" },
-      { path: "room", select: "roomName roomNumber title" },
-    ]);
+    const populated = await savedViewing.populate(POPULATE);
 
     res.status(201).json(populated);
   } catch (error) {
@@ -166,11 +174,7 @@ export const updateViewing = async (req, res) => {
     Object.assign(viewing, req.body);
     const updated = await viewing.save();
 
-    const populated = await updated.populate([
-      { path: "lead", select: "name email phone" },
-      { path: "property", select: "name" },
-      { path: "room", select: "roomName roomNumber" },
-    ]);
+    const populated = await updated.populate(POPULATE);
 
     res.json(populated);
   } catch (error) {
@@ -204,12 +208,6 @@ export const deleteViewing = async (req, res) => {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/; // YYYY-MM-DD
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/; // HH:mm, 24h
-
-const POPULATE = [
-  { path: "lead", select: "name email phone" },
-  { path: "property", select: "name" },
-  { path: "room", select: "roomName roomNumber title" },
-];
 
 // Moves a viewing to a new slot and records where it came from. Used by both
 // the operator's direct reschedule and the approval of a tenant's request, so
@@ -429,7 +427,8 @@ export const updateViewingStatus = async (req, res) => {
     const { status } = req.body;
     const orgId = req.user.organizationId;
 
-    // Allow "scheduled" so admin can correct a mistaken "done" click
+    // "scheduled" is allowed as a target so any staff member can re-open a
+    // viewing and correct a mistaken "done" click.
     if (!["scheduled", "done", "cancelled"].includes(status)) {
       return res.status(400).json({ message: "Invalid status" });
     }
@@ -438,11 +437,7 @@ export const updateViewingStatus = async (req, res) => {
       { _id: req.params.id, organizationId: orgId, isDeleted: false },
       { status },
       { new: true }
-    ).populate([
-      { path: "lead", select: "name email phone" },
-      { path: "property", select: "name" },
-      { path: "room", select: "roomName roomNumber title" },
-    ]);
+    ).populate(POPULATE);
 
     if (!viewing) {
       return res.status(404).json({ message: "Viewing not found" });

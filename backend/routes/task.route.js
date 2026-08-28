@@ -24,19 +24,25 @@ router.use(protect);
 // to distinguish admin from member anyway (a member gets a filtered view rather
 // than a flat refusal on the shared routes), so keeping it in one place avoids
 // two sources of truth for the same rule.
-router.get("/my", getMyTasks);
-router.get("/stats", getTaskStats);
+
+// Readable by any staff member of the organization.
+router.get("/my", getMyTasks); // just the ones assigned to me
+router.get("/stats", getTaskStats); // dashboard aggregates
 router.get("/assignable-members", getAssignableMembers);
+router.get("/", getTasks); //     every task on the team
 
-router.get("/", getTasks);
+// Registered AFTER every literal GET segment, so "/stats" and
+// "/assignable-members" are not matched as an :id and rejected as an invalid id.
+router.get("/:id", getTaskById); // one task in full, with its whole history
+
+// Owner only — assigning work.
 router.post("/", createTask);
-
-router.get("/:id", getTaskById);
 router.put("/:id", updateTask);
 router.patch("/:id/reschedule", rescheduleTask);
 router.delete("/:id", deleteTask);
 
-// The only write a team member can make.
+// The only write a non-owner can make: a comment from anyone on the team, or a
+// status update from an assignee. Never a reassignment.
 router.post("/:id/progress", addTaskProgress);
 
 export default router;

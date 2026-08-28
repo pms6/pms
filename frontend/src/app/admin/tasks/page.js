@@ -804,7 +804,12 @@ export default function AdminTasks() {
                       <span className="block text-[10px] text-gray-400">{dueLabel(t)}</span>
                     </td>
                     <td className="p-4 text-xs text-gray-500">
-                      {t.progressCount || 0}
+                      {/* Updates move the task; comments are the team talking
+                          about it. Counted apart so neither hides the other. */}
+                      <span className="font-bold">{t.progressCount || 0}</span>
+                      {(t.commentCount || 0) > 0 && (
+                        <span className="text-gray-400"> · {t.commentCount} comment{t.commentCount === 1 ? "" : "s"}</span>
+                      )}
                       {t.lastUpdate && (
                         <span className="block text-[10px] text-gray-400 truncate max-w-[9rem]">
                           {fmtDateTime(t.lastUpdate.createdAt)}

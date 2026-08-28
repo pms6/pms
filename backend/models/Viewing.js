@@ -17,6 +17,21 @@ const viewingSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Who scheduled this viewing, denormalized at creation so the board can
+    // name them without a populate and the attribution survives them leaving
+    // the team. Viewings are staff-only, so createdByRole is always set.
+    createdByEmail: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    createdByRole: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     // ============================
     // Core Viewing Fields
     // ============================

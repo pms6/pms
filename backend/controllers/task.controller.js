@@ -8,9 +8,23 @@ import User from "../models/User.js";
 // Permissions
 //
 // Admin  = the organization OWNER. Only they may create, assign, reassign,
-//          edit or delete a task, and only they see every task.
-// Member = MANAGER / AGENT / FINANCE. They see the tasks assigned to them and
-//          may append progress, nothing else.
+//          reschedule, edit or delete a task. Assignment in particular is
+//          owner-only: no other role can put work on somebody.
+// Member = MANAGER / AGENT / FINANCE. They can READ every task in their own
+//          organization and COMMENT on any of them, so the team has one shared
+//          view of the work. What they cannot do is change a task: only the
+//          owner or an actual assignee may post a status update, and only the
+//          owner may assign.
+//
+// The three tiers, in one place:
+//
+//   action              OWNER   assignee   other staff   tenant
+//   ------------------  -----   --------   -----------   ------
+//   see task detail      yes      yes         yes          no
+//   comment              yes      yes         yes          no
+//   status update        yes      yes         no           no
+//   create / assign      yes      no          no           no
+//   edit / delete        yes      no          no           no
 //
 // protect() also resolves an organizationId for TENANT accounts from their own
 // Tenant record, so every handler must check the role and not merely the
@@ -87,14 +101,35 @@ const daysUntilDue = (dueDate) => {
 
 // Shape one task for the client: derived status plus a couple of conveniences
 // the dashboard and lists would otherwise recompute per row.
-const decorate = (task) => ({
-  ...task,
-  status: normalizeStatus(task.status),
-  effectiveStatus: effectiveStatus(task),
-  daysUntilDue: daysUntilDue(task.dueDate),
-  progressCount: task.progress?.length || 0,
-  lastUpdate: task.progress?.length ? task.progress[task.progress.length - 1] : null,
-});
+//
+// `req` carries the viewer, so each row also states what THIS person may do
+// with it. The UI renders from those flags instead of re-deriving the rules
+// from a role string, which is what keeps the buttons and the API agreeing on
+// who can update and who can only comment.
+const decorate = (task, req) => {
+  const progress = task.progress || [];
+  const comments = progress.filter((p) => p.kind === "comment");
+  const updates = progress.filter((p) => p.kind !== "comment");
+  const mine = req ? isAssignedTo(task, req.user._id) : false;
+
+  return {
+    ...task,
+    status: normalizeStatus(task.status),
+    effectiveStatus: effectiveStatus(task),
+    daysUntilDue: daysUntilDue(task.dueDate),
+    progressCount: updates.length,
+    commentCount: comments.length,
+    lastUpdate: updates.length ? updates[updates.length - 1] : null,
+    lastComment: comments.length ? comments[comments.length - 1] : null,
+
+    // Viewer-relative. Absent `req` (nothing does that today) they default to
+    // read-only, which is the safe direction for a permission flag.
+    isMine: mine,
+    canComment: req ? isStaff(req) : false,
+    canUpdateStatus: req ? canUpdateStatus(task, req) : false,
+    canManage: req ? isAdmin(req) : false,
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Input sanitisers
@@ -168,6 +203,15 @@ const resolveAssignees = async (userIds, organizationId) => {
 const isAssignedTo = (task, userId) =>
   (task.assignees || []).some((a) => String(a.userId) === String(userId));
 
+/**
+ * May this caller post a STATUS update on this task?
+ *
+ * The owner can move any task; an assignee can move their own. Everybody else
+ * on the team is limited to comments, which is what keeps a task visible to the
+ * whole organization without becoming editable by it.
+ */
+const canUpdateStatus = (task, req) => isAdmin(req) || isAssignedTo(task, req.user._id);
+
 const applyStatusSideEffects = (task, status, userId) => {
   task.status = status;
   if (status === "Done") {
@@ -216,12 +260,18 @@ export const getAssignableMembers = async (req, res) => {
 };
 
 // ===========================================================================
-// ADMIN — every task, with filters
+// Every task in the organization, with filters.
+//
+// Open to ALL staff, not just the owner: the team shares one view of the work,
+// so an agent can open a task that sits with somebody else and comment on it.
+// What they still cannot do is change it — the per-row canUpdateStatus /
+// canManage flags say so, and the write endpoints enforce it independently.
+//
 // @route GET /api/v1/tasks
 // ===========================================================================
 export const getTasks = async (req, res) => {
   try {
-    if (denyNonAdmin(req, res)) return;
+    if (denyNonStaff(req, res)) return;
 
     const { status, priority, assignee, search } = req.query;
     const filter = { organizationId: req.user.organizationId, isDeleted: false };
@@ -236,7 +286,8 @@ export const getTasks = async (req, res) => {
     }
 
     const tasks = await Task.find(filter).sort({ dueDate: 1, createdAt: -1 }).lean();
-    let data = tasks.map(decorate);
+    // Not `.map(decorate)` — map would pass the array index as the viewer.
+    let data = tasks.map((t) => decorate(t, req));
 
     // Status is filtered AFTER decorating, because "Overdue" is derived and so
     // cannot be expressed as a query on the stored field.
@@ -244,7 +295,19 @@ export const getTasks = async (req, res) => {
       data = data.filter((t) => t.effectiveStatus === normalizeStatus(status));
     }
 
-    return res.status(200).json({ success: true, total: data.length, data });
+    // Counts for the tab strip, so a member view does not need the admin-only
+    // stats endpoint just to label its filters.
+    const stats = data.reduce(
+      (acc, t) => {
+        acc.total++;
+        acc[t.effectiveStatus] = (acc[t.effectiveStatus] || 0) + 1;
+        if (t.isMine) acc.mine++;
+        return acc;
+      },
+      { total: 0, mine: 0 }
+    );
+
+    return res.status(200).json({ success: true, total: data.length, data, stats });
   } catch (error) {
     console.error("Get Tasks Error:", error);
     return res.status(500).json({ success: false, message: "Failed to load tasks." });
@@ -267,7 +330,7 @@ export const getMyTasks = async (req, res) => {
       .sort({ dueDate: 1, createdAt: -1 })
       .lean();
 
-    const data = tasks.map(decorate);
+    const data = tasks.map((t) => decorate(t, req));
 
     // A compact summary so the member view can show their own counts without
     // calling the admin-only stats endpoint.
@@ -300,7 +363,7 @@ export const getTaskStats = async (req, res) => {
       isDeleted: false,
     }).lean();
 
-    const decorated = tasks.map(decorate);
+    const decorated = tasks.map((t) => decorate(t, req));
 
     const byStatus = {
       "Not Started": 0,
@@ -377,7 +440,12 @@ export const getTaskStats = async (req, res) => {
 };
 
 // ===========================================================================
-// One task. Admin sees any; a member only one assigned to them.
+// One task, in full, including its whole progress and comment history.
+//
+// Any staff member of the organization may open any of its tasks. The
+// organizationId in the query is the tenant-isolation boundary and still holds:
+// a task belonging to another organization is simply not found.
+//
 // @route GET /api/v1/tasks/:id
 // ===========================================================================
 export const getTaskById = async (req, res) => {
@@ -395,13 +463,7 @@ export const getTaskById = async (req, res) => {
 
     if (!task) return res.status(404).json({ success: false, message: "Task not found." });
 
-    // A member may only open a task they are on. Same 404 as a missing task, so
-    // this cannot be used to probe which task ids exist.
-    if (!isAdmin(req) && !isAssignedTo(task, req.user._id)) {
-      return res.status(404).json({ success: false, message: "Task not found." });
-    }
-
-    return res.status(200).json({ success: true, data: decorate(task) });
+    return res.status(200).json({ success: true, data: decorate(task, req) });
   } catch (error) {
     console.error("Get Task Error:", error);
     return res.status(500).json({ success: false, message: "Failed to load the task." });
@@ -475,7 +537,7 @@ export const createTask = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Task created and assigned.",
-      data: decorate(task.toObject()),
+      data: decorate(task.toObject(), req),
     });
   } catch (error) {
     console.error("Create Task Error:", error);
@@ -565,7 +627,7 @@ export const updateTask = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Task updated.",
-      data: decorate(task.toObject()),
+      data: decorate(task.toObject(), req),
     });
   } catch (error) {
     console.error("Update Task Error:", error);
@@ -611,6 +673,7 @@ export const rescheduleTask = async (req, res) => {
       }`;
 
     task.progress.push({
+      kind: "update",
       status: stored === "Overdue" ? "In Progress" : stored,
       remark: note,
       attachments: [],
@@ -632,7 +695,7 @@ export const rescheduleTask = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Task rescheduled.",
-      data: decorate(task.toObject()),
+      data: decorate(task.toObject(), req),
     });
   } catch (error) {
     console.error("Reschedule Task Error:", error);
@@ -667,11 +730,16 @@ export const deleteTask = async (req, res) => {
 };
 
 // ===========================================================================
-// Append a progress update. Admin on any task; a member only on their own.
+// Append to a task's timeline. Two kinds of entry come through here:
 //
-// This is the ONLY write a team member can make. It cannot change assignees,
-// priority or dates — only the status, plus a remark and attachments — so
-// reassignment stays impossible from the member side.
+//   kind "comment" — ANY staff member of the organization, on ANY task. Carries
+//                    no status, so it cannot move the work; it is discussion.
+//   kind "update"  — the owner on any task, an assignee on their own. Moves the
+//                    task to a status and can be flagged as a formal report.
+//
+// This is the ONLY write a non-owner can make, and it reaches neither
+// assignees, priority nor dates — so assignment stays owner-only no matter what
+// a member posts here.
 //
 // @route POST /api/v1/tasks/:id/progress
 // ===========================================================================
@@ -689,28 +757,37 @@ export const addTaskProgress = async (req, res) => {
     });
     if (!task) return res.status(404).json({ success: false, message: "Task not found." });
 
-    if (!isAdmin(req) && !isAssignedTo(task, req.user._id)) {
-      return res.status(404).json({ success: false, message: "Task not found." });
-    }
-
     const { status, remark, attachments, isReport } = req.body;
 
-    const normalized = normalizeIncomingStatus(status);
-    if (!normalized) {
-      return res.status(400).json({ success: false, message: "A valid status is required." });
-    }
+    // Trust the caller's rights, not the flag they sent: anyone who cannot post
+    // a status update is writing a comment, whatever `kind` says.
+    const mayUpdate = canUpdateStatus(task, req);
+    const wantsComment = req.body.kind === "comment";
+    const isComment = wantsComment || !mayUpdate;
+
     if (!remark?.trim() && !(Array.isArray(attachments) && attachments.length)) {
       return res.status(400).json({
         success: false,
-        message: "Add a remark or an attachment to record an update.",
+        message: isComment
+          ? "Write a comment or attach a file."
+          : "Add a remark or an attachment to record an update.",
       });
     }
 
+    // A status is required to move the task, and meaningless on a comment.
+    const normalized = isComment ? null : normalizeIncomingStatus(status);
+    if (!isComment && !normalized) {
+      return res.status(400).json({ success: false, message: "A valid status is required." });
+    }
+
     const entry = {
+      kind: isComment ? "comment" : "update",
       status: normalized,
       remark: remark?.trim() || "",
       attachments: sanitizeAttachments(attachments, req.user),
-      isReport: Boolean(isReport),
+      // A comment is never a formal report — that is a statement about the work
+      // itself, which only the owner or an assignee is in a position to make.
+      isReport: isComment ? false : Boolean(isReport),
       authorId: req.user._id,
       authorEmail: req.user.email || "",
       authorRole: req.user.organizationRole || "",
@@ -718,14 +795,14 @@ export const addTaskProgress = async (req, res) => {
     };
 
     task.progress.push(entry);
-    applyStatusSideEffects(task, normalized, req.user._id);
+    if (!isComment) applyStatusSideEffects(task, normalized, req.user._id);
 
     await task.save();
 
     return res.status(201).json({
       success: true,
-      message: "Progress recorded.",
-      data: decorate(task.toObject()),
+      message: isComment ? "Comment added." : "Progress recorded.",
+      data: decorate(task.toObject(), req),
     });
   } catch (error) {
     console.error("Add Task Progress Error:", error);

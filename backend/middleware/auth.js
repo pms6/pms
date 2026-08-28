@@ -59,3 +59,26 @@ export const protect = async (req, res, next) => {
     return res.status(401).json({ message: "Not authorized, token invalid or expired" });
   }
 };
+// Staff = anybody who works FOR the organization, whatever their seat: the
+// OWNER plus MANAGER / AGENT / FINANCE. Use it on routes the whole team shares.
+//
+// It deliberately excludes Tenant accounts. `protect` resolves an
+// organizationId for a tenant from their Tenant record, so a handler that only
+// checks for organizationId would hand a tenant the org's internal data — the
+// role has to be checked too.
+const STAFF_ROLES = ["OWNER", "MANAGER", "AGENT", "FINANCE"];
+
+export const staffOnly = (req, res, next) => {
+  const isStaff =
+    req.user?.role === "Organization" && STAFF_ROLES.includes(req.user?.organizationRole);
+
+  if (!isStaff) {
+    return res.status(403).json({ success: false, message: "Not authorized." });
+  }
+
+  if (!req.user.organizationId) {
+    return res.status(401).json({ success: false, message: "Organization ID required" });
+  }
+
+  return next();
+};

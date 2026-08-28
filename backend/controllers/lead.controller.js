@@ -35,6 +35,10 @@ export const createLead = async (req, res) => {
     const lead = await Lead.create({
       organizationId,
       createdBy,
+      // Everything reaching this handler is a staff member — the route is
+      // staffOnly — so the board can name them as the one who added the lead.
+      createdByEmail: req.user.email || "",
+      createdByRole: req.user.organizationRole || "",
       name,
       email,
       phone,
@@ -54,7 +58,8 @@ export const createLead = async (req, res) => {
     // Populate references before sending response
     const populatedLead = await Lead.findById(lead._id)
       .populate("propertyId", "name")
-      .populate("roomId", "name roomNumber type");
+      .populate("roomId", "name roomNumber type")
+      .populate("createdBy", "email");
 
     return res.status(201).json({
       success: true,
@@ -103,6 +108,7 @@ export const getLeads = async (req, res) => {
     const leads = await Lead.find(filter)
       .populate("propertyId", "name")
       .populate("roomId", "name roomNumber")
+      .populate("createdBy", "email")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -135,6 +141,7 @@ export const getLeadById = async (req, res) => {
     })
       .populate("propertyId", "name")
       .populate("roomId", "name roomNumber")
+      .populate("createdBy", "email")
       .lean();
 
     if (!lead) {
@@ -230,6 +237,7 @@ export const updateLead = async (req, res) => {
     const updatedLead = await Lead.findById(lead._id)
       .populate("propertyId", "name")
       .populate("roomId", "name roomNumber")
+      .populate("createdBy", "email")
       .lean();
 
     return res.status(200).json({
@@ -292,7 +300,8 @@ export const updateLeadStatus = async (req, res) => {
       { new: true }
     )
       .populate("propertyId", "name")
-      .populate("roomId", "name roomNumber");
+      .populate("roomId", "name roomNumber")
+      .populate("createdBy", "email");
 
     if (!lead) {
       return res.status(404).json({

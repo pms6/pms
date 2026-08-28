@@ -415,6 +415,11 @@ export const createEnquiry = async (req, res) => {
     const lead = await Lead.create({
       organizationId: property.organizationId,
       createdBy: req.user._id,
+      createdByEmail: req.user.email || "",
+      // Deliberately blank: createdBy here is the ENQUIRER's own account, not
+      // a member of the operator's team. An empty role is what tells the Leads
+      // board to show "Website enquiry" instead of naming a team member.
+      createdByRole: "",
       propertyId: property._id,
       roomId: validRoomId,
       name,

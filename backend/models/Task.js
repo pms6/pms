@@ -36,11 +36,24 @@ const attachmentSchema = new mongoose.Schema(
 // One entry in the task's progress history. Never edited or removed once
 // written — the whole point is that the admin can see how the work moved over
 // time, so an update is an append, not a mutation.
+//
+// Two kinds share this one timeline:
+//   "update"  — moves the task to a status. Only the owner or an assignee may
+//               post one, because it changes the state of the work.
+//   "comment" — discussion only. ANY staff member of the organization may post
+//               one on ANY task, so the whole team can weigh in on work they
+//               are not assigned to without being able to alter it.
 const progressSchema = new mongoose.Schema(
   {
+    kind: { type: String, enum: ["update", "comment"], default: "update" },
+
     // The status the task was moved to by this update. Stored per entry so the
     // history reads as a timeline of state changes, not just free text.
-    status: { type: String, enum: TASK_STATUSES, required: true },
+    //
+    // Null on a comment — a comment deliberately carries no status, so it can
+    // never move the task. Entries written before comments existed all carry a
+    // status and default to kind "update", so old history still reads right.
+    status: { type: String, enum: TASK_STATUSES, default: null },
     remark: { type: String, trim: true, default: "" },
     attachments: { type: [attachmentSchema], default: [] },
 
@@ -143,8 +156,8 @@ const taskSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// The admin dashboard filters by org and sorts by due date; the member view
-// filters by org plus their own userId inside assignees.
+// The admin dashboard and the team-wide member view both filter by org and sort
+// by due date; "My tasks" adds the signed-in user's own id inside assignees.
 taskSchema.index({ organizationId: 1, isDeleted: 1, dueDate: 1 });
 taskSchema.index({ organizationId: 1, "assignees.userId": 1, isDeleted: 1 });
 

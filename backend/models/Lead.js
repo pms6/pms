@@ -17,6 +17,25 @@ const leadSchema = new mongoose.Schema(
       ref: "User",
     },
 
+    // Who added this lead, denormalized at creation the same way Task stores
+    // createdByEmail. Kept alongside the ref so the board can name the member
+    // without a populate, and so the attribution survives them leaving the team.
+    createdByEmail: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    // The creator's organization role ("OWNER" / "MANAGER" / "AGENT" /
+    // "FINANCE"). Empty means it was NOT a team member: website enquiries are
+    // created by the enquirer's own account, and naming them as the member who
+    // added the lead would be wrong.
+    createdByRole: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     // ============================
     // Lead Details
     // ============================

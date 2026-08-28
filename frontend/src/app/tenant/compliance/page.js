@@ -184,13 +184,25 @@ export default function CompliancePage() {
               </button>
             </div>
 
-            {/* PDF */}
+            {/* PDF. <object> rather than <iframe> so a certificate the host
+                refuses to serve, or one that is no longer there, shows the
+                fallback below instead of an unexplained blank panel. */}
             <div className="flex-1 bg-gray-100">
-              <iframe
-                src={selected.fileUrl}
+              <object
+                data={selected.fileUrl}
+                type="application/pdf"
                 title={selected.type || "Compliance"}
                 className="w-full h-full"
-              />
+              >
+                <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+                  <p className="text-sm font-bold text-[#0F253B]">
+                    This certificate could not be displayed.
+                  </p>
+                  <p className="text-xs font-medium text-gray-500">
+                    Try the download button below, or ask your property manager to re-upload it.
+                  </p>
+                </div>
+              </object>
             </div>
 
             {/* Footer */}

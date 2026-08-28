@@ -16,6 +16,7 @@ import {
   Paperclip,
 } from "lucide-react";
 import { PageHeader } from "../../Shared/ui";
+import { fileKind, kindLabel } from "../../Shared/fileType";
 import api from "../../api/api";
 import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
 
@@ -78,14 +79,9 @@ function Kpi({ icon: Icon, label, value, tone = "light" }) {
   );
 }
 
-// A receipt is worth showing inline when it is an image; PDFs and anything else
-// get a link. Cloudinary URLs carry /image/upload/ even without a file
-// extension, so check both.
-const isImageReceipt = (url) => {
-  if (!url) return false;
-  const clean = String(url).split("?")[0];
-  return /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(clean) || /\/image\/upload\//.test(clean);
-};
+// How a receipt previews depends on what it actually is — see Shared/fileType.
+// Note that Cloudinary stores PDFs under /image/upload/ too, so the file
+// extension is what decides, not the URL shape.
 
 // Normalise legacy single-file records into a files array.
 const getExpenseFiles = (e) => {
@@ -126,6 +122,76 @@ const toDateInput = (d) => {
   const parsed = new Date(d);
   return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
 };
+
+// One receipt, previewed according to what it is: images inline, PDFs in an
+// embedded viewer, everything else as a plain link.
+//
+// A stored file can fail to load even though the record is perfectly fine — the
+// host may refuse to serve it (Cloudinary blocks PDF delivery unless the
+// account opts in) or the file may no longer exist. Both used to surface as a
+// silent broken-image box, so failures are caught and stated instead.
+function ReceiptPreview({ file, index }) {
+  const [failed, setFailed] = useState(false);
+
+  const url = file.url;
+  const label = file.name || `Receipt ${index + 1}`;
+  const kind = fileKind(url, file.name);
+  const badge = kindLabel(url, file.name);
+
+  return (
+    <div className="space-y-2">
+      {!failed && kind === "image" && (
+        <a href={url} target="_blank" rel="noopener noreferrer" className="block">
+          <img
+            src={url}
+            alt={label}
+            onError={() => setFailed(true)}
+            className="max-h-72 w-auto rounded-xl border border-gray-100 object-contain bg-gray-50"
+          />
+        </a>
+      )}
+
+      {!failed && kind === "pdf" && (
+        <object
+          data={url}
+          type="application/pdf"
+          className="w-full h-80 rounded-xl border border-gray-100 bg-gray-50"
+        >
+          {/* Shown when the browser cannot embed it — a blocked or missing
+              file lands here rather than on a blank frame. */}
+          <div className="flex h-full items-center justify-center px-4 text-center">
+            <p className="text-xs font-medium text-gray-400">
+              This PDF could not be displayed. Use the link below to open it.
+            </p>
+          </div>
+        </object>
+      )}
+
+      {failed && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-xs font-bold text-amber-800">This file could not be loaded.</p>
+          <p className="mt-0.5 text-[11px] font-medium text-amber-700">
+            The entry is fine — the file host refused it or it no longer exists. Try the
+            link below; if that fails too, re-upload the receipt.
+          </p>
+        </div>
+      )}
+
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-2 px-3 py-2 border border-gray-200 hover:bg-gray-50 rounded-xl text-xs font-bold text-[#0F253B] transition-all"
+      >
+        <Paperclip size={14} className="text-[#F47C3C]" />
+        <span className="truncate max-w-[18rem]">{label}</span>
+        <span className="text-[10px] font-bold text-gray-400 bg-gray-100 rounded px-1.5 py-0.5">
+          {badge}
+        </span>
+      </a>
+    </div>
+  );
+}
 
 function Field({ label, value, span = false }) {
   return (
@@ -197,26 +263,7 @@ function ExpenseDetailModal({ expense, onClose, onEdit }) {
             {files.length > 0 ? (
               <div className="space-y-4">
                 {files.map((f, idx) => (
-                  <div key={`${f.url}-${idx}`} className="space-y-2">
-                    {isImageReceipt(f.url) && (
-                      <a href={f.url} target="_blank" rel="noopener noreferrer" className="block">
-                        <img
-                          src={f.url}
-                          alt={f.name || `Receipt ${idx + 1}`}
-                          className="max-h-72 w-auto rounded-xl border border-gray-100 object-contain bg-gray-50"
-                        />
-                      </a>
-                    )}
-                    <a
-                      href={f.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-3 py-2 border border-gray-200 hover:bg-gray-50 rounded-xl text-xs font-bold text-[#0F253B] transition-all"
-                    >
-                      <Paperclip size={14} className="text-[#F47C3C]" />
-                      {f.name || `Open receipt ${idx + 1}`}
-                    </a>
-                  </div>
+                  <ReceiptPreview key={`${f.url}-${idx}`} file={f} index={idx} />
                 ))}
               </div>
             ) : (
@@ -556,7 +603,9 @@ export default function AdminExpenses() {
   }, [year, monthFilter, propertyFilter, categoryFilter]);
 
   useEffect(() => {
-    loadData();
+    (async () => {
+      await loadData();
+    })();
   }, [loadData]);
 
   // One save path for both modes — the modal decides which by whether it was

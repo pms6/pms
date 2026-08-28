@@ -1,10 +1,13 @@
 "use client";
 
-import { X } from "lucide-react";
+import { X, Edit2 } from "lucide-react";
 import { applicantEntries } from "./applicant";
+import { creatorOf } from "./creator";
 
 // The Kanban card is too small for the full screening answers, so the Leads
-// boards (admin, agent, manager) all open this for the detail view.
+// boards (admin, manager, agent, finance) all open this for the detail view.
+// `onEdit` is optional — when given, the header offers a jump straight into the
+// edit form for the lead being read.
 
 function initials(name) {
   return (name || "?").split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
@@ -15,9 +18,10 @@ function roomName(room) {
   return room.roomName || room.title || room.name || "Unnamed Room";
 }
 
-export default function LeadDetailModal({ lead, onClose }) {
+export default function LeadDetailModal({ lead, onClose, onEdit }) {
   const answers = applicantEntries(lead.applicant);
   const property = lead.propertyId;
+  const creator = creatorOf(lead);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -37,9 +41,20 @@ export default function LeadDetailModal({ lead, onClose }) {
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="text-gray-300 hover:text-gray-500 shrink-0">
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {onEdit && (
+              <button
+                onClick={onEdit}
+                title="Edit lead"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#0F253B] bg-gray-100 hover:bg-gray-200 rounded-lg transition-all"
+              >
+                <Edit2 size={14} /> Edit
+              </button>
+            )}
+            <button onClick={onClose} className="text-gray-300 hover:text-gray-500">
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         {lead.status === "lost" && lead.lostReason && (
@@ -68,6 +83,24 @@ export default function LeadDetailModal({ lead, onClose }) {
           <DetailRow label="Room" value={roomName(lead.roomId)} />
           <DetailRow label="Budget" value={lead.budget > 0 ? `£${lead.budget}/mo` : ""} />
           <DetailRow label="Assigned to" value={lead.assignedTo} />
+        </DetailSection>
+
+        <DetailSection title="Added by">
+          <DetailRow
+            label={creator?.isPublic ? "Source" : "Member"}
+            value={
+              creator
+                ? creator.isPublic
+                  ? creator.label
+                  : `${creator.label}${creator.role ? ` (${creator.role})` : ""}`
+                : "Unknown"
+            }
+          />
+          <DetailRow label="Email" value={creator?.email} />
+          <DetailRow
+            label="Added on"
+            value={lead.createdAt ? new Date(lead.createdAt).toLocaleString() : ""}
+          />
         </DetailSection>
 
         <DetailSection title="Applicant details">

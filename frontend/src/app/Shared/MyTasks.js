@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Search, ListChecks, Circle, PlayCircle, CheckCircle2, AlertTriangle,
-  CalendarClock, Paperclip, MessageSquare,
+  CalendarClock, Paperclip, MessageSquare, UserRound, Users,
 } from "lucide-react";
 import { PageHeader } from "./ui";
 import api from "@/app/api/api";
@@ -13,22 +13,32 @@ import {
   fmtDate, fmtDateTime, displayName, dueLabel,
 } from "./tasks";
 
+// Keys are matched against a task's effectiveStatus, so the completed tab is
+// keyed "Done" — the value the backend actually derives. Keyed "Completed" it
+// matched nothing and the tab always read empty.
 const TABS = [
   { key: "all", label: "All", icon: ListChecks },
   { key: "Not Started", label: "Not started", icon: Circle },
   { key: "In Progress", label: "In progress", icon: PlayCircle },
   { key: "Overdue", label: "Overdue", icon: AlertTriangle },
-  { key: "Completed", label: "Completed", icon: CheckCircle2 },
+  { key: "Done", label: "Completed", icon: CheckCircle2 },
 ];
 
 /**
- * My Tasks — the team member's view of the work assigned to them.
+ * Tasks — the team member's view of the work.
  *
- * Reads GET /tasks/my, which returns only tasks whose assignees include the
- * signed-in user. There is deliberately no create, assign or edit control here:
- * the only write available is a progress update, via TaskDetail.
+ * Two scopes, on one screen:
+ *   "mine" → GET /tasks/my, only tasks whose assignees include the signed-in
+ *            user. These are the ones they can actually move.
+ *   "team" → GET /tasks, every task in the organization, so anybody on the team
+ *            can open a colleague's task, read its full history and comment.
+ *
+ * There is deliberately no create, assign or edit control here at any scope —
+ * assignment is the owner's alone. The only write available is via TaskDetail,
+ * which posts to /tasks/:id/progress and cannot touch the assignee list.
  */
 export default function MyTasks({ portalLabel = "your" }) {
+  const [scope, setScope] = useState("mine");
   const [tasks, setTasks] = useState([]);
   const [stats, setStats] = useState({ total: 0 });
   const [tab, setTab] = useState("all");
@@ -38,21 +48,27 @@ export default function MyTasks({ portalLabel = "your" }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const team = scope === "team";
+
   // No setState before the first await — see the note in admin/tasks/page.js.
   const loadData = useCallback(async () => {
     try {
-      const { data } = await api.get("/tasks/my");
+      const { data } = await api.get(scope === "team" ? "/tasks" : "/tasks/my");
       setTasks(data?.data || []);
       setStats(data?.stats || { total: 0 });
       setError("");
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to load your tasks.");
+      setError(
+        err.response?.data?.message ||
+          (scope === "team" ? "Failed to load team tasks." : "Failed to load your tasks.")
+      );
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scope]);
 
   useEffect(() => {
+    setLoading(true);
     (async () => { await loadData(); })();
   }, [loadData]);
 
@@ -73,9 +89,40 @@ export default function MyTasks({ portalLabel = "your" }) {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="My Tasks"
-        subtitle={`Work assigned to you — update progress and report back to the admin`}
+        title="Tasks"
+        subtitle={
+          team
+            ? "Every task across the team — open any one to read its history and comment"
+            : "Work assigned to you — update progress and report back to the admin"
+        }
       />
+
+      {/* Scope. Members can always read the whole team's work; what changes
+          between scopes is only what is listed, never what they may do. */}
+      <div className="flex items-center gap-1 bg-white border border-gray-100 rounded-2xl p-1.5 w-fit">
+        {[
+          { key: "mine", label: "My tasks", icon: UserRound },
+          { key: "team", label: "All team tasks", icon: Users },
+        ].map((s) => {
+          const active = scope === s.key;
+          return (
+            <button
+              key={s.key}
+              onClick={() => {
+                setScope(s.key);
+                setTab("all");
+                setDetailId(null);
+              }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                active ? "bg-[#0F253B] text-white" : "text-gray-400 hover:text-[#0F253B]"
+              }`}
+            >
+              <s.icon size={14} className={active ? "text-[#F47C3C]" : ""} />
+              {s.label}
+            </button>
+          );
+        })}
+      </div>
 
       {error && (
         <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
@@ -116,7 +163,7 @@ export default function MyTasks({ portalLabel = "your" }) {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search your tasks…"
+            placeholder={team ? "Search team tasks…" : "Search your tasks…"}
             className="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]"
           />
         </div>
@@ -133,16 +180,20 @@ export default function MyTasks({ portalLabel = "your" }) {
       {/* Task cards */}
       {loading ? (
         <div className="bg-white border border-gray-100 rounded-2xl p-10 text-center text-gray-400 font-medium">
-          Loading your tasks…
+          {team ? "Loading team tasks…" : "Loading your tasks…"}
         </div>
       ) : list.length === 0 ? (
         <div className="bg-white border border-gray-100 rounded-2xl p-10 text-center">
           <p className="text-gray-500 font-medium">
-            {tasks.length === 0 ? "No tasks assigned to you yet" : "No tasks match this view"}
+            {tasks.length === 0
+              ? team
+                ? "No tasks on the team yet"
+                : "No tasks assigned to you yet"
+              : "No tasks match this view"}
           </p>
           <p className="text-sm text-gray-400 mt-1">
             {tasks.length === 0
-              ? "When the admin assigns you work it will appear here."
+              ? "When the admin assigns work it will appear here."
               : "Try another tab, priority or search term."}
           </p>
         </div>
@@ -161,12 +212,26 @@ export default function MyTasks({ portalLabel = "your" }) {
                 <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${STATUS_TONE[t.effectiveStatus]}`}>
                   {t.effectiveStatus}
                 </span>
+                {team && t.isMine && (
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#0F253B] text-white">
+                    Mine
+                  </span>
+                )}
               </div>
 
               <h3 className="font-bold text-[#0F253B] mt-3 line-clamp-2">{t.title}</h3>
               <p className="text-xs text-gray-500 font-medium mt-1 line-clamp-3 flex-1">{t.description}</p>
 
               <div className="mt-4 pt-3 border-t border-gray-50 space-y-1.5">
+                {team && (
+                  <p className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500 truncate">
+                    <UserRound size={12} className="text-[#F47C3C] shrink-0" />
+                    <span className="truncate">
+                      {(t.assignees || []).map((a) => displayName(a.email)).join(", ") ||
+                        "Unassigned"}
+                    </span>
+                  </p>
+                )}
                 <p className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500">
                   <CalendarClock size={12} className={t.effectiveStatus === "Overdue" ? "text-red-500" : "text-[#F47C3C]"} />
                   {fmtDate(t.dueDate)}
@@ -176,7 +241,10 @@ export default function MyTasks({ portalLabel = "your" }) {
                 </p>
                 <div className="flex items-center gap-3 text-[10px] font-bold text-gray-400">
                   <span className="flex items-center gap-1">
-                    <MessageSquare size={11} /> {t.progressCount || 0} update{(t.progressCount || 0) === 1 ? "" : "s"}
+                    <ListChecks size={11} /> {t.progressCount || 0} update{(t.progressCount || 0) === 1 ? "" : "s"}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <MessageSquare size={11} /> {t.commentCount || 0}
                   </span>
                   {t.attachments?.length > 0 && (
                     <span className="flex items-center gap-1">

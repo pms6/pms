@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   X, Paperclip, Send, Loader2, CalendarClock, CalendarDays, UserRound,
-  MessageSquare, FileCheck2, History,
+  MessageSquare, FileCheck2, History, Lock, ListChecks,
 } from "lucide-react";
 import api from "@/app/api/api";
 import { uploadFileToCloudinary } from "@/app/utils/uploadToCloudinary";
@@ -45,14 +45,29 @@ function AttachmentList({ items }) {
 }
 
 /**
- * Full detail of one task, plus the form for appending a progress update.
+ * Full detail of one task, plus the composer for adding to its timeline.
  *
- * Shared by the admin dashboard and the member "My Tasks" view — the two see
- * exactly the same history, which is the point of the feature. `canUpdate`
- * turns the update form on; nothing here can reassign a task, because the only
- * endpoint it calls is POST /tasks/:id/progress.
+ * Shared by the admin dashboard and the member task views — everyone on the
+ * team sees exactly the same task detail and the same history, which is the
+ * point of the feature.
+ *
+ * What differs is what you may WRITE, and that comes from the server on each
+ * task rather than from a role string here:
+ *
+ *   canComment      — every staff member, on every task. Comments carry no
+ *                     status, so they cannot move the work.
+ *   canUpdateStatus — the owner, or somebody actually assigned to this task.
+ *
+ * Nothing here can reassign a task: the only endpoint it calls is
+ * POST /tasks/:id/progress, which never touches the assignee list.
  */
 export default function TaskDetail({ task, onClose, onChanged, canUpdate = true }) {
+  // The server's flags win. `canUpdate` stays as a caller-side override and is
+  // the fallback for a task shaped before the flags existed.
+  const mayUpdate = canUpdate && (task.canUpdateStatus ?? true);
+  const mayComment = task.canComment ?? true;
+
+  const [mode, setMode] = useState(mayUpdate ? "update" : "comment");
   const [status, setStatus] = useState(
     task.status === "Overdue" ? "In Progress" : task.status || "Not Started"
   );
@@ -63,13 +78,19 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
 
-  // Newest first, so the most recent update is what you read first.
+  const commenting = mode === "comment" || !mayUpdate;
+
+  // Newest first, so the most recent entry is what you read first.
   const history = [...(task.progress || [])].reverse();
 
   const submit = async (e) => {
     e.preventDefault();
     if (!remark.trim() && files.length === 0) {
-      setError("Add a remark or attach a file to record an update.");
+      setError(
+        commenting
+          ? "Write a comment or attach a file."
+          : "Add a remark or attach a file to record an update."
+      );
       return;
     }
     setSaving(true);
@@ -88,10 +109,12 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
       }
 
       const { data } = await api.post(`/tasks/${task._id}/progress`, {
-        status,
+        kind: commenting ? "comment" : "update",
+        // Sent only on an update — a comment must not carry a status, or it
+        // would look like it moved the task.
+        ...(commenting ? {} : { status, isReport }),
         remark: remark.trim(),
         attachments,
-        isReport,
       });
 
       setRemark("");
@@ -99,7 +122,10 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
       setIsReport(false);
       onChanged?.(data.data);
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to record the update.");
+      setError(
+        err.response?.data?.message ||
+          (commenting ? "Failed to add the comment." : "Failed to record the update.")
+      );
     } finally {
       setUploading(false);
       setSaving(false);
@@ -178,12 +204,42 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
             </div>
           )}
 
-          {/* Add an update */}
-          {canUpdate && (
+          {/* Composer — a progress update if you own or are assigned this
+              task, a comment either way. */}
+          {mayComment && (
             <form onSubmit={submit} className="bg-gray-50 border border-gray-100 rounded-2xl p-5 space-y-4">
-              <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C] flex items-center gap-1.5">
-                <MessageSquare size={13} /> Add a progress update
-              </p>
+              {mayUpdate ? (
+                <div className="flex items-center gap-1 bg-white border border-gray-100 rounded-xl p-1 w-fit">
+                  {[
+                    { key: "update", label: "Progress update", icon: ListChecks },
+                    { key: "comment", label: "Comment", icon: MessageSquare },
+                  ].map((m) => (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() => { setMode(m.key); setError(""); }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                        mode === m.key ? "bg-[#0F253B] text-white" : "text-gray-400 hover:text-[#0F253B]"
+                      }`}
+                    >
+                      <m.icon size={13} className={mode === m.key ? "text-[#F47C3C]" : ""} />
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C] flex items-center gap-1.5">
+                  <MessageSquare size={13} /> Add a comment
+                </p>
+              )}
+
+              {!mayUpdate && (
+                <p className="flex items-start gap-2 text-[11px] font-medium text-gray-500 bg-white border border-gray-100 rounded-xl p-3">
+                  <Lock size={13} className="text-gray-300 shrink-0 mt-px" />
+                  This task is not assigned to you, so you can read it and comment on
+                  it — but only the owner or an assignee can change its status.
+                </p>
+              )}
 
               {error && (
                 <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">
@@ -192,14 +248,16 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
               )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className={LABEL}>Status</label>
-                  <select className={FIELD} value={status} onChange={(e) => setStatus(e.target.value)}>
-                    {SETTABLE_STATUSES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
+                {!commenting && (
+                  <div>
+                    <label className={LABEL}>Status</label>
+                    <select className={FIELD} value={status} onChange={(e) => setStatus(e.target.value)}>
+                      {SETTABLE_STATUSES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className={LABEL}>Attach files</label>
                   <div className="relative border border-dashed border-gray-200 bg-white rounded-xl p-3 text-center text-xs font-bold text-gray-400 hover:bg-gray-50 transition-colors cursor-pointer">
@@ -217,26 +275,32 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
               </div>
 
               <div>
-                <label className={LABEL}>Remark</label>
+                <label className={LABEL}>{commenting ? "Comment" : "Remark"}</label>
                 <textarea
                   rows={3}
                   className={FIELD}
-                  placeholder="What has moved since the last update?"
+                  placeholder={
+                    commenting
+                      ? "Add a note for the team on this task…"
+                      : "What has moved since the last update?"
+                  }
                   value={remark}
                   onChange={(e) => setRemark(e.target.value)}
                 />
               </div>
 
-              <label className="flex items-center gap-2 text-xs font-bold text-gray-500 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={isReport}
-                  onChange={(e) => setIsReport(e.target.checked)}
-                  className="accent-[#F47C3C]"
-                />
-                <FileCheck2 size={13} className="text-[#F47C3C]" />
-                Submit this as a formal report to the admin
-              </label>
+              {!commenting && (
+                <label className="flex items-center gap-2 text-xs font-bold text-gray-500 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={isReport}
+                    onChange={(e) => setIsReport(e.target.checked)}
+                    className="accent-[#F47C3C]"
+                  />
+                  <FileCheck2 size={13} className="text-[#F47C3C]" />
+                  Submit this as a formal report to the admin
+                </label>
+              )}
 
               <button
                 type="submit"
@@ -244,36 +308,55 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
                 className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all disabled:opacity-50"
               >
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                {uploading ? "Uploading…" : saving ? "Saving…" : "Record update"}
+                {uploading
+                  ? "Uploading…"
+                  : saving
+                  ? "Saving…"
+                  : commenting
+                  ? "Post comment"
+                  : "Record update"}
               </button>
             </form>
           )}
 
-          {/* History */}
+          {/* History — status updates and comments share one timeline, so the
+              conversation sits next to the work it is about. */}
           <div>
             <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C] mb-3 flex items-center gap-1.5">
-              <History size={13} /> Progress history ({history.length})
+              <History size={13} /> Activity ({history.length})
             </p>
 
             {history.length === 0 ? (
               <p className="text-sm font-medium text-gray-400">
-                No updates yet. Progress recorded against this task will appear here.
+                Nothing yet. Progress updates and comments on this task will appear here.
               </p>
             ) : (
               <ol className="space-y-3">
-                {history.map((entry) => (
+                {history.map((entry) => {
+                  const isComment = entry.kind === "comment";
+                  return (
                   <li
                     key={entry._id || entry.createdAt}
                     className="relative pl-5 border-l-2 border-gray-100"
                   >
-                    <span className="absolute -left-[5px] top-1.5 w-2 h-2 rounded-full bg-[#F47C3C]" />
+                    <span
+                      className={`absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${
+                        isComment ? "bg-gray-300" : "bg-[#F47C3C]"
+                      }`}
+                    />
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-bold text-[#0F253B]">
                         {fmtDate(entry.createdAt)}
                       </span>
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${STATUS_TONE[entry.status] || ""}`}>
-                        {entry.status}
-                      </span>
+                      {isComment ? (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 flex items-center gap-1">
+                          <MessageSquare size={10} /> Comment
+                        </span>
+                      ) : (
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${STATUS_TONE[entry.status] || ""}`}>
+                          {entry.status}
+                        </span>
+                      )}
                       {entry.isReport && (
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#0F253B] text-white">
                           Report
@@ -297,7 +380,8 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
                       {fmtDateTime(entry.createdAt)}
                     </p>
                   </li>
-                ))}
+                  );
+                })}
               </ol>
             )}
           </div>
