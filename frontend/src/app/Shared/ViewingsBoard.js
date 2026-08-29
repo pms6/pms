@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Plus,
   X,
@@ -12,10 +12,11 @@ import {
   Mail,
   CalendarClock,
   RotateCcw,
+  Search,
 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import RescheduleModal from "./RescheduleModal";
-import { AddedBy } from "./creator";
+import { AddedBy, creatorOf } from "./creator";
 import api from "../api/api";
 import { useAuth } from "../Context/AuthContext";
 
@@ -28,7 +29,7 @@ import { useAuth } from "../Context/AuthContext";
 // Tenants never reach this board. They get /tenant/viewing, which talks to the
 // separate /viewings/my endpoints, and the API refuses them the staff routes.
 
-const useViewingsData = (filter = "") => {
+const useViewingsData = ({ status = "", person = "", propertyId = "" } = {}) => {
   const { user } = useAuth();
   const organizationId = user?.organization?._id || user?.organizationId;
   const userId = user?._id;
@@ -75,6 +76,13 @@ const useViewingsData = (filter = "") => {
     if (!organizationId) throw new Error("Organization ID missing");
 
     const payload = { ...formData, organizationId, createdBy: userId };
+
+    // A select left on its placeholder posts "". Room is optional — a property
+    // with no rooms, or a whole-property viewing, has nothing to send — but an
+    // empty string is not a valid ObjectId, so it has to be dropped rather than
+    // sent as "".
+    if (!payload.room) delete payload.room;
+
     const res = await api.post("/viewings", payload);
     const newViewing = res.data?.data || res.data;
     setAllViewings((prev) => [...prev, newViewing]);
@@ -125,13 +133,71 @@ const useViewingsData = (filter = "") => {
     })();
   }, [organizationId, fetchSupportingData, fetchAllViewings]);
 
-  // Frontend filtering
-  const filteredViewings = filter
-    ? allViewings.filter((v) => v.status === filter)
-    : allViewings;
+  // Every property that has at least one viewing, for the property filter.
+  // Built from the UNfiltered list so the dropdown does not shrink as the other
+  // filters narrow the board — otherwise picking a property would remove every
+  // other option from the list you just used.
+  const propertyOptions = useMemo(() => {
+    const byId = new Map();
+
+    allViewings.forEach((v) => {
+      const id = String(v.property?._id ?? v.property ?? "");
+      if (!id || byId.has(id)) return;
+
+      byId.set(
+        id,
+        v.property?.name ||
+          (typeof v.property === "string" ? v.property : "") ||
+          "Unnamed property"
+      );
+    });
+
+    return [...byId.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [allViewings]);
+
+  // Frontend filtering — the status chips, the person search and the property
+  // picker all narrow the same list, so they combine rather than override.
+  const personQuery = person.trim().toLowerCase();
+
+  const filteredViewings = allViewings.filter((v) => {
+    if (status && v.status !== status) return false;
+
+    if (propertyId && String(v.property?._id ?? v.property ?? "") !== propertyId) {
+      return false;
+    }
+
+    if (personQuery) {
+      // Every person named on the card: the lead being shown round, the agent
+      // showing them, and the member who scheduled it. The scheduler comes from
+      // creatorOf so the search matches the name actually rendered by AddedBy
+      // (the local part of the email); their full address is matched too, since
+      // that is what the card's tooltip shows.
+      //
+      // `lead` is populated by the API but can still arrive as a bare id/string
+      // on older rows, hence the fallback.
+      const creator = creatorOf(v);
+
+      const names = [
+        v.lead?.name || (typeof v.lead === "string" ? v.lead : ""),
+        v.agent,
+        creator?.label,
+        creator?.email,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      if (!names.includes(personQuery)) return false;
+    }
+
+    return true;
+  });
 
   return {
     viewings: filteredViewings,
+    propertyOptions,
     allViewings,
     leads,
     properties,
@@ -274,12 +340,15 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Property</label>
+              {/* Required by the API, so the browser blocks an empty submit
+                  here rather than letting the server reject it. */}
               <select
                 className={field}
                 value={form.property}
                 onChange={handleChange("property")}
+                required
               >
-                <option value="">—</option>
+                <option value="">Select property…</option>
                 {properties.map((p) => (
                   <option key={p._id} value={p._id}>
                     {p.name}
@@ -289,13 +358,19 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
             </div>
             <div>
               <label className={labelCls}>Room</label>
+              {/* Optional: a single let has no rooms to pick, and a viewing can
+                  cover the whole property. */}
               <select
                 className={field}
                 value={form.room}
                 onChange={handleChange("room")}
-                disabled={!form.property}
+                disabled={!form.property || availableRooms.length === 0}
               >
-                <option value="">Select room…</option>
+                <option value="">
+                  {form.property && availableRooms.length === 0
+                    ? "No rooms — whole property"
+                    : "Select room…"}
+                </option>
                 {availableRooms.map((r) => (
                   <option key={r._id} value={r._id}>
                     {r.roomName || r.title}{" "}
@@ -336,9 +411,12 @@ export default function ViewingsBoard({
   const { user, loading: authLoading } = useAuth();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const [person, setPerson] = useState("");
+  const [propertyId, setPropertyId] = useState("");
 
   const {
     viewings,
+    propertyOptions,
     leads,
     properties,
     allRooms,
@@ -348,7 +426,7 @@ export default function ViewingsBoard({
     updateViewingStatus,
     rescheduleViewing,
     respondToRequest,
-  } = useViewingsData(filter);
+  } = useViewingsData({ status: filter, person, propertyId });
 
   const [rescheduling, setRescheduling] = useState(null);
 
@@ -374,20 +452,64 @@ export default function ViewingsBoard({
         }
       />
 
-      <div className="flex gap-2 flex-wrap">
-        {["", "scheduled", "done", "cancelled"].map((s) => (
-          <button
-            key={s || "all"}
-            onClick={() => setFilter(s)}
-            className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all capitalize ${
-              filter === s
-                ? "bg-[#0F253B] text-white border-[#0F253B]"
-                : "bg-white text-gray-500 border-gray-100 hover:bg-gray-50"
-            }`}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex gap-2 flex-wrap">
+          {["", "scheduled", "done", "cancelled"].map((s) => (
+            <button
+              key={s || "all"}
+              onClick={() => setFilter(s)}
+              className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all capitalize ${
+                filter === s
+                  ? "bg-[#0F253B] text-white border-[#0F253B]"
+                  : "bg-white text-gray-500 border-gray-100 hover:bg-gray-50"
+              }`}
+            >
+              {s || "All"}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative">
+            <Search
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+            />
+            <input
+              value={person}
+              onChange={(e) => setPerson(e.target.value)}
+              placeholder="Search lead, agent or scheduler…"
+              aria-label="Filter viewings by person — lead, agent or the member who scheduled it"
+              className="w-full sm:w-72 pl-9 pr-3 py-2 text-sm font-medium bg-white border border-gray-100 rounded-lg outline-none transition-all focus:ring-2 focus:ring-[#F47C3C]"
+            />
+          </div>
+
+          <select
+            value={propertyId}
+            onChange={(e) => setPropertyId(e.target.value)}
+            aria-label="Filter viewings by property"
+            className="w-full sm:w-56 px-3 py-2 text-sm font-medium bg-white border border-gray-100 rounded-lg outline-none transition-all focus:ring-2 focus:ring-[#F47C3C]"
           >
-            {s || "All"}
-          </button>
-        ))}
+            <option value="">All properties</option>
+            {propertyOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+
+          {(person || propertyId) && (
+            <button
+              onClick={() => {
+                setPerson("");
+                setPropertyId("");
+              }}
+              className="px-3 py-2 text-xs font-bold text-gray-500 bg-white border border-gray-100 rounded-lg hover:bg-gray-50 transition-all"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {viewingsLoading ? (

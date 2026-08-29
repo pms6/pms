@@ -132,8 +132,19 @@ export const createViewing = async (req, res) => {
       });
     }
 
+    // A select left on its placeholder posts "". Mongoose would try to cast
+    // that to an ObjectId and fail with a CastError, which surfaces to the
+    // operator as an unreadable "Cast to ObjectId failed" — so drop the empties
+    // and let the schema's own `required` checks report what is actually
+    // missing. `room` is optional (a property with no rooms, or a viewing of
+    // the whole property) and is simply left unset.
+    const body = { ...req.body };
+    ["lead", "property", "room"].forEach((key) => {
+      if (body[key] === "" || body[key] === null) delete body[key];
+    });
+
     const viewing = new Viewing({
-      ...req.body,
+      ...body,
       organizationId: organizationId,
       createdBy: createdBy,        // optional
       // Who scheduled it. Taken from the session, never the body, so the board
