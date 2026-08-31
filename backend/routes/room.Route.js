@@ -12,6 +12,7 @@ import {
   toggleFeatured,
   togglePublish,
   getAvailableRoomsCount,
+  getAvailableRooms,
 } from "../controllers/room.controller.js";
 import { protect } from "../middleware/auth.js";
 
@@ -23,6 +24,7 @@ router.use(protect);
 
 // Room statistics
 router.get("/stats/available", getAvailableRoomsCount);
+router.get("/available", getAvailableRooms);
 
 // Rooms by property
 router.get("/property/:propertyId", getRoomsByProperty);

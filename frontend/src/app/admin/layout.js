@@ -33,6 +33,7 @@ const NAV = [
   { href: "/admin/properties", label: "Properties", icon: Building2 },
   { href: "/admin/inventory", label: "Inventory", icon: Package },
   { href: "/admin/void", label: "Void", icon: CalendarClock },
+  { href: "/admin/available", label: "Available Room", icon: CalendarClock },
   { href: "/admin/owners", label: "Property Owners", icon: KeyRound },
   { href: "/admin/leads", label: "Leads", icon: UserPlus },
   { href: "/admin/viewings", label: "Viewings", icon: CalendarClock },

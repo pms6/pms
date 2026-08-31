@@ -1,6 +1,8 @@
 // controllers/roomController.js
 import Room from "../models/Room.js";
 import Property from "../models/Property.js";
+import Tenancy from "../models/Tenancy.js";
+import Tenant from "../models/Tenant.js";
 // RM-000001 sequencing lives in utils/codes.js so rooms created by approving a
 // property submission land in the same sequence as rooms created in-app.
 import { generateRoomCode } from "../utils/codes.js";
@@ -702,6 +704,246 @@ export const getAvailableRoomsCount = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch room statistics.",
+    });
+  }
+};
+
+/**
+ * GET /api/rooms/available
+ * Returns two lists:
+ *  - availableNow
+ *  - comingSoon  (tenant leaving within `daysAhead` days)
+ *
+ * Query params:
+ *  - organizationId (required for SaaS)
+ *  - daysAhead (default 60) – how many days ahead to treat as "Coming Soon"
+ */
+export const getAvailableRooms = async (req, res) => {
+  try {
+    const organizationId = req.query.organizationId || req.user?.organizationId;
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        message: "organizationId is required",
+      });
+    }
+
+    const daysAhead = parseInt(req.query.daysAhead, 10) || 60;
+    const now = new Date();
+    const futureLimit = new Date();
+    futureLimit.setDate(futureLimit.getDate() + daysAhead);
+
+    // 1. Fetch rooms for this organization
+    const rooms = await Room.find({
+      organizationId,
+      status: { $in: ["AVAILABLE", "AVAILABLE_SOON", "OCCUPIED", "RESERVED"] },
+      isPublished: true, // remove this line if you also want unpublished rooms
+    })
+      .populate({
+        path: "propertyId",
+        select: "name propertyCode address rentalType status isDeleted",
+        match: { isDeleted: { $ne: true }, status: { $ne: "ARCHIVED" } },
+      })
+      .populate({
+        path: "currentTenant",
+        select: "firstName lastName",
+      })
+      .lean();
+
+    // Keep only rooms that still have a valid property
+    const validRooms = rooms.filter((r) => r.propertyId);
+
+    if (validRooms.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          availableNow: [],
+          comingSoon: [],
+          summary: {
+            availableNowCount: 0,
+            comingSoonCount: 0,
+            daysAhead,
+          },
+        },
+      });
+    }
+
+    const roomIds = validRooms.map((r) => r._id);
+
+    // 2. Fetch active / ending tenancies for these rooms
+    const tenancies = await Tenancy.find({
+      organizationId,
+      roomId: { $in: roomIds },
+      isDeleted: { $ne: true },
+      $or: [
+        { status: { $in: ["Fixed Term", "Becoming Periodic", "Periodic", "Ending"] } },
+        { fixedTermEnd: { $gte: now } },
+        { periodicStart: { $ne: null } },
+      ],
+    })
+      .populate({
+        path: "tenantId",
+        select: "firstName lastName",
+      })
+      .lean();
+
+    // Map roomId → most relevant tenancy
+    const tenancyByRoom = {};
+    for (const t of tenancies) {
+      if (!t.roomId) continue;
+      const key = t.roomId.toString();
+
+      if (
+        !tenancyByRoom[key] ||
+        (t.fixedTermEnd &&
+          (!tenancyByRoom[key].fixedTermEnd ||
+            t.fixedTermEnd > tenancyByRoom[key].fixedTermEnd))
+      ) {
+        tenancyByRoom[key] = t;
+      }
+    }
+
+    const availableNow = [];
+    const comingSoon = [];
+
+    for (const room of validRooms) {
+      const property = room.propertyId;
+      const tenancy = tenancyByRoom[room._id.toString()];
+
+      // Determine leave / available-from date
+      let leaveDate = null;
+      if (tenancy?.fixedTermEnd) {
+        leaveDate = new Date(tenancy.fixedTermEnd);
+      } else if (room.availableFrom) {
+        leaveDate = new Date(room.availableFrom);
+      }
+
+      // Ex-tenant name
+      let exTenantName = "—";
+      if (tenancy?.tenantId) {
+        exTenantName =
+          `${tenancy.tenantId.firstName || ""} ${tenancy.tenantId.lastName || ""}`.trim() ||
+          tenancy.tenant ||
+          "—";
+      } else if (room.currentTenant) {
+        exTenantName =
+          `${room.currentTenant.firstName || ""} ${room.currentTenant.lastName || ""}`.trim() ||
+          "—";
+      } else if (tenancy?.tenant) {
+        exTenantName = tenancy.tenant;
+      }
+
+      // Pricing
+      const rent = room.monthlyRent || 0;
+      const deposit = room.securityDeposit != null ? room.securityDeposit : null;
+
+      const priceStr =
+        room.roomType === "ENSUITE" || room.bathroomType === "private"
+          ? `Ensuite:£${rent}`
+          : `DR=£${rent}`;
+
+      const depositStr = deposit != null ? `£${deposit}` : "—";
+
+      // Build row (matches your screenshot columns)
+      const row = {
+        propertyId: property._id,
+        roomId: room._id,
+        propertyName: property.name || property.address?.line1 || "—",
+        code: property.propertyCode || property.address?.postcode || "—",
+        area: property.address?.area || property.address?.city || "—",
+        zone: null, // add to Property schema later if needed
+        price: priceStr,
+        deposit: depositStr,
+        monthlyRent: rent,
+        securityDeposit: deposit,
+        exTenant: exTenantName,
+        occupancy:
+          room.occupancy === "DOUBLE" || room.occupancy === "TWIN"
+            ? "Single/Double"
+            : "Single",
+        bank: null, // add to schema later if needed
+        roomType: room.roomType,
+        bathroomType: room.bathroomType,
+        status: null, // set below
+        availableFrom: leaveDate,
+        availableImmediately: room.availableImmediately || false,
+        roomStatus: room.status,
+        shortTermLets: room.shortTermLets || false,
+        minimumTenancy: room.minimumTenancy,
+        title: room.title,
+        roomName: room.roomName,
+        listingCode: room.listingCode,
+      };
+
+      // Decision logic
+      const isAvailableNow =
+        room.status === "AVAILABLE" ||
+        room.availableImmediately === true ||
+        !tenancy ||
+        (leaveDate && leaveDate <= now);
+
+      const isComingSoon =
+        leaveDate &&
+        leaveDate > now &&
+        leaveDate <= futureLimit &&
+        (room.status === "OCCUPIED" ||
+          room.status === "AVAILABLE_SOON" ||
+          room.status === "RESERVED" ||
+          !!tenancy);
+
+      if (isAvailableNow) {
+        row.status = "Available Now";
+        if (room.shortTermLets) {
+          row.notes = "Short Letting No Contract";
+        }
+        availableNow.push(row);
+      } else if (isComingSoon) {
+        // Format like "6-September-2026"
+        const d = leaveDate;
+        const months = [
+          "January",
+          "February",
+          "March",
+          "April",
+          "May",
+          "June",
+          "July",
+          "August",
+          "September",
+          "October",
+          "November",
+          "December",
+        ];
+        row.status = `${d.getDate()}-${months[d.getMonth()]}-${d.getFullYear()}`;
+        comingSoon.push(row);
+      }
+      // else → still occupied far in the future → skip
+    }
+
+    // Sort
+    comingSoon.sort(
+      (a, b) => new Date(a.availableFrom) - new Date(b.availableFrom)
+    );
+    availableNow.sort((a, b) => (a.monthlyRent || 0) - (b.monthlyRent || 0));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        availableNow,
+        comingSoon,
+        summary: {
+          availableNowCount: availableNow.length,
+          comingSoonCount: comingSoon.length,
+          daysAhead,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("getAvailableRooms error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch available rooms",
+      error: error.message,
     });
   }
 };
