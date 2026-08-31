@@ -24,6 +24,7 @@ import {
   UserRound,
   Receipt,
   ListChecks,
+  MapPin,
 } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 
@@ -31,6 +32,7 @@ const NAV = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/properties", label: "Properties", icon: Building2 },
   { href: "/admin/inventory", label: "Inventory", icon: Package },
+  { href: "/admin/void", label: "Void", icon: CalendarClock },
   { href: "/admin/owners", label: "Property Owners", icon: KeyRound },
   { href: "/admin/leads", label: "Leads", icon: UserPlus },
   { href: "/admin/viewings", label: "Viewings", icon: CalendarClock },
@@ -51,6 +53,7 @@ const NAV = [
   { href: "/admin/feedback", label: "Feedback", icon: MessageSquare },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardCheck },
   { href: "/admin/users", label: "Team", icon: Users },
+  { href: "/admin/live-location", label: "Live Location", icon: MapPin },
   { href: "/admin/tasks", label: "Task Management", icon: ListChecks },
   { href: "/admin/settings", label: "Account", icon: Settings },
 ];

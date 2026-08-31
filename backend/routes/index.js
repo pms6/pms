@@ -20,6 +20,8 @@ import auditRoutes from "./auditLog.route.js"
 import tenantRoute from "./tenant.route.js"
 import expenseRoutes from "./expense.route.js"
 import taskRoutes from "./task.route.js"
+import voidPeriodRoutes from "./voidPeriod.Route.js"
+import agentLocationRoutes from "./agentLocation.Route.js"
 
 const router = express.Router();
 
@@ -55,5 +57,7 @@ router.use("/payments", paymentRoutes);
 router.use("/expenses", expenseRoutes);
 router.use("/tasks", taskRoutes);
 router.use("/audit", auditRoutes);
+router.use("/void-periods", voidPeriodRoutes);
+router.use("/agent-location", agentLocationRoutes);
 
 export default router;

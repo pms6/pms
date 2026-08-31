@@ -87,21 +87,42 @@ const leadSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-
     // ============================
     // Applicant details
     // ============================
-    // Screening answers collected on the website request form. Optional at the
-    // schema level so leads created by an operator on the Leads board (which
-    // asks none of this) still save.
+    // Screening answers. Collected on the website request form AND on the
+    // Leads board's own form, which requires them.
+    //
+    // Everything stays optional at the SCHEMA level: leads created before these
+    // questions existed carry none of them, and requiring them here would make
+    // those records unsaveable on any later edit. The Leads board form and
+    // createLead enforce the requirement for new leads instead.
     applicant: {
       age: { type: Number, default: null },
       gender: { type: String, trim: true, default: "" },
+
+      // Marital status is a different question from `occupancy` below: a
+      // married applicant may still be taking the room alone.
+      maritalStatus: { type: String, enum: ["", "Single", "Married"], default: "" },
+
       smoking: { type: String, enum: ["", "Yes", "No"], default: "" },
       occupancy: { type: String, enum: ["", "Single", "Couple"], default: "" },
       workStatus: { type: String, enum: ["", "Working", "Student"], default: "" },
+
+      // How the applicant intends to pay the rent — salary, student loan,
+      // guarantor, savings. Free text, asked of students and workers alike.
+      rentPayment: { type: String, trim: true, default: "" },
+
       minimumStayMonths: { type: Number, default: null },
       nationality: { type: String, trim: true, default: "" },
+
+      // The country that issued the applicant's passport. Kept separate from
+      // `nationality` because a right-to-rent check records the document's
+      // issuing country, which a dual national's stated nationality may not
+      // match. The website form asks only for nationality; the Leads board
+      // form asks only for the passport country.
+      passportCountry: { type: String, trim: true, default: "" },
+
       moveInDate: { type: String, default: "" }, // YYYY-MM-DD
       pet: { type: String, enum: ["", "Yes", "No"], default: "" },
     },
@@ -112,10 +133,48 @@ const leadSchema = new mongoose.Schema(
     },
 
     // Pipeline stage — matches the frontend Kanban columns.
+    //
+    // "pending" is the intake column: EVERY lead starts there, whether it was
+    // typed in on the board or arrived from the website, and only leaves once a
+    // staff member approves it. It is first in the list so the board and the
+    // stats endpoint both render the pipeline in order.
     status: {
       type: String,
-      enum: ["new", "qualified", "viewing", "converted", "lost"],
-      default: "new",
+      enum: ["pending", "new", "qualified", "viewing", "converted", "lost"],
+      default: "pending",
+    },
+
+    // ============================
+    // Approval
+    // ============================
+    // Who moved this lead out of "pending". Any staff seat may approve — the
+    // record is an audit trail, not a permission gate — so the whole team can
+    // see which colleague signed a lead off.
+    //
+    // Denormalised the same way createdByEmail / createdByRole are: the ref
+    // alone would need a populate on every read, and the attribution has to
+    // survive that member leaving the team.
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    approvedByEmail: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    approvedByRole: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    approvedAt: {
+      type: Date,
+      default: null,
     },
 
     notes: String,

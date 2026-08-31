@@ -2,6 +2,7 @@
 
 import { LayoutDashboard, UserPlus, CalendarClock, ClipboardList, Megaphone, ListChecks } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
+import LiveLocationToggle from "../Shared/LiveLocationToggle";
 
 const NAV = [
   { href: "/agent/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -14,7 +15,15 @@ const NAV = [
 
 export default function AgentLayout({ children }) {
   return (
-    <RoleShell role="agent" portalLabel="Agent" nav={NAV}>
+    <RoleShell
+      role="agent"
+      portalLabel="Agent"
+      nav={NAV}
+      // In the header rather than on one page: sharing has to be switchable
+      // from wherever the agent happens to be, and visible enough that they
+      // always know it is on.
+      headerExtra={<LiveLocationToggle />}
+    >
       {children}
     </RoleShell>
   );

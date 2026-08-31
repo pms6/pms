@@ -6,6 +6,7 @@ import {
   getLeadById,
   updateLead,
   updateLeadStatus,
+  approveLead,
   deleteLead,
   getLeadStats,
 } from "../controllers/lead.controller.js";
@@ -32,5 +33,9 @@ router.delete("/:id", deleteLead);
 
 // Special operations
 router.patch("/:id/status", updateLeadStatus);
+
+// Approve a lead out of the "pending" intake column. Any staff seat may do it;
+// the handler records which one, so the board can show who signed it off.
+router.patch("/:id/approve", approveLead);
 
 export default router;

@@ -1,8 +1,8 @@
 "use client";
 
-import { X, Edit2 } from "lucide-react";
+import { X, Edit2, Clock3 } from "lucide-react";
 import { applicantEntries } from "./applicant";
-import { creatorOf } from "./creator";
+import { creatorOf, approverOf } from "./creator";
 
 // The Kanban card is too small for the full screening answers, so the Leads
 // boards (admin, manager, agent, finance) all open this for the detail view.
@@ -22,6 +22,7 @@ export default function LeadDetailModal({ lead, onClose, onEdit }) {
   const answers = applicantEntries(lead.applicant);
   const property = lead.propertyId;
   const creator = creatorOf(lead);
+  const approver = approverOf(lead);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -85,6 +86,28 @@ export default function LeadDetailModal({ lead, onClose, onEdit }) {
           <DetailRow label="Assigned to" value={lead.assignedTo} />
         </DetailSection>
 
+        {/* Approval trail — readable by every role, which is the point of it:
+            anyone on the team can see who let this lead into the pipeline. */}
+        <DetailSection title="Approval">
+          {approver ? (
+            <>
+              <DetailRow
+                label="Approved by"
+                value={`${approver.label}${approver.role ? ` (${approver.role})` : ""}`}
+              />
+              <DetailRow label="Email" value={approver.email} />
+              <DetailRow
+                label="Approved on"
+                value={approver.at ? new Date(approver.at).toLocaleString() : ""}
+              />
+            </>
+          ) : (
+            <p className="inline-flex items-center gap-1.5 text-sm font-bold text-amber-600 py-1">
+              <Clock3 size={14} /> Pending approval
+            </p>
+          )}
+        </DetailSection>
+
         <DetailSection title="Added by">
           <DetailRow
             label={creator?.isPublic ? "Source" : "Member"}
@@ -108,7 +131,8 @@ export default function LeadDetailModal({ lead, onClose, onEdit }) {
             answers.map((a) => <DetailRow key={a.key} label={a.label} value={a.value} />)
           ) : (
             <p className="text-sm text-gray-400 font-medium py-1">
-              No screening answers — this lead wasn&apos;t created from the website request form.
+              No screening answers — this lead predates the questions on the request
+              and lead forms.
             </p>
           )}
         </DetailSection>

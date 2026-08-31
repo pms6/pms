@@ -1,12 +1,22 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Loader2 } from "lucide-react";
+import { X, Loader2, Clock3 } from "lucide-react";
 import api from "../api/api";
 
-export const LEAD_STAGES = ["new", "qualified", "viewing", "converted", "lost"];
+// "pending" is the intake stage every lead is created into — see the Lead
+// model. It is listed so an EDIT can send a lead back to it.
+export const LEAD_STAGES = ["pending", "new", "qualified", "viewing", "converted", "lost"];
 
 const SOURCES = ["Rightmove", "Zoopla", "SpareRoom", "OpenRent", "Website", "Referral"];
+
+// Screening answer options. These strings are stored verbatim, and match the
+// enums on the Lead model and the values the public request form sends, so the
+// two intake routes stay comparable.
+const MARITAL_STATUS = ["Single", "Married"];
+const YES_NO = ["Yes", "No"];
+const WORK_STATUS = ["Working", "Student"];
+const GENDERS = ["Male", "Female", "Other"];
 
 // propertyId / roomId come back populated ({ _id, name }) on a saved lead but
 // go out as plain ids, so the form always works with the id.
@@ -29,6 +39,8 @@ const roomLabel = (room) => {
 export default function LeadFormModal({ lead, properties = [], onClose, onSaved }) {
   const isEdit = Boolean(lead?._id);
 
+  const applicant = lead?.applicant || {};
+
   const [form, setForm] = useState({
     name: lead?.name || "",
     email: lead?.email || "",
@@ -38,10 +50,26 @@ export default function LeadFormModal({ lead, properties = [], onClose, onSaved 
     roomId: idOf(lead?.roomId),
     interestedIn: lead?.interestedIn || "",
     budget: lead?.budget ? String(lead.budget) : "",
-    status: lead?.status || "new",
+    status: lead?.status || "pending",
     assignedTo: lead?.assignedTo || "",
     notes: lead?.notes || "",
     lostReason: lead?.lostReason || "",
+
+    // Screening answers — every one of these is required. They live flat in
+    // form state and are nested back under `applicant` on submit, so the
+    // <input> handlers stay the same shape as the rest of the form.
+    age: applicant.age ? String(applicant.age) : "",
+    gender: applicant.gender || "",
+    maritalStatus: applicant.maritalStatus || "",
+    pet: applicant.pet || "",
+    smoking: applicant.smoking || "",
+    passportCountry: applicant.passportCountry || "",
+    minimumStayMonths: applicant.minimumStayMonths
+      ? String(applicant.minimumStayMonths)
+      : "",
+    moveInDate: applicant.moveInDate || "",
+    workStatus: applicant.workStatus || "",
+    rentPayment: applicant.rentPayment || "",
   });
 
   const [rooms, setRooms] = useState([]);
@@ -95,9 +123,9 @@ export default function LeadFormModal({ lead, properties = [], onClose, onSaved 
 
     try {
       const payload = {
-        name: form.name,
-        email: form.email || undefined,
-        phone: form.phone || undefined,
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim(),
         source: form.source,
         propertyId: form.propertyId || undefined,
         roomId: form.roomId || undefined,
@@ -107,6 +135,19 @@ export default function LeadFormModal({ lead, properties = [], onClose, onSaved 
         assignedTo: form.assignedTo || undefined,
         notes: form.notes || undefined,
         lostReason: form.status === "lost" ? form.lostReason.trim() : "",
+
+        applicant: {
+          age: Number(form.age) || null,
+          gender: form.gender,
+          maritalStatus: form.maritalStatus,
+          pet: form.pet,
+          smoking: form.smoking,
+          passportCountry: form.passportCountry.trim(),
+          minimumStayMonths: Number(form.minimumStayMonths) || null,
+          moveInDate: form.moveInDate,
+          workStatus: form.workStatus,
+          rentPayment: form.rentPayment.trim(),
+        },
       };
 
       const res = isEdit
@@ -135,7 +176,7 @@ export default function LeadFormModal({ lead, properties = [], onClose, onSaved 
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7 max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-5">
@@ -166,12 +207,24 @@ export default function LeadFormModal({ lead, properties = [], onClose, onSaved 
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>Email</label>
-              <input className={field} value={form.email} onChange={handleChange("email")} />
+              <label className={labelCls}>Email *</label>
+              <input
+                className={field}
+                type="email"
+                value={form.email}
+                onChange={handleChange("email")}
+                required
+              />
             </div>
             <div>
-              <label className={labelCls}>Phone</label>
-              <input className={field} value={form.phone} onChange={handleChange("phone")} />
+              <label className={labelCls}>Phone *</label>
+              <input
+                className={field}
+                type="tel"
+                value={form.phone}
+                onChange={handleChange("phone")}
+                required
+              />
             </div>
           </div>
 
@@ -187,13 +240,15 @@ export default function LeadFormModal({ lead, properties = [], onClose, onSaved 
               </select>
             </div>
             <div>
-              <label className={labelCls}>Budget (£)</label>
+              <label className={labelCls}>Budget (£) *</label>
               <input
                 className={field}
                 type="number"
+                min="1"
                 value={form.budget}
                 onChange={handleChange("budget")}
                 placeholder="650"
+                required
               />
             </div>
           </div>
@@ -237,6 +292,175 @@ export default function LeadFormModal({ lead, properties = [], onClose, onSaved 
             </div>
           </div>
 
+          {/* ----------------------------------------------------------------
+              Applicant details
+
+              The same screening questions the public request form asks, so a
+              lead an operator types in is directly comparable with one that
+              arrives from the website. All of them are required here.
+             ---------------------------------------------------------------- */}
+          <div className="pt-2 border-t border-gray-100">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+              Applicant details
+            </p>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Age *</label>
+                  <input
+                    className={field}
+                    type="number"
+                    min="16"
+                    max="120"
+                    value={form.age}
+                    onChange={handleChange("age")}
+                    placeholder="27"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Gender *</label>
+                  <select
+                    className={field}
+                    value={form.gender}
+                    onChange={handleChange("gender")}
+                    required
+                  >
+                    <option value="">— Select —</option>
+                    {GENDERS.map((g) => (
+                      <option key={g} value={g}>
+                        {g}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Marital status *</label>
+                  <select
+                    className={field}
+                    value={form.maritalStatus}
+                    onChange={handleChange("maritalStatus")}
+                    required
+                  >
+                    <option value="">— Select —</option>
+                    {MARITAL_STATUS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Passport country *</label>
+                  <input
+                    className={field}
+                    value={form.passportCountry}
+                    onChange={handleChange("passportCountry")}
+                    placeholder="e.g. United Kingdom"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Pet *</label>
+                  <select
+                    className={field}
+                    value={form.pet}
+                    onChange={handleChange("pet")}
+                    required
+                  >
+                    <option value="">— Select —</option>
+                    {YES_NO.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Smoking *</label>
+                  <select
+                    className={field}
+                    value={form.smoking}
+                    onChange={handleChange("smoking")}
+                    required
+                  >
+                    <option value="">— Select —</option>
+                    {YES_NO.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Minimum stay (months) *</label>
+                  <input
+                    className={field}
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={form.minimumStayMonths}
+                    onChange={handleChange("minimumStayMonths")}
+                    placeholder="6"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Move-in date *</label>
+                  <input
+                    className={field}
+                    type="date"
+                    value={form.moveInDate}
+                    onChange={handleChange("moveInDate")}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className={labelCls}>Work status *</label>
+                <select
+                  className={field}
+                  value={form.workStatus}
+                  onChange={handleChange("workStatus")}
+                  required
+                >
+                  <option value="">— Select —</option>
+                  {WORK_STATUS.map((w) => (
+                    <option key={w} value={w}>
+                      {w}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className={labelCls}>How will the rent be paid? *</label>
+                <textarea
+                  className={`${field} min-h-[76px] resize-y`}
+                  value={form.rentPayment}
+                  onChange={handleChange("rentPayment")}
+                  placeholder={
+                    form.workStatus === "Student"
+                      ? "e.g. Student loan plus a UK-based guarantor"
+                      : "e.g. Monthly salary, £2,400 net per month"
+                  }
+                  required
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Assigned To</label>
@@ -247,16 +471,28 @@ export default function LeadFormModal({ lead, properties = [], onClose, onSaved 
                 placeholder="e.g. Ella Moore"
               />
             </div>
-            <div>
-              <label className={labelCls}>Stage</label>
-              <select className={field} value={form.status} onChange={handleChange("status")}>
-                {LEAD_STAGES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Stage is editable only on an existing lead. A NEW lead always
+                starts in "pending" and needs an approval to move on, so
+                offering a stage here would be a choice the server overrides. */}
+            {isEdit ? (
+              <div>
+                <label className={labelCls}>Stage</label>
+                <select className={field} value={form.status} onChange={handleChange("status")}>
+                  {LEAD_STAGES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className={labelCls}>Stage</label>
+                <p className="w-full px-4 py-3 bg-amber-50 border border-amber-100 rounded-xl text-sm font-bold text-amber-700 flex items-center gap-2">
+                  <Clock3 size={15} /> Pending approval
+                </p>
+              </div>
+            )}
           </div>
 
           {form.status === "lost" && (

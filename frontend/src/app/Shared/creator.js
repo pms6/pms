@@ -1,6 +1,6 @@
 "use client";
 
-import { UserCircle2 } from "lucide-react";
+import { UserCircle2, BadgeCheck } from "lucide-react";
 
 // Who added a lead or a viewing.
 //
@@ -77,6 +77,51 @@ export function AddedBy({ record, verb = "Added by", className = "" }) {
       {creator.role && (
         <span className="text-[10px] font-bold text-gray-400 bg-gray-100 rounded-full px-1.5 py-0.5">
           {creator.role}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * Who approved a lead out of the "pending" column, or null while it is still
+ * waiting. Same denormalised-with-ref fallback as creatorOf above.
+ */
+export function approverOf(record) {
+  if (!record?.approvedAt) return null;
+
+  const email = record.approvedByEmail || record.approvedBy?.email || "";
+  const role = record.approvedByRole || "";
+
+  return {
+    label: nameFromEmail(email) || "a team member",
+    email,
+    role: ROLE_LABEL[role] || "",
+    at: record.approvedAt,
+  };
+}
+
+/**
+ * The "Approved by <member>" line. Visible to every role — the whole team can
+ * see which colleague signed a lead off, and hovering gives the full address
+ * and the date.
+ */
+export function ApprovedBy({ record, className = "" }) {
+  const approver = approverOf(record);
+  if (!approver) return null;
+
+  const when = approver.at ? new Date(approver.at).toLocaleDateString() : "";
+
+  return (
+    <span
+      title={[approver.email, when].filter(Boolean).join(" • ")}
+      className={`inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 ${className}`}
+    >
+      <BadgeCheck size={12} />
+      Approved by <span className="font-bold">{approver.label}</span>
+      {approver.role && (
+        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 rounded-full px-1.5 py-0.5">
+          {approver.role}
         </span>
       )}
     </span>

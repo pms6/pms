@@ -11,6 +11,10 @@ export default function RoleShell({
   role,
   portalLabel,
   nav = [],
+  // Rendered in the top bar, left of the user chip. The agent portal puts its
+  // live-location switch here so it is reachable from every page rather than
+  // buried on one.
+  headerExtra = null,
   children,
 }) {
   const { user, profile, loading, logout } = useAuth();
@@ -140,6 +144,8 @@ export default function RoleShell({
           
 
           <div className="flex-1" />
+
+          {headerExtra && <div className="mr-3">{headerExtra}</div>}
 
           <div className="flex items-center gap-3">
             <div className="text-right hidden sm:block">

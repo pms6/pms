@@ -13,6 +13,8 @@ import {
   CalendarClock,
   RotateCcw,
   Search,
+  Clock3,
+  CalendarX2,
 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import RescheduleModal from "./RescheduleModal";
@@ -36,6 +38,8 @@ const useViewingsData = ({ status = "", person = "", propertyId = "" } = {}) => 
 
   const [allViewings, setAllViewings] = useState([]);
   const [leads, setLeads] = useState([]);
+  // Dates on which no viewing may be booked.
+  const [blocks, setBlocks] = useState([]);
   const [properties, setProperties] = useState([]);
   const [allRooms, setAllRooms] = useState([]);
   const [viewingsLoading, setViewingsLoading] = useState(false);
@@ -71,6 +75,27 @@ const useViewingsData = ({ status = "", person = "", propertyId = "" } = {}) => 
       console.error(err);
     }
   }, [organizationId]);
+
+  const fetchBlocks = useCallback(async () => {
+    if (!organizationId) return;
+    try {
+      const res = await api.get("/viewings/blocks");
+      setBlocks(res.data?.data || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }, [organizationId]);
+
+  const createBlock = async (payload) => {
+    const res = await api.post("/viewings/blocks", payload);
+    await fetchBlocks();
+    return res.data;
+  };
+
+  const removeBlock = async (id) => {
+    await api.delete(`/viewings/blocks/${id}`);
+    setBlocks((current) => current.filter((b) => b._id !== id));
+  };
 
   const createViewing = async (formData) => {
     if (!organizationId) throw new Error("Organization ID missing");
@@ -129,9 +154,10 @@ const useViewingsData = ({ status = "", person = "", propertyId = "" } = {}) => 
       setInitialLoading(true);
       await fetchSupportingData();
       await fetchAllViewings();
+      await fetchBlocks();
       setInitialLoading(false);
     })();
-  }, [organizationId, fetchSupportingData, fetchAllViewings]);
+  }, [organizationId, fetchSupportingData, fetchAllViewings, fetchBlocks]);
 
   // Every property that has at least one viewing, for the property filter.
   // Built from the UNfiltered list so the dropdown does not shrink as the other
@@ -202,9 +228,12 @@ const useViewingsData = ({ status = "", person = "", propertyId = "" } = {}) => 
     leads,
     properties,
     allRooms,
+    blocks,
     viewingsLoading,
     initialLoading,
     createViewing,
+    createBlock,
+    removeBlock,
     updateViewingStatus,
     rescheduleViewing,
     respondToRequest,
@@ -214,9 +243,17 @@ const useViewingsData = ({ status = "", person = "", propertyId = "" } = {}) => 
 // ==================== UI ====================
 const STATUS_TONE = { scheduled: "orange", done: "green", cancelled: "gray" };
 
+// A viewing's date is a plain calendar day ("2026-09-05"), not an instant, so
+// it is parsed AND rendered in UTC.
+//
+// The "Z" matters: without it the string is parsed in the viewer's local
+// timezone, and rendering that with timeZone "UTC" then shifts it backwards for
+// anyone east of UTC — at UTC+5, local midnight on the 5th is 19:00 on the 4th
+// in UTC, so 5 September displayed as "Friday 4 Sept".
 function prettyDay(iso) {
   if (!iso) return "";
-  const d = new Date(iso + "T00:00:00");
+  const d = new Date(iso + "T00:00:00Z");
+  if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-GB", {
     weekday: "long",
     day: "numeric",
@@ -227,17 +264,157 @@ function prettyDay(iso) {
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
+// ---------------------------------------------------------------------------
+// Blocked dates
+//
+// A date closed for a property (and optionally one room within it). The server
+// refuses any attempt to book or move a viewing onto a blocked date, so this
+// form is the only thing standing between an operator and a wasted journey.
+// ---------------------------------------------------------------------------
+function BlockDateModal({ onClose, onCreate, properties, allRooms }) {
+  const [form, setForm] = useState({ propertyId: "", roomId: "", date: "", note: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleChange = (key) => (e) => {
+    const { value } = e.target;
+    // Changing property invalidates the chosen room.
+    setForm((prev) =>
+      key === "propertyId" ? { ...prev, propertyId: value, roomId: "" } : { ...prev, [key]: value }
+    );
+  };
+
+  const roomsForProperty = allRooms.filter((r) => {
+    const rid = r.propertyId && typeof r.propertyId === "object" ? r.propertyId._id : r.propertyId;
+    return String(rid) === String(form.propertyId);
+  });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      await onCreate({
+        propertyId: form.propertyId,
+        roomId: form.roomId || undefined,
+        date: form.date,
+        note: form.note,
+      });
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not block that date.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const field =
+    "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium";
+  const labelCls =
+    "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h3 className="text-xl font-bold text-[#0F253B]">Block a date</h3>
+            <p className="text-xs text-gray-400 font-medium mt-0.5">
+              No viewing can be booked for this date.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-300 hover:text-gray-500">
+            <X size={20} />
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={submit} className="space-y-4">
+          <div>
+            <label className={labelCls}>Property *</label>
+            <select className={field} value={form.propertyId} onChange={handleChange("propertyId")} required>
+              <option value="">Select property…</option>
+              {properties.map((p) => (
+                <option key={p._id} value={p._id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className={labelCls}>Room</label>
+            <select
+              className={field}
+              value={form.roomId}
+              onChange={handleChange("roomId")}
+              disabled={!form.propertyId}
+            >
+              {/* The default closes the whole property, which is the commoner
+                  case — a room is picked only to close one room. */}
+              <option value="">All rooms in this property</option>
+              {roomsForProperty.map((r) => (
+                <option key={r._id} value={r._id}>
+                  {r.roomName || r.title || (r.roomNumber ? `Room ${r.roomNumber}` : "Room")}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className={labelCls}>Date *</label>
+            <input type="date" className={field} value={form.date} onChange={handleChange("date")} required />
+          </div>
+
+          <div>
+            <label className={labelCls}>Note</label>
+            <textarea
+              className={`${field} min-h-[76px] resize-y`}
+              value={form.note}
+              onChange={handleChange("note")}
+              placeholder="Why is this date closed? Shown to whoever is refused the booking."
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full py-3.5 bg-[#0F253B] hover:bg-[#1d3557] text-white font-bold rounded-xl transition-all active:scale-[0.98] disabled:opacity-50"
+          >
+            {submitting ? "Blocking…" : "Block this date"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+
+function ViewingModal({ onClose, onCreate, leads, properties, allRooms, defaultAgent = "" }) {
   const [form, setForm] = useState({
     date: "", // empty on server → no hydration mismatch
     time: "10:00",
     lead: "",
     property: "",
     room: "",
-    agent: "",
+    // Whoever is scheduling it is usually the one showing it round, so their
+    // name is the sensible starting point. Still editable, and still required.
+    agent: defaultAgent,
     status: "scheduled",
   });
   const [submitting, setSubmitting] = useState(false);
+
+  // A lead awaiting approval has not been vetted, so it cannot be shown round.
+  // Filtered here rather than at the fetch because the board's own search still
+  // needs the full list.
+  const bookableLeads = leads.filter((l) => l.status !== "pending");
+  const pendingCount = leads.length - bookableLeads.length;
 
   // Set today's date only on the client
   useEffect(() => {
@@ -329,12 +506,30 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
               required
             >
               <option value="">Select lead…</option>
-              {leads.map((l) => (
+              {bookableLeads.map((l) => (
                 <option key={l._id} value={l._id}>
                   {l.name}
                 </option>
               ))}
             </select>
+
+            {/* Say WHY a lead they can see on the Leads board is not in this
+                list, rather than leaving them hunting for it. The server
+                enforces the same rule. */}
+            {pendingCount > 0 && (
+              <p className="mt-1.5 flex items-start gap-1.5 text-[11px] font-medium text-amber-600">
+                <Clock3 size={13} className="shrink-0 mt-px" />
+                {pendingCount} lead{pendingCount === 1 ? " is" : "s are"} pending approval and
+                cannot be booked yet — approve {pendingCount === 1 ? "it" : "them"} on the Leads
+                board first.
+              </p>
+            )}
+
+            {bookableLeads.length === 0 && (
+              <p className="mt-1.5 text-[11px] font-medium text-gray-400">
+                No approved leads yet.
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -382,12 +577,16 @@ function ViewingModal({ onClose, onCreate, leads, properties, allRooms }) {
           </div>
 
           <div>
-            <label className={labelCls}>Agent</label>
+            <label className={labelCls}>Agent *</label>
+            {/* Required by the API — the Viewing model rejects a blank agent —
+                so the browser blocks an empty submit here rather than letting
+                the server come back with a validation error. */}
             <input
               className={field}
               value={form.agent}
               onChange={handleChange("agent")}
               placeholder="Who is showing the property?"
+              required
             />
           </div>
 
@@ -420,15 +619,19 @@ export default function ViewingsBoard({
     leads,
     properties,
     allRooms,
+    blocks,
     viewingsLoading,
     initialLoading,
     createViewing,
+    createBlock,
+    removeBlock,
     updateViewingStatus,
     rescheduleViewing,
     respondToRequest,
   } = useViewingsData({ status: filter, person, propertyId });
 
   const [rescheduling, setRescheduling] = useState(null);
+  const [blockOpen, setBlockOpen] = useState(false);
 
   const days = [...new Set(viewings.map((v) => v.date))].sort();
 
@@ -443,14 +646,70 @@ export default function ViewingsBoard({
         title={title}
         subtitle={subtitle}
         action={
-          <button
-            onClick={() => setOpen(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
-          >
-            <Plus size={18} /> Schedule
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setBlockOpen(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-[#0F253B] font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
+            >
+              <CalendarX2 size={18} /> Block a date
+            </button>
+            <button
+              onClick={() => setOpen(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
+            >
+              <Plus size={18} /> Schedule
+            </button>
+          </div>
         }
       />
+
+      {/* Blocked dates. Shown above the diary so an operator sees what is closed
+          before trying to book into it, rather than after being refused. */}
+      {blocks.length > 0 && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <CalendarX2 size={15} className="text-red-500" />
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+              Blocked dates — no viewing can be booked
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {blocks.map((b) => {
+              const room = b.roomId;
+              const scope = room
+                ? room.roomName || room.title || (room.roomNumber ? `Room ${room.roomNumber}` : "Room")
+                : "All rooms";
+
+              return (
+                <div
+                  key={b._id}
+                  className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-red-800">{prettyDay(b.date)}</p>
+                    <p className="text-[11px] font-medium text-red-500 truncate">
+                      {b.propertyId?.name || "Property"} · {scope}
+                    </p>
+                    {b.note && (
+                      <p className="text-[11px] text-red-400 font-medium mt-0.5 max-w-[220px]">
+                        {b.note}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => removeBlock(b._id)}
+                    title="Unblock this date"
+                    className="text-red-300 hover:text-red-600 transition-all shrink-0"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex gap-2 flex-wrap">
@@ -707,6 +966,16 @@ export default function ViewingsBoard({
           onClose={() => setOpen(false)}
           onCreate={createViewing}
           leads={leads}
+          properties={properties}
+          allRooms={allRooms}
+          defaultAgent={user?.name || ""}
+        />
+      )}
+
+      {blockOpen && (
+        <BlockDateModal
+          onClose={() => setBlockOpen(false)}
+          onCreate={createBlock}
           properties={properties}
           allRooms={allRooms}
         />

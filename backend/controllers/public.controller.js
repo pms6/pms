@@ -428,7 +428,9 @@ export const createEnquiry = async (req, res) => {
       source: "Website",
       interestedIn: `${property.name}${roomLabel}`,
       budget: budget ? Number(budget) : 0,
-      status: "new",
+      // Website enquiries land in the intake column like every other lead, and
+      // wait there for a staff member to approve them.
+      status: "pending",
       notes: noteParts.join("\n"),
       applicant,
     });

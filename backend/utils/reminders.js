@@ -92,3 +92,55 @@ export const expiryState = (expiryDate, reminderDaysBefore = 14) => {
   if (days <= (reminderDaysBefore || 14)) return { status: "warning", days };
   return { status: "valid", days };
 };
+
+/**
+ * Every ACTIVE member of the organization, whatever their seat, plus the owner.
+ *
+ * resolveOrgRecipients above deliberately narrows to OWNER/MANAGER because a
+ * certificate renewal is their job. The live-location digest is the opposite
+ * case: it goes to the whole team, so an agent out on visits knows exactly who
+ * can see their position — which is what makes the hourly mail-out fair rather
+ * than surveillance nobody agreed to.
+ *
+ * `exclude` drops an address from the result, used to keep an agent off the
+ * digest about their own movements.
+ *
+ * Returns { to, cc } in the same shape as resolveOrgRecipients.
+ */
+export const resolveAllOrgRecipients = async (organizationId, { exclude = [] } = {}) => {
+  const fallback = env.mail.user ? { to: env.mail.user, cc: [] } : { to: null, cc: [] };
+
+  if (!organizationId) return fallback;
+
+  const org = await Organization.findById(organizationId).select("userId").lean();
+
+  const memberships = await OrganizationMember.find({
+    organizationId,
+    status: "ACTIVE",
+  })
+    .select("userId")
+    .lean();
+
+  const userIds = [org?.userId, ...memberships.map((m) => m.userId)].filter(Boolean);
+  if (!userIds.length) return fallback;
+
+  const users = await User.find({ _id: { $in: userIds } }).select("email").lean();
+  const emailById = new Map(users.map((u) => [String(u._id), u.email]));
+
+  const skip = new Set(
+    exclude.filter(Boolean).map((e) => String(e).trim().toLowerCase())
+  );
+
+  const seen = new Set();
+  const emails = [];
+  for (const id of userIds) {
+    const email = emailById.get(String(id))?.trim().toLowerCase();
+    if (!email || seen.has(email) || skip.has(email)) continue;
+    seen.add(email);
+    emails.push(email);
+  }
+
+  if (!emails.length) return fallback;
+
+  return { to: emails[0], cc: emails.slice(1) };
+};

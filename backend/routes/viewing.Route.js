@@ -11,6 +11,11 @@ import {
   requestMyViewingReschedule,
   respondToRescheduleRequest,
 } from "../controllers/viewing.controller.js";
+import {
+  listViewingBlocks,
+  createViewingBlock,
+  deleteViewingBlock,
+} from "../controllers/viewingBlock.controller.js";
 import { protect, staffOnly } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -32,6 +37,11 @@ router.patch("/my/:id/reschedule-request", requestMyViewingReschedule);
 // a TENANT account from their Tenant record, so without this a tenant could
 // read and edit every viewing in the organization through these routes.
 router.use(staffOnly);
+
+// Blocked dates. Declared before "/:id" so "blocks" is not read as an id.
+router.get("/blocks", listViewingBlocks);
+router.post("/blocks", createViewingBlock);
+router.delete("/blocks/:id", deleteViewingBlock);
 
 router.get("/", getViewings);
 router.post("/", createViewing);

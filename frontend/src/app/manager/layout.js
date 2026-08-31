@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, Home, Users, UserPlus, CalendarClock, Wrench, ShieldCheck, BarChart3, ListChecks } from "lucide-react";
+import { LayoutDashboard, Home, Users, UserPlus, CalendarClock, Wrench, ShieldCheck, BarChart3, ListChecks, MapPin } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 
 const NAV = [
@@ -9,6 +9,7 @@ const NAV = [
   { href: "/manager/leads", label: "Leads", icon: UserPlus },
   { href: "/manager/viewings", label: "Viewings", icon: CalendarClock },
   { href: "/manager/team", label: "Team", icon: Users },
+  { href: "/manager/live-location", label: "Live Location", icon: MapPin },
   { href: "/manager/tasks", label: "My Tasks", icon: ListChecks },
   { href: "/manager/maintenance", label: "Maintenance", icon: Wrench },
   { href: "/manager/compliance", label: "Compliance", icon: ShieldCheck },

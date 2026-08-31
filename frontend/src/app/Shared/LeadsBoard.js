@@ -1,13 +1,24 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Mail, Phone, PoundSterling, Trash2, Edit2, Eye } from "lucide-react";
+import {
+  Plus,
+  Mail,
+  Phone,
+  PoundSterling,
+  Trash2,
+  Edit2,
+  Eye,
+  Clock3,
+  CheckCircle2,
+  Loader2,
+} from "lucide-react";
 import { PageHeader } from "./ui";
 import { applicantEntries } from "./applicant";
 import LeadDetailModal from "./LeadDetailModal";
 import LostReasonModal from "./LostReasonModal";
 import LeadFormModal, { LEAD_STAGES } from "./LeadFormModal";
-import { AddedBy } from "./creator";
+import { AddedBy, ApprovedBy } from "./creator";
 import api from "../api/api";
 
 // One board, rendered by every staff portal (admin, manager, agent, finance).
@@ -15,7 +26,11 @@ import api from "../api/api";
 // move it through the stages. Tenants have no leads page at all, and the API
 // refuses them regardless of what the UI offers.
 
+// "pending" is the intake column: every lead lands there and needs an approval
+// to move on. Its `icon` marks it as the one column whose cards get the Approve
+// button; the rest are ordinary pipeline stages.
 const COLUMNS = [
+  { key: "pending", label: "Pending", tone: "bg-amber-500", icon: Clock3 },
   { key: "new", label: "New", tone: "bg-blue-500" },
   { key: "qualified", label: "Qualified", tone: "bg-emerald-500" },
   { key: "viewing", label: "Viewing", tone: "bg-[#F47C3C]" },
@@ -41,6 +56,7 @@ export default function LeadsBoard({ title = "Leads", subtitle = "Your enquiry p
   const [dragOverCol, setDragOverCol] = useState(null);
   const [detailLead, setDetailLead] = useState(null);
   const [lostPrompt, setLostPrompt] = useState(null);
+  const [approvingId, setApprovingId] = useState(null);
 
   // null = closed, { lead: null } = create, { lead } = edit.
   const [formState, setFormState] = useState(null);
@@ -92,6 +108,24 @@ export default function LeadsBoard({ title = "Leads", subtitle = "Your enquiry p
     }
 
     return true;
+  };
+
+  // Approve a pending lead into the working pipeline. The server records WHO
+  // approved it and returns the updated lead, so the card can show the approver
+  // without a reload. Not optimistic: the approver line has to come from the
+  // server, and guessing it would show the wrong colleague for a moment.
+  const approveLead = async (lead) => {
+    setApprovingId(lead._id);
+    try {
+      const res = await api.patch(`/leads/${lead._id}/approve`);
+      const approved = res.data.data;
+      setLeads((ls) => ls.map((l) => (l._id === lead._id ? approved : l)));
+      setDetailLead((d) => (d && d._id === lead._id ? approved : d));
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to approve lead");
+    } finally {
+      setApprovingId(null);
+    }
   };
 
   // Losing a lead has to say why — the backend rejects "lost" with no reason —
@@ -169,6 +203,11 @@ export default function LeadsBoard({ title = "Leads", subtitle = "Your enquiry p
                   <div className="flex items-center gap-2">
                     <span className={`w-2.5 h-2.5 rounded-full ${col.tone}`} />
                     <span className="text-sm font-bold text-[#0F253B]">{col.label}</span>
+                    {col.icon && (
+                      <span title="Awaiting approval" className="text-amber-500 flex">
+                        <col.icon size={13} />
+                      </span>
+                    )}
                   </div>
                   <span className="text-xs font-bold text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">
                     {cards.length}
@@ -327,6 +366,28 @@ export default function LeadsBoard({ title = "Leads", subtitle = "Your enquiry p
                         </div>
 
                         <AddedBy record={l} className="mt-2" />
+
+                        {/* Who signed this lead off. Shown on every card that
+                            has been approved, to every role. */}
+                        <ApprovedBy record={l} className="mt-1.5" />
+
+                        {/* Approve is the intended way out of "pending".
+                            Dragging the card works too and records the same
+                            approver, but the button is the obvious one. */}
+                        {l.status === "pending" && (
+                          <button
+                            onClick={() => approveLead(l)}
+                            disabled={approvingId === l._id}
+                            className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition-all active:scale-[0.98] disabled:opacity-50"
+                          >
+                            {approvingId === l._id ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <CheckCircle2 size={14} />
+                            )}
+                            {approvingId === l._id ? "Approving…" : "Approve"}
+                          </button>
+                        )}
 
                         <select
                           value={l.status}

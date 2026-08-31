@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, CreditCard, UserPlus, CalendarClock, ShieldCheck, BarChart3, ListChecks } from "lucide-react";
+import { LayoutDashboard, CreditCard, UserPlus, CalendarClock, ShieldCheck, BarChart3, ListChecks, MapPin } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 
 // Invoices and Statements were removed rather than stubbed: this system has no
@@ -15,6 +15,7 @@ const NAV = [
   { href: "/finance/deposits", label: "Deposits", icon: ShieldCheck },
   { href: "/finance/reports", label: "Reports", icon: BarChart3 },
   { href: "/finance/tasks", label: "My Tasks", icon: ListChecks },
+  { href: "/finance/live-location", label: "Live Location", icon: MapPin },
 ];
 
 export default function FinanceLayout({ children }) {

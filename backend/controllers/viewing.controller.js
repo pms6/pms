@@ -1,6 +1,7 @@
 import Viewing from "../models/Viewing.js";
 import Lead from "../models/Lead.js";
 import Room from "../models/Room.js";
+import { blockedReason } from "./viewingBlock.controller.js";
 
 // Every staff-facing response shapes a viewing the same way. createdBy is here
 // so the board can name whoever scheduled it: rows created before
@@ -11,6 +12,34 @@ const POPULATE = [
   { path: "room", select: "roomName roomNumber title" },
   { path: "createdBy", select: "email" },
 ];
+
+/**
+ * Why this lead cannot have a viewing booked against it, or null when it can.
+ *
+ * A lead sitting in the "pending" column is an enquiry nobody has vetted yet —
+ * showing someone round before that is exactly what the approval step exists to
+ * prevent. The board hides pending leads from the picker; this is the same rule
+ * on the server, for a stale page or a direct API call.
+ *
+ * Looking the lead up by organizationId as well means a viewing can never be
+ * booked against another organization's lead either.
+ */
+const leadBookingError = async (leadId, organizationId) => {
+  // No lead at all is the schema's `required` to report, not ours.
+  if (!leadId) return null;
+
+  const lead = await Lead.findOne({ _id: leadId, organizationId, isDeleted: false })
+    .select("name status")
+    .lean();
+
+  if (!lead) return "Lead not found.";
+
+  if (lead.status === "pending") {
+    return `${lead.name || "That lead"} is still pending approval. Approve the lead on the Leads board before booking a viewing.`;
+  }
+
+  return null;
+};
 
 // @desc    Get the signed-in TENANT's own viewings (matched by their leads).
 // @route   GET /api/viewings/my
@@ -143,6 +172,24 @@ export const createViewing = async (req, res) => {
       if (body[key] === "" || body[key] === null) delete body[key];
     });
 
+    // A pending lead has not been approved into the pipeline yet, so it cannot
+    // be shown round.
+    const leadError = await leadBookingError(body.lead, organizationId);
+    if (leadError) {
+      return res.status(400).json({ message: leadError });
+    }
+
+    // The date may be closed for this property/room.
+    const blocked = await blockedReason({
+      date: body.date,
+      propertyId: body.property,
+      roomId: body.room,
+      organizationId,
+    });
+    if (blocked) {
+      return res.status(409).json({ message: blocked, blocked: true });
+    }
+
     const viewing = new Viewing({
       ...body,
       organizationId: organizationId,
@@ -160,9 +207,9 @@ export const createViewing = async (req, res) => {
     res.status(201).json(populated);
   } catch (error) {
     console.error("Create Viewing Error:", error);
-    res.status(400).json({ 
-      message: error.message,
-      details: error.errors 
+    res.status(400).json({
+      message: validationMessage(error) || error.message,
+      details: error.errors,
     });
   }
 };
@@ -182,6 +229,40 @@ export const updateViewing = async (req, res) => {
       return res.status(404).json({ message: "Viewing not found" });
     }
 
+    // Only when the edit actually MOVES the viewing to a different lead. An
+    // untouched lead is left alone deliberately: if it were dragged back to
+    // pending after the booking was made, re-checking here would make the
+    // viewing uneditable, which punishes the wrong thing.
+    if (req.body.lead && String(req.body.lead) !== String(viewing.lead)) {
+      const leadError = await leadBookingError(req.body.lead, orgId);
+      if (leadError) {
+        return res.status(400).json({ message: leadError });
+      }
+    }
+
+    // Re-check whenever the edit touches the date, property or room, since any
+    // of the three changes which block applies.
+    const nextDate = req.body.date ?? viewing.date;
+    const nextProperty = req.body.property ?? viewing.property;
+    const nextRoom = req.body.room !== undefined ? req.body.room : viewing.room;
+
+    const movesSlot =
+      String(nextDate) !== String(viewing.date) ||
+      String(nextProperty) !== String(viewing.property) ||
+      String(nextRoom ?? "") !== String(viewing.room ?? "");
+
+    if (movesSlot) {
+      const blocked = await blockedReason({
+        date: nextDate,
+        propertyId: nextProperty,
+        roomId: nextRoom,
+        organizationId: orgId,
+      });
+      if (blocked) {
+        return res.status(409).json({ message: blocked, blocked: true });
+      }
+    }
+
     Object.assign(viewing, req.body);
     const updated = await viewing.save();
 
@@ -189,7 +270,8 @@ export const updateViewing = async (req, res) => {
 
     res.json(populated);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error("Update Viewing Error:", error);
+    res.status(400).json({ message: validationMessage(error) || error.message });
   }
 };
 
@@ -215,6 +297,46 @@ export const deleteViewing = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
+};
+
+// Field names as an operator would say them, for validation messages. Without
+// this a blank agent surfaces as the raw Mongoose string, "Viewing validation
+// failed: agent: Path `agent` is required." — which reads like a crash.
+const FIELD_LABELS = {
+  date: "Date",
+  time: "Time",
+  lead: "Lead",
+  property: "Property",
+  room: "Room",
+  agent: "Agent",
+  status: "Status",
+};
+
+/**
+ * Turn a Mongoose ValidationError into one readable sentence naming the fields
+ * that are missing. Returns null for anything else, so real errors are not
+ * disguised as validation problems.
+ */
+export const validationMessage = (error) => {
+  if (error?.name !== "ValidationError" || !error.errors) return null;
+
+  // Mongoose reports the failed paths in no particular order. Sort them into
+  // the order they appear on the form, so the message is stable and reads the
+  // way the operator filled the thing in.
+  const order = Object.keys(FIELD_LABELS);
+  const missing = Object.keys(error.errors)
+    .sort((a, b) => {
+      const ai = order.indexOf(a);
+      const bi = order.indexOf(b);
+      return (ai === -1 ? order.length : ai) - (bi === -1 ? order.length : bi);
+    })
+    .map((key) => FIELD_LABELS[key] || key);
+
+  if (!missing.length) return null;
+
+  return missing.length === 1
+    ? `${missing[0]} is required.`
+    : `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]} are required.`;
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/; // YYYY-MM-DD
@@ -273,6 +395,16 @@ export const rescheduleViewing = async (req, res) => {
 
     if (viewing.date === date && viewing.time === time) {
       return res.status(400).json({ message: "That is already the scheduled slot." });
+    }
+
+    const blocked = await blockedReason({
+      date,
+      propertyId: viewing.property,
+      roomId: viewing.room,
+      organizationId: orgId,
+    });
+    if (blocked) {
+      return res.status(409).json({ message: blocked, blocked: true });
     }
 
     moveSlot(viewing, { date, time, reason, userId: req.user._id });
@@ -343,6 +475,19 @@ export const requestMyViewingReschedule = async (req, res) => {
         .json({ success: false, message: "That is already your scheduled slot." });
     }
 
+    // Refuse a closed date here rather than letting the tenant wait for an
+    // operator to decline it — they can pick another slot straight away. The
+    // property and room come off the viewing itself.
+    const blockedForTenant = await blockedReason({
+      date,
+      propertyId: viewing.property,
+      roomId: viewing.room,
+      organizationId: viewing.organizationId,
+    });
+    if (blockedForTenant) {
+      return res.status(409).json({ success: false, message: blockedForTenant, blocked: true });
+    }
+
     // A new proposal while one is pending replaces it, so a tenant who changes
     // their mind isn't stuck waiting on a slot they no longer want.
     viewing.rescheduleRequest = {
@@ -403,6 +548,18 @@ export const respondToRescheduleRequest = async (req, res) => {
       // but this is what actually writes to the calendar.
       if (!DATE_RE.test(requestedDate || "") || !TIME_RE.test(requestedTime || "")) {
         return res.status(400).json({ message: "The requested slot is not a valid date/time." });
+      }
+
+      // The date may have been blocked between the tenant asking and the
+      // operator answering.
+      const blocked = await blockedReason({
+        date: requestedDate,
+        propertyId: viewing.property,
+        roomId: viewing.room,
+        organizationId: orgId,
+      });
+      if (blocked) {
+        return res.status(409).json({ message: blocked, blocked: true });
       }
 
       moveSlot(viewing, {
