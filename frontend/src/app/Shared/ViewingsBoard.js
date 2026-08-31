@@ -31,7 +31,12 @@ import { useAuth } from "../Context/AuthContext";
 // Tenants never reach this board. They get /tenant/viewing, which talks to the
 // separate /viewings/my endpoints, and the API refuses them the staff routes.
 
-const useViewingsData = ({ status = "", person = "", propertyId = "" } = {}) => {
+const useViewingsData = ({
+  status = "",
+  person = "",
+  propertyId = "",
+  period = "all", // "all" | "this_month" | "1m" | "6m" | "12m" | "YYYY-MM"
+} = {}) => {
   const { user } = useAuth();
   const organizationId = user?.organization?._id || user?.organizationId;
   const userId = user?._id;
@@ -183,8 +188,59 @@ const useViewingsData = ({ status = "", person = "", propertyId = "" } = {}) => 
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [allViewings]);
 
-  // Frontend filtering — the status chips, the person search and the property
-  // picker all narrow the same list, so they combine rather than override.
+  // Months that actually contain viewings (for the "Specific month" dropdown)
+  const monthOptions = useMemo(() => {
+    const set = new Set();
+    allViewings.forEach((v) => {
+      if (v.date && /^\d{4}-\d{2}/.test(v.date)) {
+        set.add(v.date.slice(0, 7)); // "YYYY-MM"
+      }
+    });
+    return [...set].sort().reverse(); // newest first
+  }, [allViewings]);
+
+  // Does a viewing's date fall inside the selected period?
+  const inPeriod = useCallback(
+    (isoDate) => {
+      if (!period || period === "all") return true;
+      if (!isoDate) return false;
+
+      const d = new Date(isoDate + "T00:00:00Z");
+      if (Number.isNaN(d.getTime())) return false;
+
+      const now = new Date();
+      const todayUTC = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+      );
+
+      if (period === "this_month") {
+        return (
+          d.getUTCFullYear() === todayUTC.getUTCFullYear() &&
+          d.getUTCMonth() === todayUTC.getUTCMonth()
+        );
+      }
+
+      if (period === "1m" || period === "6m" || period === "12m") {
+        const monthsBack = period === "1m" ? 1 : period === "6m" ? 6 : 12;
+        const cutoff = new Date(todayUTC);
+        cutoff.setUTCMonth(cutoff.getUTCMonth() - monthsBack);
+        return d >= cutoff;
+      }
+
+      // Specific month: "YYYY-MM"
+      if (/^\d{4}-\d{2}$/.test(period)) {
+        const [y, m] = period.split("-").map(Number);
+        return d.getUTCFullYear() === y && d.getUTCMonth() + 1 === m;
+      }
+
+      return true;
+    },
+    [period]
+  );
+
+  // Frontend filtering — the status chips, the person search, the property
+  // picker and the period all narrow the same list, so they combine rather
+  // than override.
   const personQuery = person.trim().toLowerCase();
 
   const filteredViewings = allViewings.filter((v) => {
@@ -193,6 +249,8 @@ const useViewingsData = ({ status = "", person = "", propertyId = "" } = {}) => 
     if (propertyId && String(v.property?._id ?? v.property ?? "") !== propertyId) {
       return false;
     }
+
+    if (!inPeriod(v.date)) return false;
 
     if (personQuery) {
       // Every person named on the card: the lead being shown round, the agent
@@ -221,9 +279,23 @@ const useViewingsData = ({ status = "", person = "", propertyId = "" } = {}) => 
     return true;
   });
 
+  // Stats for the *current* filtered set (period + status + person + property)
+  const stats = useMemo(() => {
+    const counts = { scheduled: 0, done: 0, cancelled: 0, total: 0 };
+    filteredViewings.forEach((v) => {
+      counts.total += 1;
+      if (v.status === "scheduled") counts.scheduled += 1;
+      else if (v.status === "done") counts.done += 1;
+      else if (v.status === "cancelled") counts.cancelled += 1;
+    });
+    return counts;
+  }, [filteredViewings]);
+
   return {
     viewings: filteredViewings,
     propertyOptions,
+    monthOptions,
+    stats,
     allViewings,
     leads,
     properties,
@@ -394,7 +466,6 @@ function BlockDateModal({ onClose, onCreate, properties, allRooms }) {
     </div>
   );
 }
-
 
 function ViewingModal({ onClose, onCreate, leads, properties, allRooms, defaultAgent = "" }) {
   const [form, setForm] = useState({
@@ -612,10 +683,13 @@ export default function ViewingsBoard({
   const [filter, setFilter] = useState("");
   const [person, setPerson] = useState("");
   const [propertyId, setPropertyId] = useState("");
+  const [period, setPeriod] = useState("all"); // ← new period state
 
   const {
     viewings,
     propertyOptions,
+    monthOptions,
+    stats,
     leads,
     properties,
     allRooms,
@@ -628,7 +702,7 @@ export default function ViewingsBoard({
     updateViewingStatus,
     rescheduleViewing,
     respondToRequest,
-  } = useViewingsData({ status: filter, person, propertyId });
+  } = useViewingsData({ status: filter, person, propertyId, period });
 
   const [rescheduling, setRescheduling] = useState(null);
   const [blockOpen, setBlockOpen] = useState(false);
@@ -711,6 +785,7 @@ export default function ViewingsBoard({
         </div>
       )}
 
+      {/* Status chips */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex gap-2 flex-wrap">
           {["", "scheduled", "done", "cancelled"].map((s) => (
@@ -768,6 +843,71 @@ export default function ViewingsBoard({
               Clear
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Period filter */}
+      <div className="flex flex-wrap items-center gap-2">
+        {[
+          { value: "all", label: "All time" },
+          { value: "this_month", label: "This month" },
+          { value: "1m", label: "Last 1 month" },
+          { value: "6m", label: "Last 6 months" },
+          { value: "12m", label: "Last 12 months" },
+        ].map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => setPeriod(opt.value)}
+            className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all ${
+              period === opt.value
+                ? "bg-[#0F253B] text-white border-[#0F253B]"
+                : "bg-white text-gray-500 border-gray-100 hover:bg-gray-50"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+
+        {/* Specific month picker */}
+        <select
+          value={/^\d{4}-\d{2}$/.test(period) ? period : ""}
+          onChange={(e) => setPeriod(e.target.value || "all")}
+          className="px-3 py-2 text-xs font-bold bg-white border border-gray-100 rounded-lg outline-none focus:ring-2 focus:ring-[#F47C3C]"
+        >
+          <option value="">Specific month…</option>
+          {monthOptions.map((ym) => {
+            const [y, m] = ym.split("-");
+            const label = new Date(Date.UTC(+y, +m - 1, 1)).toLocaleDateString("en-GB", {
+              month: "long",
+              year: "numeric",
+              timeZone: "UTC",
+            });
+            return (
+              <option key={ym} value={ym}>
+                {label}
+              </option>
+            );
+          })}
+        </select>
+      </div>
+
+      {/* Stats summary for the active period + filters */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Total</p>
+          <p className="text-2xl font-bold text-[#0F253B] mt-0.5">{stats.total}</p>
+        </div>
+        <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3">
+          <p className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">Scheduled</p>
+          <p className="text-2xl font-bold text-orange-600 mt-0.5">{stats.scheduled}</p>
+        </div>
+        <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3">
+          <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest">Done</p>
+          <p className="text-2xl font-bold text-green-700 mt-0.5">{stats.done}</p>
+        </div>
+        <div className="bg-white border border-gray-100 rounded-2xl px-4 py-3">
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Cancelled</p>
+          <p className="text-2xl font-bold text-gray-600 mt-0.5">{stats.cancelled}</p>
         </div>
       </div>
 
