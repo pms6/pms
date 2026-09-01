@@ -117,6 +117,34 @@ export const AuthProvider = ({ children }) => {
     setProfile(null);
   };
 
+  // A session can be revoked server-side while the user is sitting on a page —
+  // suspending a team member does exactly that, and the cookie itself stays
+  // valid for 7 days. `protect` answers 401 from then on, so treat any 401 on a
+  // signed-in session as "you have been signed out" and clear local state;
+  // RoleShell sees `user` go null and sends them home.
+  //
+  // Auth endpoints are exempt: a 401 from /auth/login is a wrong password, not
+  // an expired session, and must leave the login form alone.
+  useEffect(() => {
+    const interceptor = api.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        const url = error.config?.url || "";
+        const isAuthCall = url.includes("/auth/login") || url.includes("/auth/register");
+
+        if (error.response?.status === 401 && !isAuthCall) {
+          persistToken(null);
+          setUser(null);
+          setProfile(null);
+        }
+
+        return Promise.reject(error);
+      }
+    );
+
+    return () => api.interceptors.response.eject(interceptor);
+  }, []);
+
   // Boot: try to restore session
   useEffect(() => {
     let active = true;

@@ -1,6 +1,36 @@
 const cloudName = "et693ldf";
 const uploadPreset = "pms123";
 
+// ---------------------------------------------------------------------------
+// Download URLs
+// ---------------------------------------------------------------------------
+// The HTML `download` attribute is ignored on cross-origin links, so pointing a
+// download button at a Cloudinary URL just navigates to the file and lets the
+// browser preview it instead. Cloudinary's `fl_attachment` flag is the fix: it
+// serves the asset with Content-Disposition: attachment, so the browser saves
+// it. The flag goes immediately after /upload/ in the delivery URL.
+//
+// `filename` (without extension) renames the saved file — worth setting, since
+// the stored public_id is a random string rather than anything meaningful.
+//
+// Non-Cloudinary URLs are returned untouched; there is nothing useful to do
+// with a host whose rules we don't know.
+export const downloadUrlFor = (url, filename = "") => {
+  if (!url || !/res\.cloudinary\.com\//i.test(url)) return url || "";
+  if (/\/upload\/fl_attachment/i.test(url)) return url; // already one
+
+  // Strip the extension and anything Cloudinary would choke on, so a name like
+  // "Gas Safety 2025.pdf" becomes "Gas_Safety_2025".
+  const safe = String(filename)
+    .replace(/\.[^./]+$/, "")
+    .replace(/[^a-zA-Z0-9-_]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+
+  const flag = safe ? `fl_attachment:${safe}` : "fl_attachment";
+  return url.replace(/\/upload\//, `/upload/${flag}/`);
+};
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 const uploadToCloudinary = async (file) => {

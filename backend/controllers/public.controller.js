@@ -11,6 +11,9 @@ import Room from "../models/Room.js";
 import Organization from "../models/Organization.js";
 import Lead from "../models/Lead.js";
 import Onboarding from "../models/Onboarding.js";
+import { sendEmail } from "../utils/sendEmail.js";
+import { resolveOrgRecipients } from "../utils/reminders.js";
+import env from "../config/env.js";
 
 // Onboarding stageIndex at which an applicant is considered "in review" — i.e.
 // advanced past the initial "Application" stage (index 0) into "Referencing"
@@ -231,6 +234,81 @@ export const getPublicRooms = async (req, res) => {
   }
 };
 
+// Both enquiry emails: one to the operator's team, one back to the applicant.
+// Failures are logged, never rethrown — see the call site.
+const notifyEnquiry = async ({ lead, property, roomLabel, applicantEmail }) => {
+  const listing = `${property.name}${roomLabel}`;
+  const leadsUrl = `${env.clientUrl}/admin/leads`;
+
+  // --- Operator: the owner, with managers copied in -----------------------
+  try {
+    const { to, cc } = await resolveOrgRecipients(property.organizationId);
+
+    if (to) {
+      const detail = [
+        ["Name", lead.name],
+        ["Email", lead.email],
+        ["Phone", lead.phone],
+        ["Property", listing],
+        ["Budget", lead.budget ? `£${lead.budget}` : ""],
+      ]
+        .filter(([, value]) => value)
+        .map(
+          ([label, value]) =>
+            `<tr><td style="padding:4px 12px 4px 0;color:#666;">${label}</td><td style="padding:4px 0;font-weight:bold;">${value}</td></tr>`
+        )
+        .join("");
+
+      await sendEmail({
+        email: to,
+        cc,
+        subject: `New website enquiry — ${listing}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+            <h2 style="color: #F47C3C; margin-top:0;">New room request</h2>
+            <p><strong>${lead.name}</strong> has requested <strong>${listing}</strong> through the website.</p>
+            <table style="font-size:14px;border-collapse:collapse;margin:16px 0;">${detail}</table>
+            ${
+              lead.notes
+                ? `<p style="color:#666;font-size:13px;white-space:pre-line;border-left:3px solid #eee;padding-left:12px;">${lead.notes}</p>`
+                : ""
+            }
+            <p style="color:#666;font-size:13px;">It is waiting in the <strong>Pending</strong> column of your Leads board for approval.</p>
+            <div style="text-align:center;margin:28px 0;">
+              <a href="${leadsUrl}" style="background:#F47C3C;color:#fff;padding:12px 36px;text-decoration:none;border-radius:5px;display:inline-block;">
+                Review the lead
+              </a>
+            </div>
+          </div>
+        `,
+      });
+    }
+  } catch (error) {
+    console.error("Enquiry operator email failed:", error);
+  }
+
+  // --- Applicant: an acknowledgement so they know it went through ---------
+  try {
+    if (applicantEmail) {
+      await sendEmail({
+        email: applicantEmail,
+        subject: `We've received your request — ${listing}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+            <h2 style="color: #F47C3C; margin-top:0;">Request received</h2>
+            <p>Hi ${lead.name},</p>
+            <p>Thanks for your interest in <strong>${listing}</strong>. Your request has reached the team and someone will be in touch to arrange the next step.</p>
+            <p style="color:#666;font-size:13px;">You don't need to do anything for now. If your plans change, just reply to this email.</p>
+            <p style="font-size:12px;color:#999;margin-top:28px;">This is an automated confirmation.</p>
+          </div>
+        `,
+      });
+    }
+  } catch (error) {
+    console.error("Enquiry applicant email failed:", error);
+  }
+};
+
 /**
  * POST /public/enquiries
  * Create a website enquiry / viewing request. REQUIRES a signed-in user (the
@@ -434,6 +512,16 @@ export const createEnquiry = async (req, res) => {
       notes: noteParts.join("\n"),
       applicant,
     });
+
+    // Tell both sides. A website enquiry lands in the "pending" column of the
+    // Leads board and waits for a human to approve it, so nobody finds out it
+    // arrived unless we say so — and the applicant is left wondering whether
+    // the form worked at all.
+    //
+    // Deliberately after the Lead is created and never allowed to throw: the
+    // enquiry is saved either way, and a mail outage must not turn a captured
+    // lead into a 500 that tells the applicant to try again.
+    await notifyEnquiry({ lead, property, roomLabel, applicantEmail: email || req.user.email });
 
     return res.status(201).json({
       success: true,

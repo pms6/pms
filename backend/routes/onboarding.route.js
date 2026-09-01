@@ -14,6 +14,7 @@ import {
   deleteOnboardingDocument,
   getOnboardingRequests,
   acceptOnboardingRequest,
+  declineOnboardingRequest,
   getMyOnboarding,
   addMyOnboardingDocument,
   deleteMyOnboardingDocument,
@@ -34,6 +35,7 @@ router.get("/stats", getOnboardingStats);
 router.get("/requests", getOnboardingRequests);
 router.get("/me", getMyOnboarding);
 router.post("/accept-request", acceptOnboardingRequest);
+router.post("/decline-request", declineOnboardingRequest);
 
 // Tenant-owned document actions on their own onboarding (authorized by email,
 // not org membership). 3-segment paths, so they don't collide with "/:id".

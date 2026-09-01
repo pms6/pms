@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Building2, Download, X, Bell, BellRing, CalendarClock, FileText, Eye, ScrollText, Loader2 } from "lucide-react";
+import { Plus, Building2, Download, X, Bell, BellRing, CalendarClock, FileText, Eye, ScrollText, Loader2, Pencil, Trash2 } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
 import api from "../../api/api";
-import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
+import { uploadFileToCloudinary, downloadUrlFor } from "../../utils/uploadToCloudinary";
 import { ExpiryBadge } from "../../Components/PropertyContract";
+import PdfFrame from "../../Shared/PdfFrame";
+import { fileKind, kindLabel } from "../../Shared/fileType";
 
 const STATUS_TONE = { expired: "red", warning: "amber", valid: "green" };
 
@@ -47,21 +49,126 @@ const hasContract = (p) =>
 const FIELD = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
 const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
 
-function ComplianceModal({ properties, onClose, onSave }) {
+// ---------------------------------------------------------------------------
+// Certificate viewer — the evidence file attached to a compliance record.
+// ---------------------------------------------------------------------------
+// PDFs go through PdfFrame, which checks the host will actually serve the file
+// before embedding it; images render inline; anything else falls back to the
+// download button, which is always present.
+function CertificateModal({ record, onClose }) {
+  if (!record) return null;
+
+  const url = record.fileUrl;
+  const name = record.fileName || "Certificate";
+  const kind = fileKind(url, record.fileName);
+  const title = [record.type, record.subType].filter(Boolean).join(" — ");
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-100">
+          <div className="min-w-0">
+            <h3 className="text-lg font-bold text-[#0F253B] truncate">{title || "Certificate"}</h3>
+            <p className="text-xs font-medium text-gray-400 truncate">
+              {record.property || "—"} · expires {fmtDate(record.expiryDate)}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-300 hover:text-gray-500 shrink-0">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto bg-gray-100 min-h-[18rem]">
+          {!url ? (
+            <div className="flex h-full min-h-[18rem] items-center justify-center px-6 text-center">
+              <p className="text-sm font-bold text-gray-400">
+                No certificate file was attached to this record.
+              </p>
+            </div>
+          ) : kind === "pdf" ? (
+            <PdfFrame url={url} title={name} className="w-full h-[65vh]" />
+          ) : kind === "image" ? (
+            <div className="flex items-center justify-center p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt={name} className="max-h-[65vh] w-auto rounded-xl bg-white object-contain" />
+            </div>
+          ) : (
+            <div className="flex h-full min-h-[18rem] flex-col items-center justify-center gap-2 px-6 text-center">
+              <FileText size={28} className="text-gray-300" />
+              <p className="text-sm font-bold text-[#0F253B]">
+                {kindLabel(url, record.fileName)} files can&apos;t be previewed here.
+              </p>
+              <p className="text-xs font-medium text-gray-500">Download it to open in its own app.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-t border-gray-100">
+          <p className="text-xs font-medium text-gray-400 truncate min-w-0">{url ? name : ""}</p>
+          <div className="flex gap-2 shrink-0">
+            {url && (
+              <>
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2.5 rounded-xl border border-gray-200 font-bold text-sm text-[#0F253B] hover:bg-gray-50"
+                >
+                  Open in new tab
+                </a>
+                <a
+                  href={downloadUrlFor(url, record.fileName)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm"
+                >
+                  <Download size={16} /> Download
+                </a>
+              </>
+            )}
+            <button
+              onClick={onClose}
+              className="px-4 py-2.5 rounded-xl border border-gray-200 font-bold text-sm hover:bg-gray-50"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// yyyy-mm-dd for <input type="date">; anything unparseable becomes empty.
+const toDateInput = (d) => {
+  if (!d) return "";
+  const parsed = new Date(d);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+};
+
+// One form for both modes — `record` absent means a new certificate.
+function ComplianceModal({ record, properties, onClose, onSave }) {
   const [form, setForm] = useState({
-    propertyId: "",
-    property: "",
-    type: "Carbon Monoxide Check",
-    subType: "",
-    carriedOut: "",
-    validityMonths: "3",
-    expiryDate: "",
-    reminderDaysBefore: "14",
-    autoReminder: true,
-    notes: "",
+    propertyId: record?.propertyId || "",
+    property: record?.property || "",
+    type: record?.type || "Carbon Monoxide Check",
+    subType: record?.subType || "",
+    carriedOut: toDateInput(record?.carriedOut),
+    validityMonths: String(record?.validityMonths ?? "3"),
+    expiryDate: toDateInput(record?.expiryDate),
+    reminderDaysBefore: String(record?.reminderDaysBefore ?? "14"),
+    autoReminder: record?.autoReminder ?? true,
+    notes: record?.notes || "",
     file: null
   });
 
+  // The attachment already on the record. Cleared when the user removes it, so
+  // saving with nothing chosen detaches the old file rather than silently
+  // keeping it.
+  const [existingFile, setExistingFile] = useState(
+    record?.fileUrl ? { url: record.fileUrl, name: record.fileName || "Attachment" } : null
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -100,7 +207,7 @@ function ComplianceModal({ properties, onClose, onSave }) {
     setError("");
 
     try {
-      await onSave(form);
+      await onSave({ ...form, existingFile });
     } catch (err) {
       setError(err.message || "Failed to save compliance certificate");
     } finally {
@@ -112,7 +219,9 @@ function ComplianceModal({ properties, onClose, onSave }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
-          <h3 className="text-xl font-bold text-[#0F253B]">Add Compliance Asset</h3>
+          <h3 className="text-xl font-bold text-[#0F253B]">
+            {record ? "Edit Compliance Asset" : "Add Compliance Asset"}
+          </h3>
           <button onClick={onClose} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
         </div>
 
@@ -166,10 +275,36 @@ function ComplianceModal({ properties, onClose, onSave }) {
 
           <div>
             <label className={LABEL}>Evidence Attachment (Files)</label>
+
+            {existingFile && !form.file && (
+              <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                <a
+                  href={existingFile.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 min-w-0 text-xs font-bold text-[#0F253B] hover:text-[#F47C3C]"
+                >
+                  <FileText size={14} className="text-[#F47C3C] shrink-0" />
+                  <span className="truncate">{existingFile.name}</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setExistingFile(null)}
+                  className="text-[11px] font-bold text-red-600 hover:underline shrink-0"
+                >
+                  Remove
+                </button>
+              </div>
+            )}
+
             <div className="border border-dashed border-gray-200 rounded-xl p-4 bg-gray-50/50 text-center hover:bg-gray-50 transition-colors relative cursor-pointer">
               <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileChange} />
               <p className="text-xs font-bold text-gray-500">
-                {form.file ? `Selected: ${form.file.name}` : "Choose PDF or Image (max 15MB)"}
+                {form.file
+                  ? `Selected: ${form.file.name}`
+                  : existingFile
+                  ? "Choose a file to replace the one above"
+                  : "Choose PDF or Image (max 15MB)"}
               </p>
             </div>
           </div>
@@ -218,7 +353,7 @@ function ComplianceModal({ properties, onClose, onSave }) {
             disabled={saving}
             className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all active:scale-[0.98]"
           >
-            {saving ? "Saving Certificate…" : "Save Certificate"}
+            {saving ? "Saving Certificate…" : record ? "Save Changes" : "Save Certificate"}
           </button>
         </form>
       </div>
@@ -236,7 +371,11 @@ export default function AdminCompliance() {
   const [statusFilter, setStatusFilter] = useState("");
   const [propertyFilter, setPropertyFilter] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
-  const [showModal, setShowModal] = useState(false);
+  // undefined = closed, null = adding, a record = editing that record.
+  const [editing, setEditing] = useState(undefined);
+  const [deletingId, setDeletingId] = useState(null);
+  // The record whose certificate file is open in the viewer.
+  const [viewing, setViewing] = useState(null);
   const [sendingReminders, setSendingReminders] = useState(false);
   const [reminderMsg, setReminderMsg] = useState("");
 
@@ -283,11 +422,14 @@ export default function AdminCompliance() {
     loadData();
   }, [loadData]);
 
-  // Create Compliance with Cloudinary Upload
-  const createCompliance = async (formData) => {
+  // One save path for add and edit — the modal decides which by whether it was
+  // given a record. A newly chosen file is uploaded and replaces whatever was
+  // attached; with none chosen, the record keeps (or drops) the existing one
+  // according to what the modal hands back.
+  const saveCompliance = async (formData) => {
     try {
-      let fileUrl = null;
-      let fileName = null;
+      let fileUrl = formData.existingFile?.url || null;
+      let fileName = formData.existingFile?.name || null;
 
       if (formData.file) {
         const uploadResult = await uploadFileToCloudinary(formData.file);
@@ -309,13 +451,34 @@ export default function AdminCompliance() {
         fileName,
       };
 
-      await api.post("/compliance", payload);
+      if (editing) await api.put(`/compliance/${editing._id}`, payload);
+      else await api.post("/compliance", payload);
 
-      setShowModal(false);
+      setEditing(undefined);
       loadData(); // refresh list
     } catch (err) {
       console.error(err);
-      throw new Error(err.message || "Failed to save compliance certificate");
+      throw new Error(
+        err.response?.data?.message || err.message || "Failed to save compliance certificate"
+      );
+    }
+  };
+
+  const deleteCompliance = async (row) => {
+    const label = [row.type, row.subType].filter(Boolean).join(" — ");
+    if (!confirm(`Delete the ${label} certificate for ${row.property || "this property"}? This cannot be undone.`)) {
+      return;
+    }
+
+    setDeletingId(row._id);
+    setError("");
+    try {
+      await api.delete(`/compliance/${row._id}`);
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to delete the certificate");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -393,7 +556,7 @@ export default function AdminCompliance() {
               {sendingReminders ? "Sending..." : "Send Reminders"}
             </button>
             <button
-              onClick={() => setShowModal(true)}
+              onClick={() => setEditing(null)}
               className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
             >
               <Plus size={18} /> Add Document
@@ -511,6 +674,7 @@ export default function AdminCompliance() {
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Carried Out</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Expiry Date</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">Reminder Settings</th>
+                  <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-sm font-medium text-[#0F253B]">
@@ -560,6 +724,54 @@ export default function AdminCompliance() {
                         <span className="text-[10px] text-gray-300 font-medium">Inactive</span>
                       )}
                     </td>
+                    <td className="p-4">
+                      <div className="flex items-center justify-end gap-1">
+                        {row.fileUrl ? (
+                          <>
+                            <button
+                              onClick={() => setViewing(row)}
+                              title="View certificate"
+                              className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                              <Eye size={15} />
+                            </button>
+                            <a
+                              href={downloadUrlFor(row.fileUrl, row.fileName)}
+                              title={`Download ${row.fileName || "certificate"}`}
+                              className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                              <Download size={15} />
+                            </a>
+                          </>
+                        ) : (
+                          <span
+                            title="No certificate file attached"
+                            className="p-1.5 text-gray-200"
+                          >
+                            <FileText size={15} />
+                          </span>
+                        )}
+                        <button
+                          onClick={() => setEditing(row)}
+                          title="Edit certificate"
+                          className="p-1.5 text-[#0F253B] hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <button
+                          onClick={() => deleteCompliance(row)}
+                          disabled={deletingId === row._id}
+                          title="Delete certificate"
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {deletingId === row._id ? (
+                            <Loader2 size={15} className="animate-spin" />
+                          ) : (
+                            <Trash2 size={15} />
+                          )}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -577,11 +789,14 @@ export default function AdminCompliance() {
         </div>
       )}
 
-      {showModal && (
+      <CertificateModal record={viewing} onClose={() => setViewing(null)} />
+
+      {editing !== undefined && (
         <ComplianceModal
+          record={editing}
           properties={properties}
-          onClose={() => setShowModal(false)}
-          onSave={createCompliance}
+          onClose={() => setEditing(undefined)}
+          onSave={saveCompliance}
         />
       )}
     </div>

@@ -306,6 +306,18 @@ export const login = async (req, res) => {
         { userId: user._id, status: "INVITED" },
         { $set: { status: "ACTIVE" } }
       );
+
+      // A suspended member gets no session at all. Without this they would log
+      // in normally and only hit walls later — suspension has to stop at the
+      // door, not somewhere down the corridor.
+      const member = await OrganizationMember.findOne({ userId: user._id });
+      if (member?.status === "SUSPENDED") {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Your account has been suspended. Please contact your organization administrator.",
+        });
+      }
     }
 
     await sendTokenResponse(user, 200, res);

@@ -9,6 +9,8 @@ import {
   X,
 } from "lucide-react";
 import api from "@/app/api/api";
+import PdfFrame from "@/app/Shared/PdfFrame";
+import { downloadUrlFor } from "@/app/utils/uploadToCloudinary";
 
 const fmtDate = (d) =>
   d
@@ -147,11 +149,11 @@ export default function CompliancePage() {
                       View
                     </button>
 
+                    {/* downloadUrlFor, not a bare `download` attribute: the
+                        attribute is ignored on cross-origin links, so this
+                        button used to just open the file. */}
                     <a
-                      href={doc.fileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      download
+                      href={downloadUrlFor(doc.fileUrl, doc.fileName)}
                       className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#F47C3C] text-white hover:bg-[#e36f31] w-full sm:w-auto"
                     >
                       <Download size={16} />
@@ -184,34 +186,22 @@ export default function CompliancePage() {
               </button>
             </div>
 
-            {/* PDF. <object> rather than <iframe> so a certificate the host
-                refuses to serve, or one that is no longer there, shows the
-                fallback below instead of an unexplained blank panel. */}
+            {/* PdfFrame checks the certificate is actually being served before
+                embedding it, so a refusal is explained here rather than showing
+                the file host's own error inside the frame. */}
             <div className="flex-1 bg-gray-100">
-              <object
-                data={selected.fileUrl}
-                type="application/pdf"
+              <PdfFrame
+                url={selected.fileUrl}
                 title={selected.type || "Compliance"}
                 className="w-full h-full"
-              >
-                <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-                  <p className="text-sm font-bold text-[#0F253B]">
-                    This certificate could not be displayed.
-                  </p>
-                  <p className="text-xs font-medium text-gray-500">
-                    Try the download button below, or ask your property manager to re-upload it.
-                  </p>
-                </div>
-              </object>
+                audience="tenant"
+              />
             </div>
 
             {/* Footer */}
             <div className="border-t px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row gap-2 sm:justify-between">
               <a
-                href={selected.fileUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                download
+                href={downloadUrlFor(selected.fileUrl, selected.fileName)}
                 className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-[#F47C3C] text-white hover:bg-[#e36f31] w-full sm:w-auto"
               >
                 <Download size={18} />

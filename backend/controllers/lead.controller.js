@@ -6,6 +6,11 @@ const LEAD_STAGES = ["pending", "new", "qualified", "viewing", "converted", "los
 // The intake column. Every lead is created here and needs an approval to leave.
 const PENDING = "pending";
 
+// Lead.source value used by createEnquiry for requests sent from a public
+// property page. These are handled through the Onboarding requests inbox, so
+// the Leads board filters them out — see getLeads.
+const WEBSITE_SOURCE = "Website";
+
 // Where Approve sends a lead — the first working column of the pipeline.
 const APPROVED_STAGE = "new";
 
@@ -213,7 +218,16 @@ export const getLeads = async (req, res) => {
     const filter = { organizationId, isDeleted: false };
 
     if (status) filter.status = status;
+
+    // Website requests are worked from the Onboarding requests inbox
+    // (GET /onboarding/requests → accept), not from this board, so they are
+    // kept off it by default rather than appearing in both places.
+    //
+    // The record itself is untouched — it still carries the applicant's
+    // screening answers and the approve/reject trail, and asking for
+    // ?source=Website explicitly still returns them, so nothing is stranded.
     if (source) filter.source = source;
+    else filter.source = { $ne: WEBSITE_SOURCE };
 
     if (search) {
       filter.$or = [
@@ -563,9 +577,16 @@ export const getLeadStats = async (req, res) => {
   try {
     const organizationId = req.user.organizationId;
 
+    // Excludes website requests for the same reason getLeads does — the column
+    // counts have to describe the board the user is actually looking at.
     const counts = await Promise.all(
       LEAD_STAGES.map((stage) =>
-        Lead.countDocuments({ organizationId, isDeleted: false, status: stage })
+        Lead.countDocuments({
+          organizationId,
+          isDeleted: false,
+          status: stage,
+          source: { $ne: WEBSITE_SOURCE },
+        })
       )
     );
 

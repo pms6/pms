@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "../../Shared/ui";
 import { fileKind, kindLabel } from "../../Shared/fileType";
+import PdfFrame from "../../Shared/PdfFrame";
 import api from "../../api/api";
 import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
 
@@ -123,13 +124,13 @@ const toDateInput = (d) => {
   return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
 };
 
-// One receipt, previewed according to what it is: images inline, PDFs in an
-// embedded viewer, everything else as a plain link.
+// One receipt, previewed according to what it is: images inline, PDFs through
+// PdfFrame (which checks the host will actually serve them), everything else as
+// a plain link.
 //
 // A stored file can fail to load even though the record is perfectly fine — the
-// host may refuse to serve it (Cloudinary blocks PDF delivery unless the
-// account opts in) or the file may no longer exist. Both used to surface as a
-// silent broken-image box, so failures are caught and stated instead.
+// host may refuse to serve it or the file may no longer exist. Both used to
+// surface as a silent broken-image box, so failures are caught and stated.
 function ReceiptPreview({ file, index }) {
   const [failed, setFailed] = useState(false);
 
@@ -152,19 +153,12 @@ function ReceiptPreview({ file, index }) {
       )}
 
       {!failed && kind === "pdf" && (
-        <object
-          data={url}
-          type="application/pdf"
+        <PdfFrame
+          url={url}
+          title={label}
           className="w-full h-80 rounded-xl border border-gray-100 bg-gray-50"
-        >
-          {/* Shown when the browser cannot embed it — a blocked or missing
-              file lands here rather than on a blank frame. */}
-          <div className="flex h-full items-center justify-center px-4 text-center">
-            <p className="text-xs font-medium text-gray-400">
-              This PDF could not be displayed. Use the link below to open it.
-            </p>
-          </div>
-        </object>
+          compact
+        />
       )}
 
       {failed && (

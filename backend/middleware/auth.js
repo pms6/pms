@@ -33,6 +33,19 @@ export const protect = async (req, res, next) => {
     if (req.user.role === "Organization") {
       const member = await OrganizationMember.findOne({ userId: req.user._id });
       if (member) {
+        // Suspension has to bite on every request, not just at login: the
+        // session cookie lives for 7 days, so checking only at the door would
+        // leave a suspended member working normally for the rest of the week.
+        // 401 (rather than 403) is deliberate — the client treats it as "your
+        // session is over" and signs them out.
+        if (member.status === "SUSPENDED") {
+          return res.status(401).json({
+            success: false,
+            message:
+              "Your account has been suspended. Please contact your organization administrator.",
+          });
+        }
+
         req.user.organizationId = member.organizationId;
         req.user.organizationRole = member.role;
         req.user.memberStatus = member.status;

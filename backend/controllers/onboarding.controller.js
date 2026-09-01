@@ -1012,7 +1012,13 @@ export const getOnboardingRequests = async (req, res) => {
       isDeleted: false,
       source: "Website",
       // Not yet accepted (converted) or dismissed (lost).
-      status: { $in: ["new", "qualified", "viewing"] },
+      //
+      // "pending" MUST be here: createEnquiry files every website request as
+      // pending (it is the intake status every lead now starts in), so leaving
+      // it out meant a request went straight into the inbox's blind spot — it
+      // only surfaced if someone first approved it over on the Leads board,
+      // which is exactly the detour this inbox exists to avoid.
+      status: { $in: ["pending", "new", "qualified", "viewing"] },
     })
       .sort({ createdAt: -1 })
       .lean();
@@ -1027,6 +1033,106 @@ export const getOnboardingRequests = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch onboarding requests.",
+    });
+  }
+};
+
+/**
+ * Decline a website request → the applicant is not taken on.
+ *
+ * Marks the lead "lost", which is what drops it out of getOnboardingRequests
+ * above. A reason is required, matching updateLeadStatus: a lost lead that
+ * doesn't say why is a dead end for whoever reads it later.
+ *
+ * No Onboarding record is created, and the tenant's account is left alone —
+ * declining a request must not touch an account the person still uses.
+ */
+export const declineOnboardingRequest = async (req, res) => {
+  try {
+    const organizationId = req.user.organizationId;
+    const { leadId, reason } = req.body;
+
+    if (!leadId) {
+      return res.status(400).json({
+        success: false,
+        message: "leadId is required.",
+      });
+    }
+
+    const trimmedReason = String(reason ?? "").trim();
+    if (!trimmedReason) {
+      return res.status(400).json({
+        success: false,
+        message: "A reason is required when declining a request.",
+      });
+    }
+
+    const lead = await Lead.findOne({
+      _id: leadId,
+      organizationId,
+      isDeleted: false,
+    });
+
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: "Request not found.",
+      });
+    }
+
+    if (lead.status === "converted") {
+      return res.status(409).json({
+        success: false,
+        message: "This request has already been accepted — cancel the onboarding instead.",
+      });
+    }
+
+    if (lead.status === "lost") {
+      return res.status(409).json({
+        success: false,
+        message: "This request has already been declined.",
+      });
+    }
+
+    lead.status = "lost";
+    lead.lostReason = trimmedReason;
+    lead.lostAt = new Date();
+    await lead.save();
+
+    // Tell the applicant. Best-effort: the decline is already saved, and a mail
+    // failure must not leave the operator thinking it didn't take.
+    if (lead.email) {
+      const org = await Organization.findById(organizationId).select("name").lean();
+      const orgName = org?.name || "The property team";
+      try {
+        await sendEmail({
+          email: lead.email,
+          subject: `Update on your request for ${lead.interestedIn || "a property"}`,
+          html: `
+            <div style="font-family: sans-serif; padding: 20px; max-width: 520px; border: 1px solid #e0e0e0; border-radius: 8px;">
+              <h2 style="color: #0F253B;">About your request</h2>
+              <p>Hi ${lead.name},</p>
+              <p>Thank you for your interest in <strong>${lead.interestedIn || "the property"}</strong>. ${orgName} isn't able to take this request forward.</p>
+              <p style="color:#666;">Other rooms may still be available, and you're welcome to send another request at any time.</p>
+              <p style="font-size: 12px; color: #999; margin-top: 28px;">This is an automated message.</p>
+            </div>
+          `,
+        });
+      } catch (mailError) {
+        console.error("Decline email failed:", mailError.message);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Request declined.",
+      data: { id: lead._id },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to decline request.",
     });
   }
 };

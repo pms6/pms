@@ -10,6 +10,7 @@ import { PageHeader, Badge } from "../../Shared/ui";
 import { ONBOARDING_STAGES, money } from "../_data/dummy";
 import api from "../../api/api";
 import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
+import LostReasonModal from "../../Shared/LostReasonModal";
 
 const DOC_TYPES = [
   "ID / Passport",
@@ -353,6 +354,9 @@ export default function AdminOnboarding() {
   const [properties, setProperties] = useState([]);
   const [requests, setRequests] = useState([]);
   const [acceptingId, setAcceptingId] = useState(null);
+  const [decliningId, setDecliningId] = useState(null);
+  // The request the Cancel button is asking for a reason about.
+  const [decliningRequest, setDecliningRequest] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -398,6 +402,24 @@ export default function AdminOnboarding() {
       setError(err.response?.data?.message || "Failed to accept request");
     } finally {
       setAcceptingId(null);
+    }
+  };
+
+  // Decline a website request → marks the lead lost (which drops it out of this
+  // inbox) and emails the applicant. No onboarding is created and their account
+  // is left alone. The reason is required by the server, the same rule the
+  // Leads board applies when a lead is marked lost.
+  const declineRequest = async (lead, reason) => {
+    setDecliningId(lead._id);
+    setError("");
+    try {
+      await api.post("/onboarding/decline-request", { leadId: lead._id, reason });
+      setRequests((rs) => rs.filter((r) => r._id !== lead._id));
+      setDecliningRequest(null);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to decline request");
+    } finally {
+      setDecliningId(null);
     }
   };
 
@@ -519,14 +541,25 @@ export default function AdminOnboarding() {
                     {r.phone && <span className="flex items-center gap-1"><Phone size={11} />{r.phone}</span>}
                   </p>
                 </div>
-                <button
-                  onClick={() => acceptRequest(r)}
-                  disabled={acceptingId === r._id}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-xs rounded-xl transition-all disabled:opacity-50 shrink-0"
-                >
-                  {acceptingId === r._id ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
-                  {acceptingId === r._id ? "Accepting…" : "Accept"}
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => acceptRequest(r)}
+                    disabled={acceptingId === r._id || decliningId === r._id}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-xs rounded-xl transition-all disabled:opacity-50"
+                  >
+                    {acceptingId === r._id ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
+                    {acceptingId === r._id ? "Accepting…" : "Accept"}
+                  </button>
+                  <button
+                    onClick={() => setDecliningRequest(r)}
+                    disabled={acceptingId === r._id || decliningId === r._id}
+                    title="Decline this request"
+                    className="flex items-center gap-1.5 px-3.5 py-2 border border-gray-200 hover:bg-red-50 hover:border-red-200 hover:text-red-600 text-[#0F253B] font-bold text-xs rounded-xl transition-all disabled:opacity-50"
+                  >
+                    {decliningId === r._id ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
+                    {decliningId === r._id ? "Cancelling…" : "Cancel"}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -793,6 +826,16 @@ export default function AdminOnboarding() {
       )}
 
       {showAdd && <NewOnboardingModal properties={properties} onClose={() => setShowAdd(false)} onCreated={created} />}
+
+      {/* Declining a request marks its lead lost, and the server requires a
+          reason — the same modal the Leads boards use for that. */}
+      {decliningRequest && (
+        <LostReasonModal
+          lead={decliningRequest}
+          onCancel={() => setDecliningRequest(null)}
+          onConfirm={(reason) => declineRequest(decliningRequest, reason)}
+        />
+      )}
     </div>
   );
 }

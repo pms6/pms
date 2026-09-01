@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { sendAllPendingReminders } from "../cranjob/complianceReminder.js";
 import Compliance from "../models/Compliance.js";
 import Property from "../models/Property.js";
@@ -111,6 +112,120 @@ export const createCompliance = async (req, res) => {
     });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// Fields a client may change. organizationId, createdBy, status and
+// lastReminderSentAt are deliberately absent: the first two are identity, and
+// the last two are maintained by the model hook and the reminder job.
+const EDITABLE_KEYS = [
+  "propertyId",
+  "type",
+  "subType",
+  "carriedOut",
+  "validityMonths",
+  "expiryDate",
+  "reminderDaysBefore",
+  "autoReminder",
+  "notes",
+  "fileUrl",
+  "fileName",
+];
+
+// UPDATE Compliance
+export const updateCompliance = async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid id" });
+    }
+
+    // Loaded and saved rather than findOneAndUpdate: `status` is recomputed in
+    // the schema's pre("save") hook, which an atomic update would skip — the
+    // record would keep the status it had when it was created.
+    const compliance = await Compliance.findOne({
+      _id: req.params.id,
+      organizationId,
+    });
+
+    if (!compliance) {
+      return res.status(404).json({
+        success: false,
+        message: "Compliance record not found",
+      });
+    }
+
+    // Moving a certificate to another property is allowed, but only to one in
+    // the same organization.
+    if (req.body.propertyId && String(req.body.propertyId) !== String(compliance.propertyId)) {
+      const property = await Property.findOne({
+        _id: req.body.propertyId,
+        organizationId,
+      });
+
+      if (!property) {
+        return res.status(403).json({
+          success: false,
+          message: "Property not found or access denied",
+        });
+      }
+    }
+
+    for (const key of EDITABLE_KEYS) {
+      if (req.body[key] === undefined) continue;
+
+      if (key === "validityMonths" || key === "reminderDaysBefore") {
+        compliance[key] = Number(req.body[key]);
+      } else if (key === "autoReminder") {
+        compliance[key] = req.body[key] === "true" || req.body[key] === true;
+      } else {
+        compliance[key] = req.body[key];
+      }
+    }
+
+    await compliance.save();
+    await compliance.populate("propertyId", "name propertyCode address");
+
+    res.json({
+      success: true,
+      data: withLiveStatus(compliance),
+      message: "Compliance certificate updated",
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// DELETE Compliance
+export const deleteCompliance = async (req, res) => {
+  try {
+    const { organizationId } = req.user;
+
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid id" });
+    }
+
+    // Scoped by organizationId so an id guessed from another org deletes
+    // nothing.
+    const compliance = await Compliance.findOneAndDelete({
+      _id: req.params.id,
+      organizationId,
+    });
+
+    if (!compliance) {
+      return res.status(404).json({
+        success: false,
+        message: "Compliance record not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Compliance certificate deleted",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 

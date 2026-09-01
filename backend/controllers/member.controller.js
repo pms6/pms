@@ -11,6 +11,42 @@ import { sendEmail } from "../utils/sendEmail.js";
 const canManageTeam = (req) =>
     ["OWNER", "MANAGER"].includes(req.user?.organizationRole);
 
+// Roles a team manager may hand out. OWNER is deliberately absent: an
+// organization has exactly one owner and transferring that seat is a different
+// operation, so it must never be reachable from a role dropdown.
+const ASSIGNABLE_ROLES = ["MANAGER", "AGENT", "FINANCE"];
+
+// Shared guard for every role change. Returns an { status, message } problem to
+// send back, or null when the change is allowed.
+const roleChangeProblem = (req, member, role) => {
+    if (!ASSIGNABLE_ROLES.includes(role)) {
+        return {
+            status: 400,
+            message: "Role must be one of: " + ASSIGNABLE_ROLES.join(", ")
+        };
+    }
+
+    // Changing your own role would let a MANAGER promote themselves, or demote
+    // themselves out of the team screen they are standing on.
+    if (String(member.userId) === String(req.user._id)) {
+        return { status: 400, message: "You cannot change your own role" };
+    }
+
+    // Demoting the owner would leave the organization without one.
+    if (member.role === "OWNER") {
+        return {
+            status: 400,
+            message: "The organization owner's role cannot be changed"
+        };
+    }
+
+    if (member.role === role) {
+        return { status: 400, message: "Member already has the " + role + " role" };
+    }
+
+    return null;
+};
+
 // The caller's own organization (set by the `protect` middleware).
 const callerOrgId = (req) =>
     req.user?.organizationId ? String(req.user.organizationId) : null;
@@ -241,7 +277,18 @@ export const MemberController = {
                 });
             }
 
-            if (role) member.role = role;
+            // Role changes run through the same guards as PATCH /:memberId/role
+            // so this endpoint cannot be used to sidestep them.
+            if (role) {
+                const problem = roleChangeProblem(req, member, role);
+                if (problem) {
+                    return res.status(problem.status).json({
+                        success: false,
+                        message: problem.message
+                    });
+                }
+                member.role = role;
+            }
             if (status) member.status = status;
             await member.save();
             await member.populate("userId", "email");
@@ -293,6 +340,10 @@ export const MemberController = {
                 });
             }
 
+            // A suspended member coming back is a *re*-activation; an invited
+            // one is joining for the first time. The email says which.
+            const wasSuspended = member.status === "SUSPENDED";
+
             // Update status to ACTIVE
             member.status = "ACTIVE";
             await member.save();
@@ -308,11 +359,13 @@ export const MemberController = {
             if (user && user.email) {
                 await sendEmail({
                     email: user.email,
-                    subject: `Your account is now active in ${organization?.name || 'the organization'}`,
+                    subject: wasSuspended
+                        ? `Your account has been reinstated at ${organization?.name || 'the organization'}`
+                        : `Your account is now active in ${organization?.name || 'the organization'}`,
                     html: `
                         <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-                            <h2 style="color: #F47C3C;">Account Activated!</h2>
-                            <p>Your account has been activated for <strong>${organization?.name || 'the organization'}</strong>.</p>
+                            <h2 style="color: #F47C3C;">${wasSuspended ? "Account Reinstated!" : "Account Activated!"}</h2>
+                            <p>Your account has been ${wasSuspended ? "reinstated" : "activated"} for <strong>${organization?.name || 'the organization'}</strong>.</p>
                             <p>You now have <strong>${member.role}</strong> permissions.</p>
                             <p>You can now access your dashboard and start working.</p>
                             <div style="text-align: center; margin: 30px 0;">
@@ -328,7 +381,9 @@ export const MemberController = {
 
             res.status(200).json({ 
                 success: true,
-                message: "Member activated successfully",
+                message: wasSuspended
+                    ? "Member reactivated successfully"
+                    : "Member activated successfully",
                 data: member 
             });
         } catch (error) {
@@ -395,6 +450,34 @@ export const MemberController = {
 
             await member.populate("userId", "email");
 
+            // Suspension cuts off their access immediately (see `protect`), so
+            // they find out the moment they try to use the app — tell them why
+            // rather than leaving them staring at a login screen.
+            const organization = await Organization.findById(member.organizationId);
+            const email = member.userId?.email;
+
+            if (email) {
+                try {
+                    await sendEmail({
+                        email,
+                        subject: `Your access to ${organization?.name || 'the organization'} has been suspended`,
+                        html: `
+                            <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                                <h2 style="color: #F47C3C;">Account Suspended</h2>
+                                <p>Your <strong>${member.role}</strong> access to <strong>${organization?.name || 'the organization'}</strong> has been suspended.</p>
+                                <p>You have been signed out and won't be able to log in until an administrator reinstates your account.</p>
+                                <p style="color: #666;">If you think this is a mistake, please contact your organization administrator.</p>
+                                <p style="font-size: 12px; color: #999; margin-top: 30px;">This is an automated message — please do not reply.</p>
+                            </div>
+                        `
+                    });
+                } catch (mailError) {
+                    // The suspension is already saved — a bounced notification
+                    // must not turn a successful action into a 500.
+                    console.error("Suspension email failed:", mailError);
+                }
+            }
+
             res.status(200).json({ 
                 success: true,
                 message: "Member suspended successfully",
@@ -408,7 +491,102 @@ export const MemberController = {
         }
     },
 
-    // 6. Delete member
+    // 6. Change a member's role (AGENT <-> MANAGER <-> FINANCE)
+    changeRole: async (req, res) => {
+        try {
+            if (!canManageTeam(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized to manage team members"
+                });
+            }
+
+            const { memberId } = req.params;
+            const { role } = req.body;
+
+            if (!mongoose.isValidObjectId(memberId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid member id"
+                });
+            }
+
+            const member = await OrganizationMember.findById(memberId);
+            if (!member) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Member not found"
+                });
+            }
+
+            // Tenant isolation: the target must be in the caller's org.
+            if (String(member.organizationId) !== callerOrgId(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized for this member"
+                });
+            }
+
+            const problem = roleChangeProblem(req, member, role);
+            if (problem) {
+                return res.status(problem.status).json({
+                    success: false,
+                    message: problem.message
+                });
+            }
+
+            const previousRole = member.role;
+            member.role = role;
+            await member.save();
+
+            await member.populate("userId", "email");
+
+            // Tell the member their seat changed — their portal (and so the
+            // pages they land on) changes with it, so a silent switch would be
+            // confusing.
+            const organization = await Organization.findById(member.organizationId);
+            const email = member.userId?.email;
+
+            if (email) {
+                try {
+                    await sendEmail({
+                        email,
+                        subject: `Your role at ${organization?.name || 'the organization'} is now ${role}`,
+                        html: `
+                            <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                                <h2 style="color: #F47C3C;">Your role has changed</h2>
+                                <p>Your role at <strong>${organization?.name || 'the organization'}</strong> has been changed from <strong>${previousRole}</strong> to <strong>${role}</strong>.</p>
+                                <p>Sign in again to pick up your new permissions.</p>
+                                <div style="text-align: center; margin: 30px 0;">
+                                    <a href="${env.clientUrl}/login"
+                                       style="background: #F47C3C; color: white; padding: 12px 40px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                                        Login Now
+                                    </a>
+                                </div>
+                            </div>
+                        `
+                    });
+                } catch (mailError) {
+                    // The role change is already saved — a bounced notification
+                    // must not turn a successful update into a 500.
+                    console.error("Role change email failed:", mailError);
+                }
+            }
+
+            res.status(200).json({
+                success: true,
+                message: `Role updated from ${previousRole} to ${role}`,
+                data: member
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    },
+
+    // 7. Delete member
     delete: async (req, res) => {
         try {
             if (!canManageTeam(req)) {
@@ -465,7 +643,7 @@ export const MemberController = {
         }
     },
 
-    // 7. Get my organization info
+    // 8. Get my organization info
     getMyOrganization: async (req, res) => {
         try {
             const member = await OrganizationMember.findOne({ 

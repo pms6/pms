@@ -15,8 +15,9 @@ router.get("/my-org", MemberController.getMyOrganization);
 // Organization member routes
 router.get("/:organizationId", MemberController.getAll);
 router.put("/:memberId", MemberController.update);
-router.patch("/:memberId/activate", MemberController.activate); // Activate member
+router.patch("/:memberId/activate", MemberController.activate); // Activate / reinstate member
 router.patch("/:memberId/suspend", MemberController.suspend); // Suspend member
+router.patch("/:memberId/role", MemberController.changeRole); // Change member role
 router.delete("/:memberId", MemberController.delete);
 
 export default router;

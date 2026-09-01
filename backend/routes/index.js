@@ -22,6 +22,7 @@ import expenseRoutes from "./expense.route.js"
 import taskRoutes from "./task.route.js"
 import voidPeriodRoutes from "./voidPeriod.Route.js"
 import agentLocationRoutes from "./agentLocation.Route.js"
+import internetDetailRoutes from "./internetDetail.route.js"
 
 const router = express.Router();
 
@@ -59,5 +60,6 @@ router.use("/tasks", taskRoutes);
 router.use("/audit", auditRoutes);
 router.use("/void-periods", voidPeriodRoutes);
 router.use("/agent-location", agentLocationRoutes);
+router.use("/internet-details", internetDetailRoutes);
 
 export default router;
