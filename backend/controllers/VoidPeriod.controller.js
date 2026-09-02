@@ -32,18 +32,6 @@ const dayFilter = ({ days, minDays, maxDays }) => {
 /**
  * An existing void period for the same room whose dates overlap the range being
  * saved, or null when the range is clear.
- *
- * Two voids on one room over the same days would count the same empty night
- * twice, and the total loss is the number this whole section exists to produce.
- * Ranges overlap when each starts on or before the other ends.
- *
- * @param {object}   args
- * @param {*}        args.roomId
- * @param {*}        args.organizationId
- * @param {Date|string} args.startDate
- * @param {Date|string} args.endDate
- * @param {*}        [args.excludeId] the period being edited, so it cannot
- *                   clash with itself
  */
 const overlappingPeriod = async ({ roomId, organizationId, startDate, endDate, excludeId }) => {
   if (!roomId || !startDate || !endDate) return null;
@@ -70,9 +58,6 @@ const overlapMessage = (clash) => {
 export const listVoidPeriods = async (req, res) => {
   try {
     const organizationId = req.user.organizationId;
-
-    // Deleted periods are kept as history and only returned when asked for, so
-    // the working list and the totals stay clean by default.
     const includeDeleted = req.query.includeDeleted === "true";
 
     const filter = {
@@ -87,10 +72,6 @@ export const listVoidPeriods = async (req, res) => {
       .sort({ startDate: -1 })
       .lean();
 
-    // The distinct day-lengths that exist for this organization, so the client
-    // can offer "1 day / 2 days / ..." without loading every record to work
-    // them out. Always computed over the LIVE set, ignoring any day filter —
-    // otherwise picking "3 days" would leave 3 as the only option left.
     const dayOptions = await VoidPeriod.distinct("voidDays", {
       organizationId,
       ...(includeDeleted ? {} : { isDeleted: { $ne: true } }),
@@ -113,32 +94,46 @@ export const listVoidPeriods = async (req, res) => {
 export const getVoidSummary = async (req, res) => {
   try {
     const organizationId = req.user.organizationId;
+    const { period = "all" } = req.query; // "month" | "6months" | "year" | "all"
 
-    // Summary covers live periods only. A deleted void is one the operator has
-    // said should not count, so folding it into the headline loss would be
-    // wrong even though the record is kept.
-    const periods = await VoidPeriod.find({
+    const now = new Date();
+    let start = null;
+
+    if (period === "month") {
+      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    } else if (period === "6months") {
+      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1));
+    } else if (period === "year") {
+      start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+    }
+
+    const filter = {
       organizationId,
-      isDeleted: { $ne: true },
-    }).lean();
+      // Include deleted voids in the financial summary
+      // (the loss still happened)
+    };
 
-    const totalVoid = periods.reduce((sum, period) => sum + Number(period.totalVoid || 0), 0);
-    const totalDays = periods.reduce((sum, period) => sum + Number(period.voidDays || 0), 0);
-    const roomCount = new Set(periods.map((period) => String(period.roomId))).size;
+    if (start) {
+      filter.startDate = { $gte: start };
+    }
 
-    const deletedCount = await VoidPeriod.countDocuments({
-      organizationId,
-      isDeleted: true,
-    });
+    const periods = await VoidPeriod.find(filter).lean();
+
+    const totalVoid = periods.reduce((sum, p) => sum + Number(p.totalVoid || 0), 0);
+    const totalDays = periods.reduce((sum, p) => sum + Number(p.voidDays || 0), 0);
+    const activeCount = periods.filter((p) => !p.isDeleted).length;
+    const deletedCount = periods.filter((p) => p.isDeleted).length;
 
     return res.status(200).json({
       success: true,
       data: {
+        period,
         totalVoid: toMoney(totalVoid),
-        count: periods.length,
-        roomCount,
         totalDays,
+        count: periods.length,
+        activeCount,
         deletedCount,
+        startDate: start ? start.toISOString() : null,
       },
     });
   } catch (error) {
@@ -148,6 +143,63 @@ export const getVoidSummary = async (req, res) => {
       message: "Failed to fetch void summary.",
     });
   }
+};
+
+/**
+ * Latest non-deleted void for a specific room (used by the form to suggest
+ * the next start date).
+ */
+export const getLastVoidForRoom = async (req, res) => {
+  try {
+    const organizationId = req.user.organizationId;
+    const { roomId } = req.params;
+
+    if (!roomId) {
+      return res.status(400).json({ success: false, message: "roomId is required." });
+    }
+
+    const period = await VoidPeriod.findOne({
+      organizationId,
+      roomId,
+      isDeleted: { $ne: true },
+    })
+      .sort({ endDate: -1 })
+      .populate("propertyId", "name propertyCode")
+      .populate("roomId", "roomNumber roomName monthlyRent status")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: period || null,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch last void for room.",
+    });
+  }
+};
+
+/**
+ * Call this from the place where you mark a room as OCCUPIED.
+ * It cleanly ends any still-open void periods for that room.
+ */
+export const endOpenVoidsForRoom = async (roomId, organizationId, endDate = new Date()) => {
+  const open = await VoidPeriod.find({
+    roomId,
+    organizationId,
+    isDeleted: { $ne: true },
+    endDate: { $gte: endDate },
+  });
+
+  for (const period of open) {
+    period.endDate = endDate;
+    // pre-validate hook recalculates voidDays + totalVoid
+    await period.save();
+  }
+
+  return open.length;
 };
 
 export const createVoidPeriod = async (req, res) => {
@@ -175,13 +227,21 @@ export const createVoidPeriod = async (req, res) => {
       });
     }
 
+    // Block occupied rooms
+    if (room.status === "OCCUPIED") {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This room is currently occupied. Mark the room available (or end the tenancy) before recording a void period.",
+      });
+    }
+
     const clash = await overlappingPeriod({ roomId, organizationId, startDate, endDate });
     if (clash) {
       return res.status(409).json({ success: false, message: overlapMessage(clash) });
     }
 
-    // Rent is snapshotted from the room at the moment the void is recorded, so
-    // a later rent review does not silently rewrite what a past void cost.
+    // Snapshot rent at the moment the void is recorded
     const rentAmount = Number(room.monthlyRent || 0);
     const metrics = calculateVoidMetrics(rentAmount, startDate, endDate);
 
@@ -228,18 +288,6 @@ export const createVoidPeriod = async (req, res) => {
   }
 };
 
-/**
- * Edit a void period.
- *
- * Without this the only way to correct a mistyped date or tenant name is to
- * delete the record and re-enter it, which loses who logged it and when.
- *
- * The money is never taken from the request: dailyRent, voidDays and totalVoid
- * are recomputed by the model's pre-validate hook from the rent and the dates,
- * so a client cannot post a total that does not follow from them.
- *
- * @route PUT /api/v1/void-periods/:id
- */
 export const updateVoidPeriod = async (req, res) => {
   try {
     const organizationId = req.user.organizationId;
@@ -260,8 +308,7 @@ export const updateVoidPeriod = async (req, res) => {
     const nextPropertyId = propertyId ?? period.propertyId;
     const nextRoomId = roomId ?? period.roomId;
 
-    // Moving the void to a different room re-snapshots the rent from that room,
-    // since the loss is that room's rent, not the old one's.
+    // Moving to a different room → re-snapshot rent + check status
     if (String(nextRoomId) !== String(period.roomId) || String(nextPropertyId) !== String(period.propertyId)) {
       const room = await Room.findOne({
         _id: nextRoomId,
@@ -271,6 +318,14 @@ export const updateVoidPeriod = async (req, res) => {
 
       if (!room) {
         return res.status(404).json({ success: false, message: "Room not found for this property." });
+      }
+
+      if (room.status === "OCCUPIED") {
+        return res.status(409).json({
+          success: false,
+          message:
+            "This room is currently occupied. You cannot move a void period onto an occupied room.",
+        });
       }
 
       period.propertyId = nextPropertyId;
@@ -295,7 +350,7 @@ export const updateVoidPeriod = async (req, res) => {
       return res.status(409).json({ success: false, message: overlapMessage(clash) });
     }
 
-    // The pre-validate hook recalculates dailyRent / voidDays / totalVoid here.
+    // pre-validate hook recalculates dailyRent / voidDays / totalVoid
     await period.save();
 
     const populated = await VoidPeriod.findById(period._id)
@@ -319,13 +374,6 @@ export const updateVoidPeriod = async (req, res) => {
   }
 };
 
-/**
- * Remove a void period from the working list.
- *
- * Soft, not destructive: the loss it records already happened, and an operator
- * tidying the board should not be able to erase the evidence of it. The record
- * stays readable under `?includeDeleted=true`.
- */
 export const deleteVoidPeriod = async (req, res) => {
   try {
     const { id } = req.params;
@@ -357,12 +405,6 @@ export const deleteVoidPeriod = async (req, res) => {
   }
 };
 
-/**
- * Put a removed void period back on the working list.
- *
- * The counterpart to the soft delete above — without it, "removed" is still a
- * one-way door and keeping the history buys the operator nothing.
- */
 export const restoreVoidPeriod = async (req, res) => {
   try {
     const { id } = req.params;

@@ -2,6 +2,7 @@ import express from "express";
 import {
   createVoidPeriod,
   deleteVoidPeriod,
+  getLastVoidForRoom,
   getVoidSummary,
   listVoidPeriods,
   restoreVoidPeriod,
@@ -26,5 +27,7 @@ router.delete("/:id", deleteVoidPeriod);
 
 // Removing a void period is a soft delete, so it can be undone.
 router.patch("/:id/restore", restoreVoidPeriod);
+
+router.get("/room/:roomId/last", getLastVoidForRoom);
 
 export default router;

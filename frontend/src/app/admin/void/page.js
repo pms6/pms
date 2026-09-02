@@ -1,7 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarRange, DoorOpen, Download, Filter, History, Home, Pencil, Plus, RotateCcw, Search, Trash2 } from "lucide-react";
+import {
+  CalendarRange,
+  DoorOpen,
+  Download,
+  Filter,
+  History,
+  Home,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Search,
+  Trash2,
+} from "lucide-react";
 import api from "../../api/api";
 import { PageHeader, StatCard, Badge } from "../../Shared/ui";
 
@@ -13,9 +25,6 @@ const money = (value) =>
     maximumFractionDigits: 2,
   }).format(Number(value || 0));
 
-// The daily rate is shown to 4 decimal places: £700/month is £23.3333 a day,
-// and rounding that to £23.33 on screen makes the total look like bad
-// arithmetic. Money that actually changes hands still shows as pence.
 const rate = (value) =>
   new Intl.NumberFormat("en-GB", {
     style: "currency",
@@ -26,9 +35,6 @@ const rate = (value) =>
 
 const dayLabel = (days) => `${days} ${Number(days) === 1 ? "day" : "days"}`;
 
-// Void start/end are calendar days stored as UTC midnight, so they are rendered
-// in UTC too. Rendering them locally moves them a day earlier for anyone west
-// of UTC — the mirror of the bug prettyDay() had on the Viewings board.
 const formatDate = (value) => {
   if (!value) return "—";
   const date = new Date(value);
@@ -49,12 +55,6 @@ const calculateVoidMetrics = (room, startDate, endDate) => {
   const diffMs = Math.max(0, end.getTime() - start.getTime());
   const voidDays = Math.max(1, Math.round(diffMs / 86400000) + 1);
 
-  // Mirrors backend/utils/voidMath.js — keep the two in step.
-  //
-  // The rate is reported to 4dp (700/30 = 23.3333) but the TOTAL is worked out
-  // from the unrounded figure. Multiplying a rounded 23.33 by 30 gives £699.90,
-  // ten pence short of the month that was actually lost, and the gap widens the
-  // longer the void runs.
   const exactDaily = rent / 30;
   const dailyRent = Number(exactDaily.toFixed(4));
   const totalVoid = Number((exactDaily * voidDays).toFixed(2));
@@ -63,25 +63,24 @@ const calculateVoidMetrics = (room, startDate, endDate) => {
 };
 
 export default function AdminVoidPage() {
-  // Empty until the organization's own records arrive. There is deliberately no
-  // sample data to fall back on: showing invented properties on a failed load
-  // is worse than showing none, because they look real and belong to nobody.
   const [properties, setProperties] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [voidPeriods, setVoidPeriods] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  // "" = every length. Otherwise an exact number of void days ("1", "2", …).
   const [dayFilter, setDayFilter] = useState("");
-  // "" = every property.
   const [propertyFilter, setPropertyFilter] = useState("");
   const [search, setSearch] = useState("");
-  // null = the form is creating; an id = it is editing that period.
   const [editingId, setEditingId] = useState(null);
   const formRef = useRef(null);
-  // Removed periods are kept as history rather than erased; this shows them.
   const [showHistory, setShowHistory] = useState(false);
+  const [lastVoid, setLastVoid] = useState(null);
+
+  // Period filter
+  const [periodType, setPeriodType] = useState("all"); // "all" | "month" | "6months" | "12months"
+  const [selectedMonth, setSelectedMonth] = useState(""); // "2025-08"
+
   const [form, setForm] = useState({
     propertyId: "",
     roomId: "",
@@ -97,21 +96,13 @@ export default function AdminVoidPage() {
     const load = async () => {
       try {
         const [propertiesRes, roomsRes, voidRes] = await Promise.all([
-          // Both default to a page of 10 server-side, and the pickers need the
-          // whole portfolio rather than the first page of it.
           api.get("/properties", { params: { limit: 1000 } }),
           api.get("/rooms", { params: { limit: 1000 } }),
-          // History is a server-side concern (deleted rows are not sent unless
-          // asked for); the day filter is applied on the client so changing it
-          // is instant and needs no refetch.
           api.get("/void-periods", { params: { includeDeleted: showHistory } }),
         ]);
 
         if (cancelled) return;
 
-        // Both endpoints already scope to the caller's organization server-side
-        // (getProperties / getRooms filter on req.user.organizationId), so
-        // whatever comes back belongs to this organization and nothing else.
         const props = propertiesRes.data?.data ?? [];
         const roomList = roomsRes.data?.data ?? [];
         const periods = voidRes.data?.data ?? [];
@@ -120,15 +111,14 @@ export default function AdminVoidPage() {
         setRooms(roomList);
         setVoidPeriods(periods);
 
-        // Default the form to the first real property, and to that property's
-        // first room, so the selects are never pointing at nothing.
         setForm((current) => {
           if (current.propertyId || props.length === 0) return current;
           const first = props[0];
           const firstRoom = roomList.find((room) => {
-            const rid = room.propertyId && typeof room.propertyId === "object"
-              ? room.propertyId._id
-              : room.propertyId;
+            const rid =
+              room.propertyId && typeof room.propertyId === "object"
+                ? room.propertyId._id
+                : room.propertyId;
             return String(rid) === String(first._id);
           });
           return { ...current, propertyId: first._id, roomId: firstRoom?._id || "" };
@@ -150,11 +140,37 @@ export default function AdminVoidPage() {
     };
   }, [showHistory]);
 
+  // Load last void whenever the selected room changes
+  useEffect(() => {
+    if (!form.roomId || editingId) {
+      setLastVoid(null);
+      return;
+    }
+
+    let cancelled = false;
+    api
+      .get(`/void-periods/room/${form.roomId}/last`)
+      .then((res) => {
+        if (!cancelled) setLastVoid(res.data?.data || null);
+      })
+      .catch(() => {
+        if (!cancelled) setLastVoid(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.roomId, editingId]);
+
   const roomOptions = useMemo(
-    () => rooms.filter((room) => {
-      const roomPropertyId = room.propertyId && typeof room.propertyId === "object" ? room.propertyId._id : room.propertyId;
-      return !form.propertyId || String(roomPropertyId) === String(form.propertyId);
-    }),
+    () =>
+      rooms.filter((room) => {
+        const roomPropertyId =
+          room.propertyId && typeof room.propertyId === "object"
+            ? room.propertyId._id
+            : room.propertyId;
+        return !form.propertyId || String(roomPropertyId) === String(form.propertyId);
+      }),
     [rooms, form.propertyId]
   );
 
@@ -164,34 +180,73 @@ export default function AdminVoidPage() {
       return;
     }
 
-    const currentSelectionExists = roomOptions.some((room) => String(room._id) === String(form.roomId));
+    const currentSelectionExists = roomOptions.some(
+      (room) => String(room._id) === String(form.roomId)
+    );
     if (!currentSelectionExists) {
       setForm((current) => ({ ...current, roomId: roomOptions[0]._id }));
     }
   }, [roomOptions, form.roomId]);
 
   const selectedRoom = useMemo(
-    () => roomOptions.find((room) => String(room._id) === String(form.roomId)) || roomOptions[0] || null,
+    () =>
+      roomOptions.find((room) => String(room._id) === String(form.roomId)) ||
+      roomOptions[0] ||
+      null,
     [roomOptions, form.roomId]
   );
 
-  const preview = useMemo(
-    () => {
-      if (!selectedRoom || !form.startDate || !form.endDate) {
-        return null;
-      }
+  const preview = useMemo(() => {
+    if (!selectedRoom || !form.startDate || !form.endDate) {
+      return null;
+    }
+    return calculateVoidMetrics(selectedRoom, form.startDate, form.endDate);
+  }, [selectedRoom, form.startDate, form.endDate]);
 
-      return calculateVoidMetrics(selectedRoom, form.startDate, form.endDate);
-    },
-    [selectedRoom, form.startDate, form.endDate]
-  );
+  // Helper: does this void belong to the currently selected period?
+  const isInSelectedPeriod = (period) => {
+    if (periodType === "all") return true;
 
-  // Every void length present, so the filter offers "1 day / 2 days / …" built
-  // from what actually exists rather than a guessed range.
+    // Specific month selected but no month chosen yet → show nothing
+    if (periodType === "month" && !selectedMonth) return false;
+
+    const start = new Date(period.startDate);
+    if (Number.isNaN(start.getTime())) return false;
+
+    const now = new Date();
+
+    if (periodType === "month" && selectedMonth) {
+      const [year, month] = selectedMonth.split("-").map(Number);
+      return (
+        start.getUTCFullYear() === year &&
+        start.getUTCMonth() + 1 === month
+      );
+    }
+
+    if (periodType === "6months") {
+      const sixMonthsAgo = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1)
+      );
+      return start >= sixMonthsAgo;
+    }
+
+    if (periodType === "12months") {
+      const twelveMonthsAgo = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)
+      );
+      return start >= twelveMonthsAgo;
+    }
+
+    return true;
+  };
+
   const dayOptions = useMemo(
     () =>
-      [...new Set(voidPeriods.map((item) => Number(item.voidDays || 0)).filter((d) => d > 0))]
-        .sort((a, b) => a - b),
+      [
+        ...new Set(
+          voidPeriods.map((item) => Number(item.voidDays || 0)).filter((d) => d > 0)
+        ),
+      ].sort((a, b) => a - b),
     [voidPeriods]
   );
 
@@ -199,12 +254,15 @@ export default function AdminVoidPage() {
     const needle = search.trim().toLowerCase();
 
     return voidPeriods.filter((item) => {
+      if (!isInSelectedPeriod(item)) return false;
+
       if (dayFilter && Number(item.voidDays || 0) !== Number(dayFilter)) return false;
 
       if (propertyFilter) {
-        const pid = item.propertyId && typeof item.propertyId === "object"
-          ? item.propertyId._id
-          : item.propertyId;
+        const pid =
+          item.propertyId && typeof item.propertyId === "object"
+            ? item.propertyId._id
+            : item.propertyId;
         if (String(pid) !== String(propertyFilter)) return false;
       }
 
@@ -226,24 +284,31 @@ export default function AdminVoidPage() {
 
       return true;
     });
-  }, [voidPeriods, dayFilter, propertyFilter, search]);
+  }, [voidPeriods, dayFilter, propertyFilter, search, periodType, selectedMonth]);
 
-  // Totals follow the filter, so "3 days" answers "what did the three-day voids
-  // cost me" rather than showing a figure for rows that are not on screen.
-  // Removed periods never count toward the loss, even when history is shown.
+  // Active only (for the “Void Periods” count)
   const countedPeriods = useMemo(
     () => visiblePeriods.filter((item) => !item.isDeleted),
     [visiblePeriods]
   );
 
+  // MONEY + DAYS – include removed voids (history) because the loss still happened
   const totalVoid = useMemo(
-    () => countedPeriods.reduce((sum, item) => sum + Number(item.totalVoid || item.total || 0), 0),
-    [countedPeriods]
+    () =>
+      visiblePeriods.reduce(
+        (sum, item) => sum + Number(item.totalVoid || item.total || 0),
+        0
+      ),
+    [visiblePeriods]
   );
 
   const totalDays = useMemo(
-    () => countedPeriods.reduce((sum, item) => sum + Number(item.voidDays || 0), 0),
-    [countedPeriods]
+    () =>
+      visiblePeriods.reduce(
+        (sum, item) => sum + Number(item.voidDays || 0),
+        0
+      ),
+    [visiblePeriods]
   );
 
   const stats = [
@@ -262,6 +327,13 @@ export default function AdminVoidPage() {
 
     if (!selectedRoom || !form.startDate || !form.endDate) {
       setError("Choose a room and complete both dates before saving.");
+      return;
+    }
+
+    if (selectedRoom.status === "OCCUPIED") {
+      setError(
+        "This room is currently occupied. You cannot record a void while it is let."
+      );
       return;
     }
 
@@ -290,7 +362,14 @@ export default function AdminVoidPage() {
         setVoidPeriods((current) => [response.data.data, ...current]);
       }
 
-      setForm((current) => ({ ...current, tenantName: "", startDate: "", endDate: "", notes: "" }));
+      setForm((current) => ({
+        ...current,
+        tenantName: "",
+        startDate: "",
+        endDate: "",
+        notes: "",
+      }));
+      setLastVoid(null);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to save void period.");
     } finally {
@@ -298,41 +377,58 @@ export default function AdminVoidPage() {
     }
   };
 
-  // Load a row into the form. The form is the editor — a separate modal would
-  // duplicate the live calculation panel that makes the figures checkable.
   const startEdit = (period) => {
-    const pid = period.propertyId && typeof period.propertyId === "object"
-      ? period.propertyId._id
-      : period.propertyId;
-    const rid = period.roomId && typeof period.roomId === "object"
-      ? period.roomId._id
-      : period.roomId;
+    const pid =
+      period.propertyId && typeof period.propertyId === "object"
+        ? period.propertyId._id
+        : period.propertyId;
+    const rid =
+      period.roomId && typeof period.roomId === "object"
+        ? period.roomId._id
+        : period.roomId;
 
     setEditingId(period._id);
     setForm({
       propertyId: String(pid || ""),
       roomId: String(rid || ""),
       tenantName: period.tenantName || "",
-      // <input type="date"> wants YYYY-MM-DD; the API sends a full ISO string.
       startDate: period.startDate ? String(period.startDate).slice(0, 10) : "",
       endDate: period.endDate ? String(period.endDate).slice(0, 10) : "",
       notes: period.notes || "",
     });
     setError("");
+    setLastVoid(null);
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setError("");
-    setForm((current) => ({ ...current, tenantName: "", startDate: "", endDate: "", notes: "" }));
+    setForm((current) => ({
+      ...current,
+      tenantName: "",
+      startDate: "",
+      endDate: "",
+      notes: "",
+    }));
+    setLastVoid(null);
   };
 
-  // Download what is currently on screen, filters and all — an export that
-  // ignored the filters would not match the totals shown beside it.
   const exportCsv = () => {
     const rows = [
-      ["Property", "Room", "Client", "Monthly rent", "Daily rent", "Start", "End", "Days", "Total void", "Notes", "Status"],
+      [
+        "Property",
+        "Room",
+        "Client",
+        "Monthly rent",
+        "Daily rent",
+        "Start",
+        "End",
+        "Days",
+        "Total void",
+        "Notes",
+        "Status",
+      ],
       ...visiblePeriods.map((p) => {
         const room = p.roomId && typeof p.roomId === "object" ? p.roomId : null;
         return [
@@ -363,8 +459,6 @@ export default function AdminVoidPage() {
     URL.revokeObjectURL(url);
   };
 
-  // Removing is a soft delete server-side, so with history showing the row
-  // stays put and is marked instead of disappearing.
   const removeVoid = async (id) => {
     if (!confirm("Remove this void period? It stays in the history.")) return;
 
@@ -373,7 +467,9 @@ export default function AdminVoidPage() {
       setVoidPeriods((current) =>
         showHistory
           ? current.map((item) =>
-              item._id === id ? { ...item, isDeleted: true, deletedAt: new Date().toISOString() } : item
+              item._id === id
+                ? { ...item, isDeleted: true, deletedAt: new Date().toISOString() }
+                : item
             )
           : current.filter((item) => item._id !== id)
       );
@@ -388,7 +484,9 @@ export default function AdminVoidPage() {
       const restored = response.data?.data;
       setVoidPeriods((current) =>
         current.map((item) =>
-          item._id === id ? { ...(restored || item), isDeleted: false, deletedAt: null } : item
+          item._id === id
+            ? { ...(restored || item), isDeleted: false, deletedAt: null }
+            : item
         )
       );
     } catch (err) {
@@ -397,17 +495,42 @@ export default function AdminVoidPage() {
   };
 
   const getPropertyName = (propertyId) => {
-    // The void list arrives with propertyId populated { _id, name }, so prefer
-    // that: it names the property even for one that has since been archived and
-    // is no longer in the picker list.
     if (propertyId && typeof propertyId === "object" && propertyId.name) {
       return propertyId.name;
     }
 
-    const resolvedPropertyId = propertyId && typeof propertyId === "object" ? propertyId._id : propertyId;
-    const match = properties.find((property) => String(property._id) === String(resolvedPropertyId));
+    const resolvedPropertyId =
+      propertyId && typeof propertyId === "object" ? propertyId._id : propertyId;
+    const match = properties.find(
+      (property) => String(property._id) === String(resolvedPropertyId)
+    );
     return match?.name || "Property";
   };
+
+  const continueFromLastVoid = () => {
+    if (!lastVoid?.endDate) return;
+    const nextDay = new Date(lastVoid.endDate);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    setForm((c) => ({
+      ...c,
+      startDate: nextDay.toISOString().slice(0, 10),
+      endDate: "",
+    }));
+  };
+
+  // Human-readable label for the current period
+  const periodLabel = (() => {
+    if (periodType === "month" && selectedMonth) {
+      return new Date(selectedMonth + "-01").toLocaleString("en-GB", {
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+      });
+    }
+    if (periodType === "6months") return "Last 6 months";
+    if (periodType === "12months") return "Last 12 months";
+    return "All time";
+  })();
 
   if (loading) {
     return (
@@ -430,10 +553,10 @@ export default function AdminVoidPage() {
               disabled={visiblePeriods.length === 0}
               className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-bold text-[#0F253B] hover:bg-gray-50 disabled:opacity-50"
             >
-              <span className="inline-flex items-center gap-2"><Download size={16} /> Export</span>
+              <span className="inline-flex items-center gap-2">
+                <Download size={16} /> Export
+              </span>
             </button>
-            {/* Was a decorative button with no handler. The form IS the add
-                form, so this jumps to it and starts a fresh entry. */}
             <button
               type="button"
               onClick={() => {
@@ -442,24 +565,40 @@ export default function AdminVoidPage() {
               }}
               className="rounded-xl bg-[#0F253B] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#1d3557]"
             >
-              <span className="inline-flex items-center gap-2"><Plus size={16} /> Add void period</span>
+              <span className="inline-flex items-center gap-2">
+                <Plus size={16} /> Add void period
+              </span>
             </button>
           </div>
         }
       />
 
+      {/* Main stats – now include history (removed voids) in the money total */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {stats.map((item) => (
-          <StatCard key={item.label} label={item.label} value={item.value} icon={item.icon} tone={item.tone} />
+          <StatCard
+            key={item.label}
+            label={item.label}
+            value={item.value}
+            icon={item.icon}
+            tone={item.tone}
+          />
         ))}
       </div>
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{error}</div>
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          {error}
+        </div>
       )}
 
       <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-        <form ref={formRef} onSubmit={submitVoid} className="space-y-4 rounded-2xl border border-gray-100 bg-white p-5 scroll-mt-4">
+        {/* Form */}
+        <form
+          ref={formRef}
+          onSubmit={submitVoid}
+          className="space-y-4 rounded-2xl border border-gray-100 bg-white p-5 scroll-mt-4"
+        >
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-[#0F253B]">
               {editingId ? "Edit void period" : "Void period"}
@@ -478,8 +617,15 @@ export default function AdminVoidPage() {
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-1.5 text-sm font-medium text-gray-600">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Property</span>
-              <select className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white disabled:opacity-60" value={form.propertyId} onChange={handleField("propertyId")} disabled={properties.length === 0}>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                Property
+              </span>
+              <select
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white disabled:opacity-60"
+                value={form.propertyId}
+                onChange={handleField("propertyId")}
+                disabled={properties.length === 0}
+              >
                 {properties.length === 0 ? (
                   <option value="">No properties in your organisation</option>
                 ) : (
@@ -494,50 +640,125 @@ export default function AdminVoidPage() {
             </label>
 
             <label className="space-y-1.5 text-sm font-medium text-gray-600">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Room</span>
-              <select className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white disabled:opacity-60" value={form.roomId} onChange={handleField("roomId")} disabled={roomOptions.length === 0}>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                Room
+              </span>
+              <select
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white disabled:opacity-60"
+                value={form.roomId}
+                onChange={handleField("roomId")}
+                disabled={roomOptions.length === 0}
+              >
                 {roomOptions.length === 0 ? (
                   <option value="">No rooms in this property</option>
                 ) : (
                   roomOptions.map((room) => (
-                    <option key={room._id} value={room._id}>{room.roomName || room.roomNumber || "Room"}</option>
+                    <option
+                      key={room._id}
+                      value={room._id}
+                      disabled={room.status === "OCCUPIED"}
+                    >
+                      {room.roomName || room.roomNumber || "Room"}
+                      {room.status === "OCCUPIED" ? " (Occupied)" : ""}
+                    </option>
                   ))
                 )}
               </select>
             </label>
 
             <label className="space-y-1.5 text-sm font-medium text-gray-600">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Start date</span>
-              <input type="date" className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white" value={form.startDate} onChange={handleField("startDate")} />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                Start date
+              </span>
+              <input
+                type="date"
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
+                value={form.startDate}
+                onChange={handleField("startDate")}
+              />
             </label>
 
             <label className="space-y-1.5 text-sm font-medium text-gray-600">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">End date</span>
-              <input type="date" className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white" value={form.endDate} onChange={handleField("endDate")} />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                End date
+              </span>
+              <input
+                type="date"
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
+                value={form.endDate}
+                onChange={handleField("endDate")}
+              />
             </label>
 
             <label className="space-y-1.5 text-sm font-medium text-gray-600 md:col-span-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Tenant name</span>
-              <input className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white" value={form.tenantName} onChange={handleField("tenantName")} placeholder="e.g. Rajika" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                Tenant name
+              </span>
+              <input
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
+                value={form.tenantName}
+                onChange={handleField("tenantName")}
+                placeholder="e.g. Rajika"
+              />
             </label>
 
             <label className="space-y-1.5 text-sm font-medium text-gray-600 md:col-span-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Notes</span>
-              <textarea rows={3} className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white" value={form.notes} onChange={handleField("notes")} placeholder="Optional note about the void period" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                Notes
+              </span>
+              <textarea
+                rows={3}
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
+                value={form.notes}
+                onChange={handleField("notes")}
+                placeholder="Optional note about the void period"
+              />
             </label>
           </div>
 
-          {selectedRoom && preview && (
+          {/* Last void helper */}
+          {lastVoid && !editingId && (
+            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm">
+              <p className="font-medium text-blue-800">
+                Last void for this room:{" "}
+                {formatDate(lastVoid.startDate)} → {formatDate(lastVoid.endDate)} (
+                {dayLabel(lastVoid.voidDays)}) · {money(lastVoid.totalVoid)}
+              </p>
+              <button
+                type="button"
+                onClick={continueFromLastVoid}
+                className="mt-2 text-xs font-bold text-blue-700 underline hover:text-blue-900"
+              >
+                Start new void the day after last one ended
+              </button>
+            </div>
+          )}
+
+          {selectedRoom?.status === "OCCUPIED" && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              This room is currently occupied. You cannot record a void while it is let.
+            </div>
+          )}
+
+          {selectedRoom && preview && selectedRoom.status !== "OCCUPIED" && (
             <div className="rounded-2xl border border-dashed border-[#F47C3C]/40 bg-orange-50 p-4">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#F47C3C]">Calculated</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#F47C3C]">
+                Calculated
+              </p>
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
                 <div>
                   <p className="text-[10px] uppercase tracking-widest text-gray-400">Rent</p>
-                  <p className="text-lg font-bold text-[#0F253B]">{money(selectedRoom.monthlyRent || 0)}</p>
+                  <p className="text-lg font-bold text-[#0F253B]">
+                    {money(selectedRoom.monthlyRent || 0)}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-400">Per day</p>
-                  <p className="text-lg font-bold text-[#0F253B]">{rate(preview.dailyRent)}</p>
+                  <p className="text-[10px] uppercase tracking-widest text-gray-400">
+                    Per day
+                  </p>
+                  <p className="text-lg font-bold text-[#0F253B]">
+                    {rate(preview.dailyRent)}
+                  </p>
                   <p className="text-[10px] font-medium text-gray-400">
                     {money(selectedRoom.monthlyRent || 0)} ÷ 30
                   </p>
@@ -548,10 +769,12 @@ export default function AdminVoidPage() {
                 </div>
               </div>
               <div className="mt-4 border-t border-orange-100 pt-3">
-                <p className="text-[10px] uppercase tracking-widest text-gray-400">Total void</p>
-                <p className="text-2xl font-bold text-[#0F253B]">{money(preview.totalVoid)}</p>
-                {/* Spelling the sum out makes a wrong rent or date obvious
-                    before it is saved. */}
+                <p className="text-[10px] uppercase tracking-widest text-gray-400">
+                  Total void
+                </p>
+                <p className="text-2xl font-bold text-[#0F253B]">
+                  {money(preview.totalVoid)}
+                </p>
                 <p className="text-[11px] font-medium text-gray-400">
                   {rate(preview.dailyRent)} × {dayLabel(preview.voidDays)}
                 </p>
@@ -560,9 +783,19 @@ export default function AdminVoidPage() {
           )}
 
           <div className="flex items-center gap-2">
-            <button type="submit" disabled={saving || !selectedRoom} className="inline-flex items-center gap-2 rounded-xl bg-[#F47C3C] px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
+            <button
+              type="submit"
+              disabled={
+                saving || !selectedRoom || selectedRoom.status === "OCCUPIED"
+              }
+              className="inline-flex items-center gap-2 rounded-xl bg-[#F47C3C] px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
               <Plus size={16} />
-              {saving ? "Saving..." : editingId ? "Save changes" : "Save void period"}
+              {saving
+                ? "Saving..."
+                : editingId
+                ? "Save changes"
+                : "Save void period"}
             </button>
 
             {editingId && (
@@ -577,6 +810,7 @@ export default function AdminVoidPage() {
           </div>
         </form>
 
+        {/* Room list */}
         <div className="rounded-2xl border border-gray-100 bg-white p-5">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-bold text-[#0F253B]">Room list</h2>
@@ -589,27 +823,60 @@ export default function AdminVoidPage() {
             </p>
           )}
 
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
             {rooms.map((room) => {
-              const roomPropertyId = room.propertyId && typeof room.propertyId === "object" ? room.propertyId._id : room.propertyId;
+              const roomPropertyId =
+                room.propertyId && typeof room.propertyId === "object"
+                  ? room.propertyId._id
+                  : room.propertyId;
+              const isOccupied = room.status === "OCCUPIED";
+              const isSelected = String(form.roomId) === String(room._id);
+
               return (
                 <button
                   key={room._id}
                   type="button"
-                  onClick={() => setForm((current) => ({ ...current, propertyId: roomPropertyId || current.propertyId, roomId: room._id }))}
-                  className={`w-full rounded-xl border p-3 text-left transition-all ${String(form.roomId) === String(room._id) ? "border-[#F47C3C] bg-orange-50" : "border-gray-100 bg-gray-50 hover:bg-white"}`}
+                  disabled={isOccupied}
+                  onClick={() => {
+                    if (isOccupied) return;
+                    setForm((current) => ({
+                      ...current,
+                      propertyId: roomPropertyId || current.propertyId,
+                      roomId: room._id,
+                    }));
+                  }}
+                  className={`w-full rounded-xl border p-3 text-left transition-all ${
+                    isSelected
+                      ? "border-[#F47C3C] bg-orange-50"
+                      : isOccupied
+                      ? "border-gray-100 bg-gray-100 opacity-60 cursor-not-allowed"
+                      : "border-gray-100 bg-gray-50 hover:bg-white"
+                  }`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="font-bold text-[#0F253B]">{room.roomName || room.roomNumber || "Room"}</p>
-                      <p className="text-xs text-gray-400">{getPropertyName(roomPropertyId)}</p>
+                      <p className="font-bold text-[#0F253B]">
+                        {room.roomName || room.roomNumber || "Room"}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {getPropertyName(roomPropertyId)}
+                      </p>
                     </div>
-                    <Badge tone={room.status === "OCCUPIED" ? "orange" : "green"}>{room.status || "AVAILABLE"}</Badge>
+                    <Badge tone={isOccupied ? "orange" : "green"}>
+                      {room.status || "AVAILABLE"}
+                    </Badge>
                   </div>
                   <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
                     <span>Rent</span>
-                    <span className="font-bold text-[#0F253B]">{money(room.monthlyRent || 0)}</span>
+                    <span className="font-bold text-[#0F253B]">
+                      {money(room.monthlyRent || 0)}
+                    </span>
                   </div>
+                  {isOccupied && (
+                    <p className="mt-1.5 text-[11px] font-medium text-amber-600">
+                      Occupied – cannot add void
+                    </p>
+                  )}
                 </button>
               );
             })}
@@ -617,9 +884,39 @@ export default function AdminVoidPage() {
         </div>
       </div>
 
+      {/* Table + filters */}
       <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
-        {/* Filter bar — by void length, and whether removed periods are shown. */}
+        {/* Filter bar */}
         <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 px-4 py-3">
+          {/* Period selector */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+              Period
+            </span>
+            <select
+              value={periodType}
+              onChange={(e) => {
+                setPeriodType(e.target.value);
+                if (e.target.value !== "month") setSelectedMonth("");
+              }}
+              className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-medium outline-none focus:border-[#F47C3C] focus:bg-white"
+            >
+              <option value="all">All time</option>
+              <option value="month">Specific month</option>
+              <option value="6months">Last 6 months</option>
+              <option value="12months">Last 12 months</option>
+            </select>
+
+            {periodType === "month" && (
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-medium outline-none focus:border-[#F47C3C] focus:bg-white"
+              />
+            )}
+          </div>
+
           <div className="flex items-center gap-2">
             <Filter size={15} className="text-gray-400" />
             <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
@@ -640,15 +937,15 @@ export default function AdminVoidPage() {
             ))}
           </select>
 
-          {/* The shortest lengths get one-click buttons — they are the ones
-              looked at most often, and the request asked for them by name. */}
           <div className="flex flex-wrap items-center gap-1.5">
             {[1, 2, 3, 7].map((days) =>
               dayOptions.includes(days) ? (
                 <button
                   key={days}
                   type="button"
-                  onClick={() => setDayFilter(String(dayFilter) === String(days) ? "" : String(days))}
+                  onClick={() =>
+                    setDayFilter(String(dayFilter) === String(days) ? "" : String(days))
+                  }
                   className={`rounded-lg px-2.5 py-1.5 text-xs font-bold transition-all ${
                     String(dayFilter) === String(days)
                       ? "bg-[#F47C3C] text-white"
@@ -668,12 +965,17 @@ export default function AdminVoidPage() {
           >
             <option value="">All properties</option>
             {properties.map((property) => (
-              <option key={property._id} value={property._id}>{property.name}</option>
+              <option key={property._id} value={property._id}>
+                {property.name}
+              </option>
             ))}
           </select>
 
           <div className="relative">
-            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search
+              size={14}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+            />
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -682,10 +984,16 @@ export default function AdminVoidPage() {
             />
           </div>
 
-          {(dayFilter || propertyFilter || search) && (
+          {(dayFilter || propertyFilter || search || periodType !== "all") && (
             <button
               type="button"
-              onClick={() => { setDayFilter(""); setPropertyFilter(""); setSearch(""); }}
+              onClick={() => {
+                setDayFilter("");
+                setPropertyFilter("");
+                setSearch("");
+                setPeriodType("all");
+                setSelectedMonth("");
+              }}
               className="text-xs font-bold text-[#F47C3C] hover:underline"
             >
               Clear
@@ -710,6 +1018,34 @@ export default function AdminVoidPage() {
           </div>
         </div>
 
+        {/* Period total banner – includes history */}
+        {periodType !== "all" && (
+          <div className="border-b border-blue-100 bg-blue-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-blue-800">
+                {periodType === "month" && !selectedMonth
+                  ? "Please select a month"
+                  : (
+                    <>
+                      Showing voids for <strong>{periodLabel}</strong>
+                    </>
+                  )}
+              </p>
+              <p className="text-xs text-blue-600 mt-0.5">
+                {countedPeriods.length} active ·{" "}
+                {visiblePeriods.filter((p) => p.isDeleted).length} removed ·{" "}
+                {totalDays} days
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500">
+                Total void loss
+              </p>
+              <p className="text-xl font-bold text-blue-900">{money(totalVoid)}</p>
+            </div>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead className="bg-gray-50 text-[10px] font-bold uppercase tracking-widest text-gray-400">
@@ -731,24 +1067,33 @@ export default function AdminVoidPage() {
                   <td colSpan={9} className="px-4 py-6 text-center text-gray-400">
                     {voidPeriods.length === 0
                       ? "No void periods saved yet."
+                      : periodType === "month" && !selectedMonth
+                      ? "Please select a month."
+                      : periodType !== "all"
+                      ? `No void periods found for ${periodLabel}.`
                       : dayFilter && !propertyFilter && !search
-                        ? `No void period lasted ${dayLabel(dayFilter)}.`
-                        : "No void period matches these filters."}
+                      ? `No void period lasted ${dayLabel(dayFilter)}.`
+                      : "No void period matches these filters."}
                   </td>
                 </tr>
               ) : (
                 visiblePeriods.map((period) => {
-                  const room = period.roomId && typeof period.roomId === "object" ? period.roomId : null;
-                  const durationText = `${formatDate(period.startDate)} - ${formatDate(period.endDate)}`;
+                  const room =
+                    period.roomId && typeof period.roomId === "object"
+                      ? period.roomId
+                      : null;
+                  const durationText = `${formatDate(period.startDate)} - ${formatDate(
+                    period.endDate
+                  )}`;
                   const rentAmount = period.rentAmount || room?.monthlyRent || 0;
-                  // Fall back to the rule itself for rows saved before the rate
-                  // was stored, so the column is never blank.
                   const daily = period.dailyRent || Number(rentAmount) / 30;
 
                   return (
                     <tr
                       key={period._id}
-                      className={`border-t border-gray-100 align-top ${period.isDeleted ? "bg-gray-50/70 text-gray-400" : ""}`}
+                      className={`border-t border-gray-100 align-top ${
+                        period.isDeleted ? "bg-gray-50/70 text-gray-400" : ""
+                      }`}
                     >
                       <td className="px-4 py-3 font-medium text-[#0F253B]">
                         {getPropertyName(period.propertyId)}
@@ -758,27 +1103,53 @@ export default function AdminVoidPage() {
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-medium text-[#0F253B]">{period.roomCode || room?.roomNumber || room?.roomName || "Room"}</td>
-                      <td className="px-4 py-3 text-[#0F253B]">{period.tenantName || "—"}</td>
+                      <td className="px-4 py-3 font-medium text-[#0F253B]">
+                        {period.roomCode ||
+                          room?.roomNumber ||
+                          room?.roomName ||
+                          "Room"}
+                      </td>
+                      <td className="px-4 py-3 text-[#0F253B]">
+                        {period.tenantName || "—"}
+                      </td>
                       <td className="px-4 py-3">{money(rentAmount)}</td>
-                      {/* 4dp: £700/month is £23.3333 a day. */}
-                      <td className="px-4 py-3" title={`${money(rentAmount)} ÷ 30`}>{rate(daily)}</td>
+                      <td className="px-4 py-3" title={`${money(rentAmount)} ÷ 30`}>
+                        {rate(daily)}
+                      </td>
                       <td className="px-4 py-3 text-gray-500">{durationText}</td>
-                      <td className="px-4 py-3 font-bold text-[#0F253B]">{dayLabel(period.voidDays || 0)}</td>
-                      <td className="px-4 py-3 font-bold text-[#0F253B]" title={`${rate(daily)} × ${period.voidDays || 0}`}>
+                      <td className="px-4 py-3 font-bold text-[#0F253B]">
+                        {dayLabel(period.voidDays || 0)}
+                      </td>
+                      <td
+                        className="px-4 py-3 font-bold text-[#0F253B]"
+                        title={`${rate(daily)} × ${period.voidDays || 0}`}
+                      >
                         {money(period.totalVoid || 0)}
                       </td>
                       <td className="px-4 py-3">
                         {period.isDeleted ? (
-                          <button type="button" onClick={() => restoreVoid(period._id)} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-600">
+                          <button
+                            type="button"
+                            onClick={() => restoreVoid(period._id)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-600"
+                          >
                             <RotateCcw size={13} /> Restore
                           </button>
                         ) : (
                           <div className="flex items-center gap-1.5">
-                            <button type="button" onClick={() => startEdit(period)} title="Edit this void period" className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-bold text-[#0F253B] hover:bg-gray-100">
+                            <button
+                              type="button"
+                              onClick={() => startEdit(period)}
+                              title="Edit this void period"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-bold text-[#0F253B] hover:bg-gray-100"
+                            >
                               <Pencil size={13} /> Edit
                             </button>
-                            <button type="button" onClick={() => removeVoid(period._id)} className="inline-flex items-center gap-1.5 rounded-lg border border-red-100 bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-600">
+                            <button
+                              type="button"
+                              onClick={() => removeVoid(period._id)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-red-100 bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-600"
+                            >
                               <Trash2 size={13} /> Remove
                             </button>
                           </div>

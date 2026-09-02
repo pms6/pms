@@ -35,6 +35,7 @@ const useViewingsData = ({
   status = "",
   person = "",
   propertyId = "",
+  scheduledBy = "", // member who created / scheduled the viewing
   period = "all", // "all" | "this_month" | "1m" | "6m" | "12m" | "YYYY-MM"
 } = {}) => {
   const { user } = useAuth();
@@ -188,6 +189,29 @@ const useViewingsData = ({
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [allViewings]);
 
+  // Members who have scheduled at least one viewing (for the "Scheduled by" filter).
+  // Key is a stable id when we have createdBy, otherwise the email / label.
+  const memberOptions = useMemo(() => {
+    const byKey = new Map();
+
+    allViewings.forEach((v) => {
+      const creator = creatorOf(v);
+      if (!creator) return;
+
+      const key =
+        String(v.createdBy?._id ?? v.createdBy ?? creator.email ?? creator.label ?? "");
+      if (!key || byKey.has(key)) return;
+
+      byKey.set(key, {
+        id: key,
+        label: creator.label || creator.email || "Unknown",
+        email: creator.email || "",
+      });
+    });
+
+    return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [allViewings]);
+
   // Months that actually contain viewings (for the "Specific month" dropdown)
   const monthOptions = useMemo(() => {
     const set = new Set();
@@ -239,8 +263,8 @@ const useViewingsData = ({
   );
 
   // Frontend filtering — the status chips, the person search, the property
-  // picker and the period all narrow the same list, so they combine rather
-  // than override.
+  // picker, the scheduled-by member and the period all narrow the same list,
+  // so they combine rather than override.
   const personQuery = person.trim().toLowerCase();
 
   const filteredViewings = allViewings.filter((v) => {
@@ -251,6 +275,15 @@ const useViewingsData = ({
     }
 
     if (!inPeriod(v.date)) return false;
+
+    // Dedicated "Scheduled by" member filter
+    if (scheduledBy) {
+      const creator = creatorOf(v);
+      const key = String(
+        v.createdBy?._id ?? v.createdBy ?? creator?.email ?? creator?.label ?? ""
+      );
+      if (key !== scheduledBy) return false;
+    }
 
     if (personQuery) {
       // Every person named on the card: the lead being shown round, the agent
@@ -279,7 +312,7 @@ const useViewingsData = ({
     return true;
   });
 
-  // Stats for the *current* filtered set (period + status + person + property)
+  // Stats for the *current* filtered set (period + status + person + property + member)
   const stats = useMemo(() => {
     const counts = { scheduled: 0, done: 0, cancelled: 0, total: 0 };
     filteredViewings.forEach((v) => {
@@ -294,6 +327,7 @@ const useViewingsData = ({
   return {
     viewings: filteredViewings,
     propertyOptions,
+    memberOptions,
     monthOptions,
     stats,
     allViewings,
@@ -683,11 +717,13 @@ export default function ViewingsBoard({
   const [filter, setFilter] = useState("");
   const [person, setPerson] = useState("");
   const [propertyId, setPropertyId] = useState("");
-  const [period, setPeriod] = useState("all"); // ← new period state
+  const [scheduledBy, setScheduledBy] = useState(""); // member who added the viewing
+  const [period, setPeriod] = useState("all");
 
   const {
     viewings,
     propertyOptions,
+    memberOptions,
     monthOptions,
     stats,
     leads,
@@ -702,7 +738,13 @@ export default function ViewingsBoard({
     updateViewingStatus,
     rescheduleViewing,
     respondToRequest,
-  } = useViewingsData({ status: filter, person, propertyId, period });
+  } = useViewingsData({
+    status: filter,
+    person,
+    propertyId,
+    scheduledBy,
+    period,
+  });
 
   const [rescheduling, setRescheduling] = useState(null);
   const [blockOpen, setBlockOpen] = useState(false);
@@ -713,6 +755,8 @@ export default function ViewingsBoard({
     return <div className="p-8 text-center text-gray-500">Loading data...</div>;
   if (!user)
     return <div className="p-8 text-center text-red-500">Please log in.</div>;
+
+  const hasActiveFilters = person || propertyId || scheduledBy;
 
   return (
     <div className="space-y-5">
@@ -803,7 +847,7 @@ export default function ViewingsBoard({
           ))}
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
           <div className="relative">
             <Search
               size={16}
@@ -814,7 +858,7 @@ export default function ViewingsBoard({
               onChange={(e) => setPerson(e.target.value)}
               placeholder="Search lead, agent or scheduler…"
               aria-label="Filter viewings by person — lead, agent or the member who scheduled it"
-              className="w-full sm:w-72 pl-9 pr-3 py-2 text-sm font-medium bg-white border border-gray-100 rounded-lg outline-none transition-all focus:ring-2 focus:ring-[#F47C3C]"
+              className="w-full sm:w-64 pl-9 pr-3 py-2 text-sm font-medium bg-white border border-gray-100 rounded-lg outline-none transition-all focus:ring-2 focus:ring-[#F47C3C]"
             />
           </div>
 
@@ -822,7 +866,7 @@ export default function ViewingsBoard({
             value={propertyId}
             onChange={(e) => setPropertyId(e.target.value)}
             aria-label="Filter viewings by property"
-            className="w-full sm:w-56 px-3 py-2 text-sm font-medium bg-white border border-gray-100 rounded-lg outline-none transition-all focus:ring-2 focus:ring-[#F47C3C]"
+            className="w-full sm:w-48 px-3 py-2 text-sm font-medium bg-white border border-gray-100 rounded-lg outline-none transition-all focus:ring-2 focus:ring-[#F47C3C]"
           >
             <option value="">All properties</option>
             {propertyOptions.map((p) => (
@@ -832,11 +876,28 @@ export default function ViewingsBoard({
             ))}
           </select>
 
-          {(person || propertyId) && (
+          {/* NEW: filter by the member who scheduled / added the viewing */}
+          <select
+            value={scheduledBy}
+            onChange={(e) => setScheduledBy(e.target.value)}
+            aria-label="Filter viewings by the member who scheduled them"
+            className="w-full sm:w-52 px-3 py-2 text-sm font-medium bg-white border border-gray-100 rounded-lg outline-none transition-all focus:ring-2 focus:ring-[#F47C3C]"
+          >
+            <option value="">Scheduled by anyone</option>
+            {memberOptions.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+                {m.email && m.email !== m.label ? ` (${m.email})` : ""}
+              </option>
+            ))}
+          </select>
+
+          {hasActiveFilters && (
             <button
               onClick={() => {
                 setPerson("");
                 setPropertyId("");
+                setScheduledBy("");
               }}
               className="px-3 py-2 text-xs font-bold text-gray-500 bg-white border border-gray-100 rounded-lg hover:bg-gray-50 transition-all"
             >

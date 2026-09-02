@@ -237,7 +237,14 @@ const propertySchema = new mongoose.Schema(
                 },
                 // Replacement value per unit, used for check-out deductions.
                 price:Number,
-                notes:String
+                notes:String,
+                // Photos of the item (condition evidence). Multiple allowed.
+                images: [
+                    {
+                    url: String,
+                    publicId: String,
+                    },
+                ],
             }
         ]
     },

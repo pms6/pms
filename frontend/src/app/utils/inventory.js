@@ -31,10 +31,16 @@ export const BLANK_ITEM = {
   condition: "GOOD",
   price: "",
   notes: "",
+  images: [], // [{ url, publicId }]
 };
 
 // An API item may be missing keys the form expects; fill them in.
-export const toFormItem = (it) => ({ ...BLANK_ITEM, ...it, price: it.price ?? "" });
+export const toFormItem = (it) => ({
+  ...BLANK_ITEM,
+  ...it,
+  price: it.price ?? "",
+  images: Array.isArray(it.images) ? it.images : [],
+});
 
 export const itemValue = (it) => (Number(it.quantity) || 0) * (Number(it.price) || 0);
 
@@ -52,4 +58,13 @@ export const cleanItems = (items = []) =>
       condition: it.condition || "GOOD",
       price: it.price === "" || it.price == null ? null : Number(it.price),
       notes: (it.notes || "").trim(),
+      images: Array.isArray(it.images)
+        ? it.images
+            .filter((img) => img && (img.url || typeof img === "string"))
+            .map((img) =>
+              typeof img === "string"
+                ? { url: img, publicId: "" }
+                : { url: img.url, publicId: img.publicId || "" }
+            )
+        : [],
     }));
