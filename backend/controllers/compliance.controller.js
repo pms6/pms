@@ -1,9 +1,68 @@
 import mongoose from "mongoose";
 import { sendAllPendingReminders } from "../cranjob/complianceReminder.js";
-import Compliance from "../models/Compliance.js";
+import Compliance, { NON_EXPIRING_TYPES } from "../models/Compliance.js";
 import Property from "../models/Property.js";
 import { resolveTenantProperty } from "../utils/tenantProperty.js";
 import { expiryState } from "../utils/reminders.js";
+
+const MAX_FILES = 20;
+
+/**
+ * Whitelist the attachment list field by field, so the client's upload
+ * metadata survives but nothing else it sends does. Rows with no url are
+ * dropped — an attachment with no file behind it is a dead link in the
+ * register, and the form can produce one if a save races an upload.
+ *
+ * No format restriction: the evidence for a compliance item is whatever was
+ * actually issued.
+ *
+ * Returns { error } or { files }.
+ */
+const cleanFiles = (input) => {
+  if (!Array.isArray(input)) return { error: "files must be a list." };
+  if (input.length > MAX_FILES) {
+    return { error: `A record can hold at most ${MAX_FILES} files.` };
+  }
+
+  const files = [];
+  for (const f of input) {
+    if (!f || typeof f !== "object") continue;
+    const url = typeof f.url === "string" ? f.url.trim() : "";
+    if (!url) continue;
+
+    const bytes = Number(f.bytes);
+    files.push({
+      name: typeof f.name === "string" ? f.name.trim() : "",
+      url,
+      publicId: typeof f.publicId === "string" ? f.publicId.trim() : "",
+      format: typeof f.format === "string" ? f.format.trim() : "",
+      bytes: Number.isFinite(bytes) && bytes >= 0 ? bytes : 0,
+      // Preserved on an edit so re-saving does not restamp every attachment.
+      uploadedAt: f.uploadedAt || new Date(),
+    });
+  }
+
+  return { files };
+};
+
+/**
+ * The attachment list for a write, from either shape the client may send:
+ * the new `files` array, or the single fileUrl/fileName a caller that has not
+ * been updated still posts. Returns undefined when neither was sent, which
+ * means "leave the attachments alone".
+ */
+const resolveFiles = (body) => {
+  if (body.files !== undefined) return cleanFiles(body.files);
+
+  if (body.fileUrl !== undefined) {
+    const url = typeof body.fileUrl === "string" ? body.fileUrl.trim() : "";
+    // An explicitly empty fileUrl detaches the file, which is how the edit form
+    // has always removed one.
+    return { files: url ? [{ url, name: body.fileName || "" }] : [] };
+  }
+
+  return { files: undefined };
+};
 
 // The stored `status` is only recomputed in the model's pre-save hook, so a
 // record nobody has touched since it was created still reports whatever it was
@@ -74,8 +133,6 @@ export const createCompliance = async (req, res) => {
       reminderDaysBefore,
       autoReminder,
       notes,
-      fileUrl,
-      fileName,
     } = req.body;
 
     const property = await Property.findOne({ _id: propertyId, organizationId });
@@ -87,19 +144,35 @@ export const createCompliance = async (req, res) => {
       });
     }
 
+    const { error, files } = resolveFiles(req.body);
+    if (error) return res.status(400).json({ success: false, message: error });
+
+    // Number(undefined) is NaN, which Mongoose rejects with a cast error rather
+    // than falling back to the schema default. Leave the field off entirely
+    // when nothing usable was sent, so the default applies.
+    const num = (value) => {
+      if (value === undefined || value === null || value === "") return undefined;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : undefined;
+    };
+
+    // A non-expiring type (a floor plan) carries no dates. Blanking them rather
+    // than storing whatever the form happened to hold keeps it out of the
+    // reminder job's expiryDate query and off the expiring-soon filters.
+    const dated = !NON_EXPIRING_TYPES.includes(type);
+
     const compliance = new Compliance({
       organizationId,
       propertyId,
       type,
       subType,
-      carriedOut,
-      validityMonths: Number(validityMonths),
-      expiryDate,
-      reminderDaysBefore: Number(reminderDaysBefore || 14),
-      autoReminder: autoReminder === "true" || autoReminder === true,
+      carriedOut: dated ? carriedOut : undefined,
+      validityMonths: dated ? num(validityMonths) : undefined,
+      expiryDate: dated ? expiryDate : undefined,
+      reminderDaysBefore: num(reminderDaysBefore) ?? 14,
+      autoReminder: dated && (autoReminder === "true" || autoReminder === true),
       notes,
-      fileUrl,
-      fileName,
+      files: files || [],
       createdBy: userId,
     });
 
@@ -118,6 +191,10 @@ export const createCompliance = async (req, res) => {
 // Fields a client may change. organizationId, createdBy, status and
 // lastReminderSentAt are deliberately absent: the first two are identity, and
 // the last two are maintained by the model hook and the reminder job.
+//
+// Attachments are absent too — `files` is handled separately below, through
+// resolveFiles, because it needs sanitising rather than assigning, and because
+// fileUrl/fileName are derived from it by the model hook.
 const EDITABLE_KEYS = [
   "propertyId",
   "type",
@@ -128,8 +205,6 @@ const EDITABLE_KEYS = [
   "reminderDaysBefore",
   "autoReminder",
   "notes",
-  "fileUrl",
-  "fileName",
 ];
 
 // UPDATE Compliance
@@ -182,6 +257,21 @@ export const updateCompliance = async (req, res) => {
       } else {
         compliance[key] = req.body[key];
       }
+    }
+
+    const { error: filesError, files } = resolveFiles(req.body);
+    if (filesError) return res.status(400).json({ success: false, message: filesError });
+    // undefined means the client said nothing about attachments, so leave them.
+    if (files !== undefined) compliance.files = files;
+
+    // Switching an existing record TO a non-expiring type has to clear the
+    // dates it used to carry, or a floor plan converted from a certificate
+    // keeps expiring and keeps emailing.
+    if (NON_EXPIRING_TYPES.includes(compliance.type)) {
+      compliance.carriedOut = undefined;
+      compliance.expiryDate = undefined;
+      compliance.validityMonths = undefined;
+      compliance.autoReminder = false;
     }
 
     await compliance.save();

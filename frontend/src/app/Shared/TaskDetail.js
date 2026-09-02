@@ -16,9 +16,16 @@ function Meta({ label, value, icon: Icon }) {
   return (
     <div className="min-w-0">
       <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">{label}</p>
-      <p className="text-sm font-bold text-[#0F253B] mt-0.5 flex items-center gap-1.5 break-words">
-        {Icon && <Icon size={13} className="text-[#F47C3C] shrink-0" />}
-        {value || "—"}
+      <p className="text-sm font-bold text-[#0F253B] mt-0.5 flex items-start gap-1.5">
+        {Icon && <Icon size={13} className="text-[#F47C3C] shrink-0 mt-[3px]" />}
+        {/* The value is wrapped in a span rather than left as a bare text node:
+            an anonymous flex item will not shrink below its content, so a long
+            unbroken value — an email address, typically — overflowed its grid
+            column and ran across the cell beside it. `min-w-0` lets it shrink;
+            `wrap-anywhere` gives it somewhere to break, which plain
+            `break-words` does not, since that leaves the min-content width
+            untouched and an email has no spaces to wrap at. */}
+        <span className="min-w-0 wrap-anywhere">{value || "—"}</span>
       </p>
     </div>
   );

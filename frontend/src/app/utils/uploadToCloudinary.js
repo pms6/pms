@@ -165,3 +165,87 @@ export const uploadFileToCloudinary = async (file) => {
     bytes: data.bytes || file.size,
   };
 };
+
+// ---------------------------------------------------------------------------
+// Any-file upload — used by the reference register, where the paperwork is
+// whatever the referee actually sent.
+//
+// Deliberately separate from uploadFileToCloudinary above rather than a
+// loosening of it: that function's PDF/Word/image restriction is what fifteen
+// other screens rely on to keep a compliance certificate or a contract from
+// being a .zip. References are the opposite case — a right-to-rent share code
+// screenshot, an employer's .msg, a spreadsheet of payslips, a scan in some
+// format nobody anticipated — and refusing them would just push the file back
+// into an email folder where the register cannot see it.
+//
+// Cloudinary's `auto` endpoint routes each upload to the right resource type:
+// images and PDFs become `image`, everything else becomes `raw`.
+// NOTE: the unsigned preset must allow the `raw` resource type, or anything
+// that is not an image or a PDF is rejected by Cloudinary with
+// "Upload preset must allow unsigned uploads of this resource type".
+// ---------------------------------------------------------------------------
+
+// Cloudinary's own ceiling on a free unsigned upload is 10MB for raw files, so
+// a larger limit here would only turn a clear message into a failed request.
+export const ANY_FILE_MAX_SIZE = 10 * 1024 * 1024;
+
+/** "2.4 MB" / "812 KB" — for the size beside an attachment. */
+export const formatBytes = (bytes) => {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return Math.round(n / 1024) + " KB";
+  return (n / (1024 * 1024)).toFixed(1) + " MB";
+};
+
+export const uploadAnyFileToCloudinary = async (file) => {
+  if (!cloudName || !uploadPreset) {
+    throw new Error("Cloudinary environment variables missing");
+  }
+  if (!file) {
+    throw new Error("No file selected");
+  }
+  // A directory dragged into the picker, or an empty placeholder file, arrives
+  // with size 0 and uploads as a broken asset — catch it before the round trip.
+  if (file.size === 0) {
+    throw new Error(`"${file.name}" is empty`);
+  }
+  if (file.size > ANY_FILE_MAX_SIZE) {
+    throw new Error(
+      `"${file.name}" is ${formatBytes(file.size)} — the limit is ${formatBytes(ANY_FILE_MAX_SIZE)}`
+    );
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", uploadPreset);
+
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
+    { method: "POST", body: formData }
+  );
+
+  const responseText = await response.text();
+  let data;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    throw new Error(`Server returned: ${responseText}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message || `Upload failed with status ${response.status}`);
+  }
+
+  return {
+    url: data.secure_url,
+    publicId: data.public_id,
+    // Cloudinary's public_id is a random string, so the original filename is
+    // the only human-readable name the attachment will ever have. It is also
+    // what downloadUrlFor uses to name the saved file.
+    name: file.name,
+    format: data.format || file.type || "",
+    bytes: data.bytes || file.size,
+    resourceType: data.resource_type || "",
+  };
+};

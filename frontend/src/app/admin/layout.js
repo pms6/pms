@@ -26,6 +26,12 @@ import {
   Receipt,
   ListChecks,
   MapPin,
+  LogIn,
+  LogOut,
+  PiggyBank,
+  Table2,
+  Database,
+  Contact,
 } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 
@@ -59,6 +65,16 @@ const NAV = [
   { href: "/admin/live-location", label: "Live Location", icon: MapPin },
   { href: "/admin/tasks", label: "Task Management", icon: ListChecks },
   { href: "/admin/settings", label: "Account", icon: Settings },
+
+  // The registers that replace the office spreadsheets. Kept together and in
+  // lifecycle order — a tenant moves in, holds a deposit, moves out — but as
+  // plain entries like everything else above them.
+  { href: "/admin/client-database", label: "Client Database", icon: Database },
+  { href: "/admin/room-status", label: "Room Status List", icon: Table2 },
+  { href: "/admin/check-in", label: "Check-in", icon: LogIn },
+  { href: "/admin/reference-data", label: "Reference Data", icon: Contact },
+  { href: "/admin/deposit-register", label: "Deposit", icon: PiggyBank },
+  { href: "/admin/check-out", label: "Check-out", icon: LogOut },
 ];
 
 export default function AdminLayout({ children }) {

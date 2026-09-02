@@ -1,11 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Building2, Download, X, Bell, CalendarClock, FileText, Eye, ScrollText } from "lucide-react";
+import { Plus, Building2, Download, X, Bell, CalendarClock, FileText, Eye, ScrollText, Loader2, UploadCloud } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
 import api from "../../api/api";
-import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
+import {
+  uploadAnyFileToCloudinary,
+  downloadUrlFor,
+  formatBytes,
+} from "../../utils/uploadToCloudinary";
 import { ExpiryBadge } from "../../Components/PropertyContract";
+import { fileKind, kindLabel } from "../../Shared/fileType";
 
 const STATUS_TONE = { expired: "red", warning: "amber", valid: "green" };
 
@@ -14,11 +19,68 @@ const CATEGORIES = [
   "EICR",
   "EPC",
   "Fire Safety",
+  "Floor Plan",
   "Gas Safety",
   "HMO Licence",
   "PAT",
   "Smoke Detector Test"
 ];
+
+// Types that never expire — MUST stay in sync with NON_EXPIRING_TYPES in
+// backend/models/Compliance.js, and with the admin compliance page.
+//
+// A floor plan records the building, not a test with a result that goes stale,
+// so it carries no dates and sends no renewal reminders.
+const NON_EXPIRING = ["Floor Plan"];
+const expires = (type) => !NON_EXPIRING.includes(type);
+
+// Tone for the file-type chip on an attachment.
+const KIND_TONE = { image: "blue", pdf: "red", doc: "amber", other: "gray" };
+
+/** One attachment in the form — mirrors AttachmentRow on the admin page. */
+function AttachmentRow({ file, onRemove }) {
+  const kind = fileKind(file.url, file.name);
+  const label = file.name || file.url;
+  const size = formatBytes(file.bytes);
+
+  return (
+    <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
+      <FileText size={14} className="text-gray-400 shrink-0" />
+      <a
+        href={file.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sm font-medium text-[#0F253B] hover:text-[#F47C3C] truncate"
+        title={label}
+      >
+        {label}
+      </a>
+      <Badge tone={KIND_TONE[kind] || "gray"}>{kindLabel(file.url, file.name)}</Badge>
+      {size && <span className="text-[11px] text-gray-300 font-medium shrink-0">{size}</span>}
+      <div className="ml-auto flex items-center gap-1 shrink-0">
+        <a
+          href={downloadUrlFor(file.url, file.name)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="p-1.5 text-gray-400 hover:text-[#0F253B] hover:bg-gray-100 rounded-lg"
+          title="Download"
+        >
+          <Download size={14} />
+        </a>
+        {onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+            title="Remove"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // Contracts are not compliance certificates — they live on the Property record
 // (property.contract for the terms, property.documents[type=CONTRACT] for the
@@ -59,11 +121,17 @@ function ComplianceModal({ properties, onClose, onSave }) {
     reminderDaysBefore: "14",
     autoReminder: true,
     notes: "",
-    file: null
   });
+
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState([]);
+  const [uploadError, setUploadError] = useState("");
+  const [dragging, setDragging] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const dated = expires(form.type);
 
   const set = (k) => (e) => {
     const val = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -79,11 +147,62 @@ function ComplianceModal({ properties, onClose, onSave }) {
     });
   };
 
-  const handleFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      setForm({ ...form, file: e.target.files[0] });
-    }
+  /**
+   * Upload a batch of files of any type. Each goes up independently and is
+   * appended as it lands, so one rejected file does not lose the others.
+   */
+  const uploadFiles = async (picked) => {
+    const list = Array.from(picked || []);
+    if (!list.length) return;
+
+    setUploadError("");
+    setUploading((prev) => [...prev, ...list.map((f) => f.name)]);
+
+    const failures = [];
+
+    await Promise.all(
+      list.map(async (file) => {
+        try {
+          const up = await uploadAnyFileToCloudinary(file);
+          setFiles((prev) => [
+            ...prev,
+            {
+              name: up.name,
+              url: up.url,
+              publicId: up.publicId,
+              format: up.format,
+              bytes: up.bytes,
+              uploadedAt: new Date(),
+            },
+          ]);
+        } catch (err) {
+          failures.push(err.message || `${file.name} failed to upload`);
+        } finally {
+          // Remove one occurrence, not every match — two files picked from
+          // different folders can share a name.
+          setUploading((prev) => {
+            const i = prev.indexOf(file.name);
+            return i === -1 ? prev : [...prev.slice(0, i), ...prev.slice(i + 1)];
+          });
+        }
+      })
+    );
+
+    if (failures.length) setUploadError(failures.join(" · "));
   };
+
+  const onPickFiles = (e) => {
+    uploadFiles(e.target.files);
+    e.target.value = "";
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    uploadFiles(e.dataTransfer?.files);
+  };
+
+  const removeFile = (i) => setFiles((prev) => prev.filter((_, idx) => idx !== i));
 
   const onPropertyChange = (e) => {
     const propertyId = e.target.value;
@@ -94,13 +213,16 @@ function ComplianceModal({ properties, onClose, onSave }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!form.propertyId) { setError("Property is required"); return; }
-    if (!form.expiryDate) { setError("Expiry date is required"); return; }
+    // Only types that actually expire need a date; a floor plan has none.
+    if (dated && !form.expiryDate) { setError("Expiry date is required"); return; }
+    // Saving mid-upload would drop whatever has not landed yet.
+    if (uploading.length) { setError("Wait for the uploads to finish"); return; }
 
     setSaving(true);
     setError("");
 
     try {
-      await onSave(form);
+      await onSave({ ...form, files });
     } catch (err) {
       setError(err.message || "Failed to save compliance certificate");
     } finally {
@@ -144,20 +266,29 @@ function ComplianceModal({ properties, onClose, onSave }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className={LABEL}>Date Completed</label>
-              <input type="date" className={`${FIELD} px-2`} value={form.carriedOut} onChange={set("carriedOut")} required />
+          {/* A floor plan has no completion or expiry date, so the whole row
+              goes away rather than sitting there demanding one. */}
+          {dated ? (
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className={LABEL}>Date Completed</label>
+                <input type="date" className={`${FIELD} px-2`} value={form.carriedOut} onChange={set("carriedOut")} required />
+              </div>
+              <div>
+                <label className={LABEL}>Valid For (Months)</label>
+                <input type="number" min="1" className={FIELD} value={form.validityMonths} onChange={set("validityMonths")} placeholder="e.g. 3" />
+              </div>
+              <div>
+                <label className={LABEL}>Expiry Date</label>
+                <input type="date" className={`${FIELD} px-2`} value={form.expiryDate} onChange={set("expiryDate")} required />
+              </div>
             </div>
-            <div>
-              <label className={LABEL}>Valid For (Months)</label>
-              <input type="number" min="1" className={FIELD} value={form.validityMonths} onChange={set("validityMonths")} placeholder="e.g. 3" />
-            </div>
-            <div>
-              <label className={LABEL}>Expiry Date</label>
-              <input type="date" className={`${FIELD} px-2`} value={form.expiryDate} onChange={set("expiryDate")} required />
-            </div>
-          </div>
+          ) : (
+            <p className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-xs font-medium text-gray-500">
+              A {form.type.toLowerCase()} does not expire, so it needs no dates and sends no
+              renewal reminders. Attach the drawings below.
+            </p>
+          )}
 
           <div>
             <label className={LABEL}>Internal Administrative Notes</label>
@@ -165,13 +296,55 @@ function ComplianceModal({ properties, onClose, onSave }) {
           </div>
 
           <div>
-            <label className={LABEL}>Evidence Attachment (Files)</label>
-            <div className="border border-dashed border-gray-200 rounded-xl p-4 bg-gray-50/50 text-center hover:bg-gray-50 transition-colors relative cursor-pointer">
-              <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileChange} />
-              <p className="text-xs font-bold text-gray-500">
-                {form.file ? `Selected: ${form.file.name}` : "Choose PDF or Image (max 15MB)"}
-              </p>
+            <label className={LABEL}>
+              {dated ? "Evidence Attachments" : "Floor Plan Files"} — any file type
+            </label>
+
+            {uploadError && (
+              <div className="mb-2 p-2.5 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">
+                {uploadError}
+              </div>
+            )}
+
+            <div className="space-y-2 mb-2">
+              {files.map((f, i) => (
+                <AttachmentRow key={f.url + i} file={f} onRemove={() => removeFile(i)} />
+              ))}
+
+              {uploading.map((name) => (
+                <div key={name} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
+                  <Loader2 size={14} className="text-[#F47C3C] shrink-0 animate-spin" />
+                  <span className="text-sm font-medium text-gray-400 truncate">{name}</span>
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-widest text-gray-300">
+                    Uploading
+                  </span>
+                </div>
+              ))}
             </div>
+
+            <label
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              className={`flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 border-dashed cursor-pointer transition-all ${
+                dragging
+                  ? "border-[#F47C3C] bg-orange-50 text-[#F47C3C]"
+                  : "border-gray-200 bg-gray-50/50 text-gray-400 hover:bg-gray-50"
+              }`}
+            >
+              <UploadCloud size={18} />
+              <span className="text-xs font-bold text-center">
+                Drop files here, or click to choose — any file type, up to 10MB each
+              </span>
+              <input type="file" multiple className="hidden" onChange={onPickFiles} />
+            </label>
+
+            {files.length > 1 && (
+              <p className="mt-1.5 text-[11px] font-medium text-gray-400">
+                {files.length} files attached. The first is the one shown in the register and
+                linked from reminder emails.
+              </p>
+            )}
           </div>
 
           <div className="p-4 bg-orange-50/50 border border-orange-100 rounded-xl space-y-3">
@@ -281,18 +454,11 @@ export default function AdminCompliance() {
     loadData();
   }, [loadData]);
 
-  // Create Compliance with Cloudinary Upload
+  // Files are already uploaded by the time the modal submits, so this just
+  // hands the list over; the server derives fileUrl/fileName from its first
+  // entry.
   const createCompliance = async (formData) => {
     try {
-      let fileUrl = null;
-      let fileName = null;
-
-      if (formData.file) {
-        const uploadResult = await uploadFileToCloudinary(formData.file);
-        fileUrl = uploadResult.url;
-        fileName = uploadResult.name || formData.file.name;
-      }
-
       const payload = {
         propertyId: formData.propertyId,
         type: formData.type,
@@ -303,8 +469,7 @@ export default function AdminCompliance() {
         reminderDaysBefore: formData.reminderDaysBefore,
         autoReminder: formData.autoReminder,
         notes: formData.notes,
-        fileUrl,
-        fileName,
+        files: formData.files || [],
       };
 
       await api.post("/compliance", payload);
@@ -318,10 +483,10 @@ export default function AdminCompliance() {
   };
 
   const exportCSV = () => {
-    const headers = "Property,Type,Status,Carried Out,Expiry Date,Reminder Window\n";
+    const headers = "Property,Type,Status,Carried Out,Expiry Date,Reminder Window,Files\n";
     const rows = filteredRows
       .map((r) =>
-        `"${r.property}","${r.type}${r.subType ? ` > ${r.subType}` : ""}","${r.status}","${r.carriedOut || ""}","${r.expiryDate}","${r.reminderDaysBefore} days"`
+        `"${r.property}","${r.type}${r.subType ? ` > ${r.subType}` : ""}","${expires(r.type) ? r.status : "on file"}","${r.carriedOut || ""}","${r.expiryDate || "Does not expire"}","${expires(r.type) ? `${r.reminderDaysBefore} days` : "—"}","${r.files?.length ?? (r.fileUrl ? 1 : 0)}"`
       )
       .join("\n");
 
@@ -475,13 +640,24 @@ export default function AdminCompliance() {
                       {row.notes && <div className="text-[11px] text-gray-400 font-normal mt-0.5 max-w-xs truncate">{row.notes}</div>}
                     </td>
                     <td className="p-4">
-                      <Badge tone={STATUS_TONE[row.status] || "gray"}>{row.status}</Badge>
+                      {/* A type that cannot expire gets a neutral chip rather
+                          than a green "valid", which would imply a test that
+                          passed. */}
+                      {expires(row.type) ? (
+                        <Badge tone={STATUS_TONE[row.status] || "gray"}>{row.status}</Badge>
+                      ) : (
+                        <Badge tone="gray">on file</Badge>
+                      )}
                     </td>
                     <td className="p-4 text-xs text-gray-500">
                       {row.carriedOut ? new Date(row.carriedOut).toLocaleDateString("en-GB") : "—"}
                     </td>
                     <td className="p-4 text-xs font-bold text-red-600">
-                      {new Date(row.expiryDate).toLocaleDateString("en-GB")}
+                      {row.expiryDate ? (
+                        new Date(row.expiryDate).toLocaleDateString("en-GB")
+                      ) : (
+                        <span className="font-medium text-gray-300">Does not expire</span>
+                      )}
                     </td>
                     <td className="p-4 text-right">
                       {row.autoReminder ? (

@@ -10,6 +10,7 @@ import { getEffectiveRole, dashboardPathFor } from "../utils/roles";
 export default function RoleShell({
   role,
   portalLabel,
+  // A flat list of { href, label, icon }.
   nav = [],
   // Rendered in the top bar, left of the user chip. The agent portal puts its
   // live-location switch here so it is reachable from every page rather than
@@ -49,6 +50,26 @@ export default function RoleShell({
     );
   }
 
+  const navLink = ({ href, label, icon: Icon }) => {
+    const active = pathname === href || pathname.startsWith(href + "/");
+
+    return (
+      <Link
+        key={href}
+        href={href}
+        onClick={() => setIsOpen(false)}
+        className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition ${
+          active
+            ? "bg-[#F47C3C] text-white"
+            : "text-white/60 hover:text-white hover:bg-white/5"
+        }`}
+      >
+        <Icon size={18} />
+        {label}
+      </Link>
+    );
+  };
+
   const sidebarContent = (
     <>
       {/* Header */}
@@ -72,28 +93,7 @@ export default function RoleShell({
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-5 space-y-1">
-        {nav.map(({ href, label, icon: Icon }) => {
-          const active =
-            pathname === href || pathname.startsWith(href + "/");
-
-          return (
-            <Link
-              key={href}
-              href={href}
-              onClick={() => setIsOpen(false)}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition ${
-                active
-                  ? "bg-[#F47C3C] text-white"
-                  : "text-white/60 hover:text-white hover:bg-white/5"
-              }`}
-            >
-              <Icon size={18} />
-              {label}
-            </Link>
-          );
-        })}
-      </nav>
+      <nav className="flex-1 px-3 py-5 space-y-1">{nav.map(navLink)}</nav>
 
       {/* Logout */}
       <button

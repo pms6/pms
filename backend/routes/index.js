@@ -23,6 +23,12 @@ import taskRoutes from "./task.route.js"
 import voidPeriodRoutes from "./voidPeriod.Route.js"
 import agentLocationRoutes from "./agentLocation.Route.js"
 import internetDetailRoutes from "./internetDetail.route.js"
+import checkInRoutes from "./checkIn.route.js"
+import checkOutRoutes from "./checkOut.route.js"
+import depositRegisterRoutes from "./depositRegister.route.js"
+import roomStatusRoutes from "./roomStatus.route.js"
+import referenceDataRoutes from "./referenceData.route.js"
+import clientDatabaseRoutes from "./clientDatabase.route.js"
 
 const router = express.Router();
 
@@ -61,5 +67,15 @@ router.use("/audit", auditRoutes);
 router.use("/void-periods", voidPeriodRoutes);
 router.use("/agent-location", agentLocationRoutes);
 router.use("/internet-details", internetDetailRoutes);
+
+// Database — the operational registers that replace the office spreadsheets.
+// Check-in and check-out own their records; the deposit register and the room
+// status list are read-only views built across those records, Property and Room.
+router.use("/check-ins", checkInRoutes);
+router.use("/check-outs", checkOutRoutes);
+router.use("/reference-data", referenceDataRoutes);
+router.use("/deposit-register", depositRegisterRoutes);
+router.use("/room-status", roomStatusRoutes);
+router.use("/client-database", clientDatabaseRoutes);
 
 export default router;
