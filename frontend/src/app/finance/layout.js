@@ -2,6 +2,7 @@
 
 import { LayoutDashboard, CreditCard, UserPlus, CalendarClock, ShieldCheck, BarChart3, ListChecks, MapPin } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
+import LiveLocationToggle from "../Shared/LiveLocationToggle";
 
 // Invoices and Statements were removed rather than stubbed: this system has no
 // Invoice model — a rent charge IS the charge raised, and it lives on the Rent
@@ -20,8 +21,16 @@ const NAV = [
 
 export default function FinanceLayout({ children }) {
   return (
-    <RoleShell role="finance" portalLabel="Finance" nav={NAV}>
-      {children}
-    </RoleShell>
+    <RoleShell
+          role="finance"
+          portalLabel="Finance"
+          nav={NAV}
+          // In the header rather than on one page: sharing has to be switchable
+          // from wherever the agent happens to be, and visible enough that they
+          // always know it is on.
+          headerExtra={<LiveLocationToggle />}
+        >
+          {children}
+  </RoleShell>
   );
 }

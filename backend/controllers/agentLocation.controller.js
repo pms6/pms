@@ -1,27 +1,29 @@
 // controllers/agentLocation.controller.js
 //
-// Live location sharing for agents.
+// Live location sharing for the operation team.
 //
-// An agent turns sharing on with the toggle in their portal header, and the
-// browser then pings a position in every so often. The rest of the team sees
-// those positions on the Live Location page, and an hourly job emails them out.
+// An operation team member turns sharing on with the toggle in their portal
+// header, and the browser then pings a position in every so often. The rest
+// of the team — every staff seat, whatever their role — sees those positions
+// on the Live Location page, and an hourly job emails them out.
 //
 // Turning the toggle off is a hard stop: the position is cleared from the
-// record, the staff view drops the agent, and the hourly email skips them. That
-// is what makes the switch trustworthy to the person being tracked.
+// record, the staff view drops the sharer, and the hourly email skips them.
+// That is what makes the switch trustworthy to the person being tracked.
 import AgentLocation from "../models/AgentLocation.js";
 
 // How old a fix may be before the staff view calls it stale rather than live.
 // Twice the frontend's 5-minute ping interval, so one missed ping (a tunnel, a
-// locked phone) does not flip an agent to stale straight away.
+// locked phone) does not flip a sharer to stale straight away.
 export const STALE_AFTER_MS = 10 * 60 * 1000;
 
-// Only agents share a location. Everyone else on staff can read the board, but
+// Only OPERATION shares a location — they are the ones out at properties day
+// to day. Everyone else on staff (including AGENT) can read the board, but
 // the toggle is not theirs to flip — a manager broadcasting their own position
 // is a different feature with different consent questions.
-const SHARING_ROLE = "AGENT";
+const SHARING_ROLES = ["OPERATION"];
 
-const isAgent = (req) => req.user?.organizationRole === SHARING_ROLE;
+const canShareLocation = (req) => SHARING_ROLES.includes(req.user?.organizationRole);
 
 /** A stored row as the clients want it, with liveness derived on read. */
 export const shapeLocation = (doc, now = Date.now()) => {
@@ -41,7 +43,7 @@ export const shapeLocation = (doc, now = Date.now()) => {
     startedAt: doc.startedAt,
     ageMs,
     // A fix we have, but not a recent one. The board says "last seen" rather
-    // than pretending an hour-old position is where the agent is standing.
+    // than pretending an hour-old position is where they are standing now.
     stale: doc.active && (ageMs === null || ageMs > STALE_AFTER_MS),
     // Number.isFinite rather than a null check: a document written before
     // these fields existed has them undefined, and the boards call .toFixed()
@@ -51,17 +53,17 @@ export const shapeLocation = (doc, now = Date.now()) => {
 };
 
 /**
- * The agent's own sharing state, so the toggle renders in the right position on
- * a page load rather than flicking on after the first ping.
+ * The caller's own sharing state, so the toggle renders in the right position
+ * on a page load rather than flicking on after the first ping.
  *
  * @route GET /api/v1/agent-location/me
  */
 export const getMyLocationState = async (req, res) => {
   try {
-    if (!isAgent(req)) {
+    if (!canShareLocation(req)) {
       return res.status(403).json({
         success: false,
-        message: "Only an agent can share a live location.",
+        message: "Only an operation team member can share a live location.",
       });
     }
 
@@ -84,10 +86,10 @@ export const getMyLocationState = async (req, res) => {
  */
 export const toggleMyLocation = async (req, res) => {
   try {
-    if (!isAgent(req)) {
+    if (!canShareLocation(req)) {
       return res.status(403).json({
         success: false,
-        message: "Only an agent can share a live location.",
+        message: "Only an operation team member can share a live location.",
       });
     }
 
@@ -97,8 +99,8 @@ export const toggleMyLocation = async (req, res) => {
     const update = active
       ? { active: true, startedAt: now, stoppedAt: null }
       : // Switching off CLEARS the position rather than merely hiding it. A
-        // stored last-known location that outlives consent is the thing an
-        // agent would reasonably object to.
+        // stored last-known location that outlives consent is the thing the
+        // person sharing it would reasonably object to.
         {
           active: false,
           stoppedAt: now,
@@ -134,16 +136,16 @@ export const toggleMyLocation = async (req, res) => {
 
 /**
  * Record a position. Rejected unless sharing is currently on, so a stale tab
- * cannot keep feeding positions after the agent switched off.
+ * cannot keep feeding positions after sharing was switched off.
  *
  * @route POST /api/v1/agent-location/ping   body: { lat, lng, accuracy }
  */
 export const pingMyLocation = async (req, res) => {
   try {
-    if (!isAgent(req)) {
+    if (!canShareLocation(req)) {
       return res.status(403).json({
         success: false,
-        message: "Only an agent can share a live location.",
+        message: "Only an operation team member can share a live location.",
       });
     }
 
@@ -183,11 +185,12 @@ export const pingMyLocation = async (req, res) => {
 };
 
 /**
- * Every agent in the organization currently sharing. Readable by any staff
- * seat — the point of the feature is that the team can see where their agents
- * are — but never by a tenant, which the route's staffOnly guard enforces.
+ * Every operation team member in the organization currently sharing.
+ * Readable by any staff seat — the point of the feature is that the whole
+ * team can see where operation staff are — but never by a tenant, which the
+ * route's staffOnly guard enforces.
  *
- * Agents who have switched off are not returned at all, rather than returned
+ * Anyone who has switched off is not returned at all, rather than returned
  * with a flag: an "off" pin on a map is still a pin.
  *
  * @route GET /api/v1/agent-location
@@ -215,6 +218,6 @@ export const getActiveLocations = async (req, res) => {
     });
   } catch (error) {
     console.error("getActiveLocations error:", error);
-    return res.status(500).json({ success: false, message: "Failed to load agent locations." });
+    return res.status(500).json({ success: false, message: "Failed to load live locations." });
   }
 };

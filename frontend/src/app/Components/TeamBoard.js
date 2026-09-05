@@ -11,13 +11,14 @@ const ROLE_TONE = {
     OWNER: "bg-orange-100 text-orange-700",
     MANAGER: "bg-[#0F253B] text-white",
     AGENT: "bg-blue-100 text-blue-700",
-    FINANCE: "bg-green-100 text-green-700"
+    FINANCE: "bg-green-100 text-green-700",
+    OPERATION: "bg-purple-100 text-purple-700"
 };
 
 // Roles a team manager may hand out — must match ASSIGNABLE_ROLES in
 // backend/controllers/member.controller.js. OWNER is not in the list: there is
 // exactly one owner and that seat is not transferable from this screen.
-const ASSIGNABLE_ROLES = ["MANAGER", "AGENT", "FINANCE"];
+const ASSIGNABLE_ROLES = ["MANAGER", "AGENT", "FINANCE", "OPERATION"];
 
 const STATUS_TONE = {
     ACTIVE: "bg-green-100 text-green-700",
@@ -283,6 +284,7 @@ export default function TeamBoard() {
                                 <option value="AGENT">Agent</option>
                                 <option value="MANAGER">Manager</option>
                                 <option value="FINANCE">Finance</option>
+                                <option value="OPERATION">Operation</option>
                             </select>
                         </div>
 

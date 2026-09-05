@@ -14,13 +14,15 @@ import {
   getAvailableRoomsCount,
   getAvailableRooms,
 } from "../controllers/room.controller.js";
-import { protect } from "../middleware/auth.js";
+import { protect, staffOnly } from "../middleware/auth.js";
 
 const router = express.Router();
 
 
-// Apply protect middleware to all routes
-router.use(protect);
+// Rooms are an internal staff resource — a TENANT's organizationId (set by
+// `protect` from their own Tenant record) must not let them list, create,
+// edit or delete the organization's rooms.
+router.use(protect, staffOnly);
 
 // Room statistics
 router.get("/stats/available", getAvailableRoomsCount);

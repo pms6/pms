@@ -21,7 +21,8 @@ const organizationMemberSchema = new mongoose.Schema(
             "OWNER",
             "MANAGER",
             "AGENT",
-            "FINANCE"
+            "FINANCE",
+            "OPERATION"
         ],
         default:"AGENT"
     },

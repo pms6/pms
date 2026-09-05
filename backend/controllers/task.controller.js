@@ -10,27 +10,37 @@ import User from "../models/User.js";
 // Admin  = the organization OWNER. Only they may create, assign, reassign,
 //          reschedule, edit or delete a task. Assignment in particular is
 //          owner-only: no other role can put work on somebody.
-// Member = MANAGER / AGENT / FINANCE. They can READ every task in their own
-//          organization and COMMENT on any of them, so the team has one shared
-//          view of the work. What they cannot do is change a task: only the
-//          owner or an actual assignee may post a status update, and only the
-//          owner may assign.
+// Member = MANAGER / AGENT / FINANCE / OPERATION. They can read and comment on
+//          a task if they can SEE it (below). What they cannot do is change a
+//          task: only the owner or an actual assignee may post a status
+//          update, and only the owner may assign.
 //
-// The three tiers, in one place:
+// Visibility is not flat. A task assigned to a non-OPERATION member (e.g. an
+// AGENT) is a private matter between the owner and that assignee — nobody
+// else on staff sees it in the team list. A task with an OPERATION assignee
+// is different: operation work is cross-cutting, so it is visible to the
+// WHOLE organization, comment-only for everyone except the owner and the
+// operation assignee themselves. See `canView` / `hasOperationAssignee`.
 //
-//   action              OWNER   assignee   other staff   tenant
-//   ------------------  -----   --------   -----------   ------
-//   see task detail      yes      yes         yes          no
-//   comment              yes      yes         yes          no
-//   status update        yes      yes         no           no
-//   create / assign      yes      no          no           no
-//   edit / delete        yes      no          no           no
+// The tiers, in one place:
+//
+//   action              OWNER   assignee   other staff*   tenant
+//   ------------------  -----   --------   ------------   ------
+//   see task detail      yes      yes        yes/no†        no
+//   comment               yes      yes        yes/no†        no
+//   status update         yes      yes         no            no
+//   create / assign       yes      no          no            no
+//   edit / delete         yes      no          no            no
+//
+//   * "other staff" = staff who are not the owner and not an assignee.
+//   † yes only if the task has an OPERATION assignee; otherwise the task is
+//     invisible to them entirely (not merely read-only).
 //
 // protect() also resolves an organizationId for TENANT accounts from their own
 // Tenant record, so every handler must check the role and not merely the
 // presence of an organizationId.
 // ---------------------------------------------------------------------------
-const STAFF_ROLES = ["OWNER", "MANAGER", "AGENT", "FINANCE"];
+const STAFF_ROLES = ["OWNER", "MANAGER", "AGENT", "FINANCE", "OPERATION"];
 
 const isStaff = (req) =>
   req.user?.role === "Organization" && STAFF_ROLES.includes(req.user?.organizationRole);
@@ -125,7 +135,7 @@ const decorate = (task, req) => {
     // Viewer-relative. Absent `req` (nothing does that today) they default to
     // read-only, which is the safe direction for a permission flag.
     isMine: mine,
-    canComment: req ? isStaff(req) : false,
+    canComment: req ? canView(task, req) : false,
     canUpdateStatus: req ? canUpdateStatus(task, req) : false,
     canManage: req ? isAdmin(req) : false,
   };
@@ -203,12 +213,29 @@ const resolveAssignees = async (userIds, organizationId) => {
 const isAssignedTo = (task, userId) =>
   (task.assignees || []).some((a) => String(a.userId) === String(userId));
 
+// An OPERATION assignee is what makes a task organization-wide rather than
+// private to the owner and its assignees — see the visibility note above.
+const hasOperationAssignee = (task) =>
+  (task.assignees || []).some((a) => a.role === "OPERATION");
+
+/**
+ * May this caller see this task at all?
+ *
+ * The owner sees everything, and an assignee always sees their own task.
+ * Everyone else on staff sees it only if it has an OPERATION assignee —
+ * otherwise it does not exist for them, the same way another organization's
+ * task does not.
+ */
+const canView = (task, req) =>
+  isAdmin(req) || isAssignedTo(task, req.user._id) || hasOperationAssignee(task);
+
 /**
  * May this caller post a STATUS update on this task?
  *
  * The owner can move any task; an assignee can move their own. Everybody else
- * on the team is limited to comments, which is what keeps a task visible to the
- * whole organization without becoming editable by it.
+ * who can see the task (an OPERATION-assigned one, org-wide) is limited to
+ * comments, which is what keeps that visibility without making the task
+ * editable by the whole team.
  */
 const canUpdateStatus = (task, req) => isAdmin(req) || isAssignedTo(task, req.user._id);
 
@@ -260,12 +287,14 @@ export const getAssignableMembers = async (req, res) => {
 };
 
 // ===========================================================================
-// Every task in the organization, with filters.
+// Every task the caller may SEE, with filters.
 //
-// Open to ALL staff, not just the owner: the team shares one view of the work,
-// so an agent can open a task that sits with somebody else and comment on it.
-// What they still cannot do is change it — the per-row canUpdateStatus /
-// canManage flags say so, and the write endpoints enforce it independently.
+// Open to all staff, but not to the whole task table: the owner gets
+// everything, and everyone else gets their own assigned tasks plus any task
+// with an OPERATION assignee — operation work is cross-cutting, so it is
+// visible organization-wide, comment-only for everyone but the owner and the
+// operation assignee. A task assigned only to, say, an AGENT stays private to
+// the owner and that agent. See `canView`.
 //
 // @route GET /api/v1/tasks
 // ===========================================================================
@@ -286,8 +315,11 @@ export const getTasks = async (req, res) => {
     }
 
     const tasks = await Task.find(filter).sort({ dueDate: 1, createdAt: -1 }).lean();
+    // Visibility BEFORE decorating: a task that fails canView must not leak
+    // through decorate's flags, counts or last-touched preview.
+    const visible = tasks.filter((t) => canView(t, req));
     // Not `.map(decorate)` — map would pass the array index as the viewer.
-    let data = tasks.map((t) => decorate(t, req));
+    let data = visible.map((t) => decorate(t, req));
 
     // Status is filtered AFTER decorating, because "Overdue" is derived and so
     // cannot be expressed as a query on the stored field.
@@ -442,9 +474,10 @@ export const getTaskStats = async (req, res) => {
 // ===========================================================================
 // One task, in full, including its whole progress and comment history.
 //
-// Any staff member of the organization may open any of its tasks. The
-// organizationId in the query is the tenant-isolation boundary and still holds:
-// a task belonging to another organization is simply not found.
+// The owner, an assignee, or — if it has an OPERATION assignee — any staff
+// member may open it; see `canView`. Everyone else gets the same 404 as a
+// task belonging to another organization: it does not exist for them, not
+// merely "no access".
 //
 // @route GET /api/v1/tasks/:id
 // ===========================================================================
@@ -461,7 +494,9 @@ export const getTaskById = async (req, res) => {
       isDeleted: false,
     }).lean();
 
-    if (!task) return res.status(404).json({ success: false, message: "Task not found." });
+    if (!task || !canView(task, req)) {
+      return res.status(404).json({ success: false, message: "Task not found." });
+    }
 
     return res.status(200).json({ success: true, data: decorate(task, req) });
   } catch (error) {
@@ -732,8 +767,9 @@ export const deleteTask = async (req, res) => {
 // ===========================================================================
 // Append to a task's timeline. Two kinds of entry come through here:
 //
-//   kind "comment" — ANY staff member of the organization, on ANY task. Carries
-//                    no status, so it cannot move the work; it is discussion.
+//   kind "comment" — anyone who can SEE the task (the owner, an assignee, or
+//                    any staff member when it has an OPERATION assignee).
+//                    Carries no status, so it cannot move the work.
 //   kind "update"  — the owner on any task, an assignee on their own. Moves the
 //                    task to a status and can be flagged as a formal report.
 //
@@ -755,7 +791,9 @@ export const addTaskProgress = async (req, res) => {
       organizationId: req.user.organizationId,
       isDeleted: false,
     });
-    if (!task) return res.status(404).json({ success: false, message: "Task not found." });
+    if (!task || !canView(task, req)) {
+      return res.status(404).json({ success: false, message: "Task not found." });
+    }
 
     const { status, remark, attachments, isReport } = req.body;
 

@@ -6,21 +6,22 @@ import api from "../api/api";
 
 // How often a position is sent while sharing is on. The server calls a fix
 // stale after 10 minutes, so this leaves room for one missed ping (a tunnel, a
-// locked screen) before the team's board flags the agent as out of date.
+// locked screen) before the team's board flags the sharer as out of date.
 const PING_INTERVAL_MS = 5 * 60 * 1000;
 
 const GEO_OPTIONS = { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 };
 
 /**
- * The agent's live-location switch, shown in the agent portal header.
+ * The live-location switch, shown in the operation portal header — only
+ * OPERATION shares a location (see backend/controllers/agentLocation.controller.js).
  *
  * On: the browser is asked for a position now and every five minutes after,
  * and each one is posted to the server, where the rest of the team can see it.
  * Off: one call to the server, which clears the stored position — the team's
- * board drops the agent and the hourly email stops mentioning them.
+ * board drops them and the hourly email stops mentioning them.
  *
- * The browser permission prompt is the real gate. If the agent refuses it, or
- * revokes it later, sharing is switched back off rather than left showing "on"
+ * The browser permission prompt is the real gate. If they refuse it, or
+ * revoke it later, sharing is switched back off rather than left showing "on"
  * with nothing behind it.
  */
 export default function LiveLocationToggle() {
@@ -31,7 +32,7 @@ export default function LiveLocationToggle() {
   const [lastPingAt, setLastPingAt] = useState(null);
 
   const timerRef = useRef(null);
-  // Guards against a ping that resolves after the agent has switched off — the
+  // Guards against a ping that resolves after they have switched off — the
   // Geolocation callback can fire long after the request was made.
   const activeRef = useRef(false);
 
@@ -58,7 +59,7 @@ export default function LiveLocationToggle() {
           setLastPingAt(new Date());
           setError("");
         } catch {
-          // A failed ping is not worth alarming the agent about — the next one
+          // A failed ping is not worth alarming the person sharing about — the next one
           // is five minutes away and the board shows the fix going stale.
         }
       },
@@ -86,7 +87,7 @@ export default function LiveLocationToggle() {
   }, [sendPosition]);
 
   // Restore the switch on a page load, so a reload does not silently stop a
-  // share the agent believes is still running.
+  // share they believe is still running.
   useEffect(() => {
     let cancelled = false;
 
@@ -99,7 +100,7 @@ export default function LiveLocationToggle() {
         activeRef.current = on;
         if (on) startTimer();
       } catch {
-        // Not an agent, or the endpoint is unreachable — leave the switch off.
+        // Not able to share a location, or the endpoint is unreachable — leave the switch off.
       } finally {
         if (!cancelled) setLoaded(true);
       }
@@ -145,7 +146,7 @@ export default function LiveLocationToggle() {
   };
 
   // Nothing until the current state is known, so the button cannot flash "off"
-  // at an agent who is in fact sharing.
+  // at someone who is in fact sharing.
   if (!loaded) return null;
 
   return (

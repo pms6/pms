@@ -6,7 +6,7 @@ import { PageHeader } from "./ui";
 import { nameFromEmail } from "./creator";
 import api from "../api/api";
 
-// The board polls rather than holding a socket open: an agent pings every five
+// The board polls rather than holding a socket open: a sharer pings every five
 // minutes, so anything faster than this would mostly re-fetch the same fixes.
 const REFRESH_MS = 60 * 1000;
 
@@ -28,16 +28,15 @@ function ago(ms) {
 }
 
 /**
- * Where the organization's agents are, for every staff seat that is not the
- * agent themselves.
+ * Where the organization's operation team is, visible to every staff seat.
  *
- * Only agents with sharing switched ON appear. An agent who switches off
- * vanishes from this list entirely — there is no "last known position" left
- * behind, because the server clears it.
+ * Only operation team members with sharing switched ON appear. Someone who
+ * switches off vanishes from this list entirely — there is no "last known
+ * position" left behind, because the server clears it.
  */
 export default function LiveLocationBoard({
   title = "Live Location",
-  subtitle = "Agents currently sharing their position",
+  subtitle = "Operation team members currently sharing their position",
 }) {
   const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -53,13 +52,13 @@ export default function LiveLocationBoard({
       setLocations(data);
       setRefreshedAt(new Date());
       setError("");
-      // Keep the open map on the same agent across refreshes; drop it if they
+      // Keep the open map on the same person across refreshes; drop it if they
       // have stopped sharing.
       setSelected((cur) =>
         cur && data.some((l) => String(l.userId) === String(cur)) ? cur : null
       );
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to load agent locations");
+      setError(err.response?.data?.message || "Failed to load live locations");
     } finally {
       if (!quiet) setLoading(false);
     }
@@ -102,9 +101,10 @@ export default function LiveLocationBoard({
       ) : locations.length === 0 ? (
         <div className="text-center py-20 bg-white border border-gray-100 rounded-2xl">
           <MapPin size={30} className="mx-auto text-gray-200 mb-3" />
-          <p className="font-bold text-[#0F253B]">No agent is sharing right now</p>
+          <p className="font-bold text-[#0F253B]">No one is sharing right now</p>
           <p className="text-sm text-gray-400 font-medium mt-1">
-            An agent appears here as soon as they switch their live location on.
+            An operation team member appears here as soon as they switch their live
+            location on.
           </p>
         </div>
       ) : (
@@ -131,7 +131,7 @@ export default function LiveLocationBoard({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="font-bold text-[#0F253B] text-sm truncate">
-                        {nameFromEmail(l.email) || "Agent"}
+                        {nameFromEmail(l.email) || "Team member"}
                       </p>
                       <p className="text-[11px] text-gray-400 font-medium truncate" title={l.email}>
                         {l.email}
@@ -180,7 +180,7 @@ export default function LiveLocationBoard({
                 <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-50">
                   <div className="min-w-0">
                     <p className="font-bold text-[#0F253B] text-sm truncate">
-                      {nameFromEmail(shown.email) || "Agent"}
+                      {nameFromEmail(shown.email) || "Team member"}
                     </p>
                     <p className="text-[11px] text-gray-400 font-medium">{ago(shown.ageMs)}</p>
                   </div>
@@ -207,7 +207,7 @@ export default function LiveLocationBoard({
                 <MapPin size={28} className="text-gray-200 mb-3" />
                 <p className="font-bold text-[#0F253B] text-sm">No position yet</p>
                 <p className="text-sm text-gray-400 font-medium mt-1">
-                  Sharing is on, but no fix has come through from the agent&apos;s device.
+                  Sharing is on, but no fix has come through from their device.
                 </p>
               </div>
             )}

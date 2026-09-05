@@ -79,7 +79,7 @@ export const protect = async (req, res, next) => {
 // organizationId for a tenant from their Tenant record, so a handler that only
 // checks for organizationId would hand a tenant the org's internal data — the
 // role has to be checked too.
-const STAFF_ROLES = ["OWNER", "MANAGER", "AGENT", "FINANCE"];
+const STAFF_ROLES = ["OWNER", "MANAGER", "AGENT", "FINANCE", "OPERATION"];
 
 export const staffOnly = (req, res, next) => {
   const isStaff =

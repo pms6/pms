@@ -92,7 +92,7 @@ export default function MyTasks({ portalLabel = "your" }) {
         title="Tasks"
         subtitle={
           team
-            ? "Every task across the team — open any one to read its history and comment"
+            ? "Tasks assigned to you, plus any task assigned to Operation — open one to read its history and comment"
             : "Work assigned to you — update progress and report back to the admin"
         }
       />

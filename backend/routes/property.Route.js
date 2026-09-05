@@ -10,12 +10,14 @@ import {
   updatePropertyStatus,
   getPropertyStats,
 } from "../controllers/property.controller.js";
-import { protect } from "../middleware/auth.js";
+import { protect, staffOnly } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// Apply protect middleware to all routes
-router.use(protect);
+// Properties are an internal staff resource — a TENANT's organizationId (set
+// by `protect` from their own Tenant record) must not let them list, create,
+// edit or delete the organization's properties.
+router.use(protect, staffOnly);
 
 // Property statistics
 router.get("/stats", getPropertyStats);

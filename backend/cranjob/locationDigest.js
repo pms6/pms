@@ -1,11 +1,12 @@
 // cranjob/locationDigest.js
 //
-// Hourly digest of where the organization's agents are.
+// Hourly digest of where the organization's operation team is.
 //
 // Runs on the hour and mails every ACTIVE member of each organization that has
-// at least one agent sharing. An agent who has switched the toggle off is not
-// in the query at all, so no email mentions them — switching off means no
-// visibility and no mail, which is the whole promise of the switch.
+// at least one operation team member sharing. Anyone who has switched the
+// toggle off is not in the query at all, so no email mentions them —
+// switching off means no visibility and no mail, which is the whole promise
+// of the switch.
 //
 // Organizations with nobody sharing get no email. A quiet hour should be quiet.
 import AgentLocation from "../models/AgentLocation.js";
@@ -17,7 +18,7 @@ import { sendEmail } from "../utils/sendEmail.js";
 // manual trigger cannot double-send.
 const RESEND_GUARD_MS = 55 * 60 * 1000;
 
-const nameFromEmail = (email) => (email ? String(email).split("@")[0] : "an agent");
+const nameFromEmail = (email) => (email ? String(email).split("@")[0] : "a team member");
 
 const mapsLink = (lat, lng) =>
   `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
@@ -59,27 +60,27 @@ const row = (loc, now) => {
 
 const digestHtml = (locations, now) => `
   <div style="font-family:sans-serif;max-width:640px;padding:20px;border:1px solid #e0e0e0;border-radius:8px;">
-    <h2 style="color:#0F253B;margin:0 0 4px;">Agent live locations</h2>
+    <h2 style="color:#0F253B;margin:0 0 4px;">Operation live locations</h2>
     <p style="color:#666;font-size:13px;margin:0 0 16px;">
-      ${locations.length} agent${locations.length === 1 ? "" : "s"} sharing as of
+      ${locations.length} operation team member${locations.length === 1 ? "" : "s"} sharing as of
       ${new Date(now).toLocaleString("en-GB")}.
     </p>
     <table style="width:100%;border-collapse:collapse;font-size:14px;">
       <tr style="text-align:left;color:#999;font-size:11px;text-transform:uppercase;letter-spacing:1px;">
-        <th style="padding:0 8px 6px;">Agent</th>
+        <th style="padding:0 8px 6px;">Operation</th>
         <th style="padding:0 8px 6px;">Position</th>
         <th style="padding:0 8px 6px;">Last fix</th>
       </tr>
       ${locations.map((l) => row(l, now)).join("")}
     </table>
     <p style="font-size:11px;color:#999;margin-top:16px;">
-      Agents appear here only while their live location toggle is on. This email stops
-      as soon as they switch it off.
+      Operation team members appear here only while their live location toggle is on.
+      This email stops as soon as they switch it off.
     </p>
   </div>`;
 
 /**
- * Send one digest per organization that has agents sharing.
+ * Send one digest per organization that has operation team members sharing.
  *
  * @returns {Promise<{sentCount:number, skipped:number, organizations:number, errors:Array}>}
  */
@@ -89,8 +90,8 @@ export const sendAllLocationDigests = async () => {
   try {
     const active = await AgentLocation.find({ active: true }).lean();
 
-    // Group by organization so a team gets ONE email listing every agent, not
-    // one email per agent.
+    // Group by organization so a team gets ONE email listing every sharer, not
+    // one email per person.
     const byOrg = new Map();
     for (const loc of active) {
       const key = String(loc.organizationId);
@@ -121,7 +122,7 @@ export const sendAllLocationDigests = async () => {
         await sendEmail({
           email: to,
           cc,
-          subject: `Agent live locations — ${locations.length} sharing`,
+          subject: `Operation live locations — ${locations.length} sharing`,
           html: digestHtml(locations, now),
         });
 

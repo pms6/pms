@@ -10,11 +10,12 @@ export const ROLE_DASHBOARD = {
   manager: "/manager/dashboard",
   agent: "/agent/dashboard",
   finance: "/finance/dashboard",
+  operation: "/operation/dashboard",
   tenant: "/tenant/dashboard",
 };
 
 // The effective role used for routing + guards:
-// "organization" | "manager" | "agent" | "finance" | "tenant" | null
+// "organization" | "manager" | "agent" | "finance" | "operation" | "tenant" | null
 export function getEffectiveRole(user) {
   if (!user) return null;
   const base = (user.role || "").toLowerCase();
@@ -28,6 +29,8 @@ export function getEffectiveRole(user) {
         return "agent";
       case "FINANCE":
         return "finance";
+      case "OPERATION":
+        return "operation";
       case "OWNER":
       default:
         return "organization"; // owner uses the admin area

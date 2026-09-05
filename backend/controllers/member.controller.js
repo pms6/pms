@@ -14,7 +14,7 @@ const canManageTeam = (req) =>
 // Roles a team manager may hand out. OWNER is deliberately absent: an
 // organization has exactly one owner and transferring that seat is a different
 // operation, so it must never be reachable from a role dropdown.
-const ASSIGNABLE_ROLES = ["MANAGER", "AGENT", "FINANCE"];
+const ASSIGNABLE_ROLES = ["MANAGER", "AGENT", "FINANCE", "OPERATION"];
 
 // Shared guard for every role change. Returns an { status, message } problem to
 // send back, or null when the change is allowed.

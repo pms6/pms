@@ -1,11 +1,11 @@
 import mongoose from "mongoose";
 
-// One row per agent, created the first time they turn sharing on and reused
-// after that — the toggle flips `active` rather than creating a new record, so
-// there is exactly one place to read an agent's current position from.
+// One row per operation team member, created the first time they turn sharing on
+// and reused after that — the toggle flips `active` rather than creating a new
+// record, so there is exactly one place to read their current position from.
 //
 // Nothing here is history: only the LATEST fix is kept. Sharing a live position
-// is meant to answer "where is this agent now", and keeping a trail would turn
+// is meant to answer "where is this person now", and keeping a trail would turn
 // a convenience into a movement log nobody asked for.
 const agentLocationSchema = new mongoose.Schema(
   {
@@ -26,7 +26,7 @@ const agentLocationSchema = new mongoose.Schema(
 
     // Denormalised so the staff map renders without populating User and
     // OrganizationMember for every pin, and so the hourly email can name the
-    // agent even after they leave the team.
+    // sharer even after they leave the team.
     email: { type: String, trim: true, lowercase: true, default: "" },
     role: { type: String, trim: true, default: "" },
 
@@ -34,7 +34,7 @@ const agentLocationSchema = new mongoose.Schema(
     // hourly email skips them entirely.
     active: { type: Boolean, default: false, index: true },
 
-    // Latest fix. Null whenever the agent has turned sharing on but the browser
+    // Latest fix. Null whenever they have turned sharing on but the browser
     // has not returned a position yet.
     lat: { type: Number, default: null },
     lng: { type: Number, default: null },
@@ -42,7 +42,7 @@ const agentLocationSchema = new mongoose.Schema(
     accuracy: { type: Number, default: null },
 
     // When that fix arrived. Distinct from `updatedAt`, which also moves when
-    // the agent merely toggles sharing off.
+    // they merely toggle sharing off.
     lastPingAt: { type: Date, default: null },
 
     startedAt: { type: Date, default: null },
