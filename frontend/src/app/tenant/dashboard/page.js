@@ -15,9 +15,11 @@ const fmtDate = (d) =>
 
 // Maintenance status → presentation.
 const MR_STATUS = {
+  pending: { label: "pending", tone: "amber" },
   open: { label: "open", tone: "amber" },
   assigned: { label: "assigned", tone: "blue" },
   in_progress: { label: "in progress", tone: "amber" },
+  sorted: { label: "sorted", tone: "green" },
   closed: { label: "closed", tone: "green" },
 };
 

@@ -3,14 +3,14 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Search, ListChecks, Circle, PlayCircle, CheckCircle2, AlertTriangle,
-  CalendarClock, Paperclip, MessageSquare, UserRound, Users,
+  CalendarClock, CalendarDays, Paperclip, MessageSquare, UserRound, Users,
 } from "lucide-react";
 import { PageHeader } from "./ui";
 import api from "@/app/api/api";
 import TaskDetail from "./TaskDetail";
 import {
   TASK_PRIORITIES, PRIORITY_TONE, STATUS_TONE, PRIORITY_DOT,
-  fmtDate, fmtDateTime, displayName, dueLabel,
+  fmtDateTime, displayName, dueLabel,
 } from "./tasks";
 
 // Keys are matched against a task's effectiveStatus, so the completed tab is
@@ -92,7 +92,7 @@ export default function MyTasks({ portalLabel = "your" }) {
         title="Tasks"
         subtitle={
           team
-            ? "Tasks assigned to you, plus any task assigned to Operation — open one to read its history and comment"
+            ? "Every task across the team — open any one to read its history and comment"
             : "Work assigned to you — update progress and report back to the admin"
         }
       />
@@ -232,12 +232,21 @@ export default function MyTasks({ portalLabel = "your" }) {
                     </span>
                   </p>
                 )}
+                {/* Members were only shown the due DATE, so a task due at
+                    9am and one due at 5pm read identically. Both dates now
+                    carry their time, on the same UK clock the admin set. */}
+                {t.startDate && (
+                  <p className="flex items-center gap-1.5 text-[11px] font-medium text-gray-400">
+                    <CalendarDays size={12} className="text-gray-300 shrink-0" />
+                    Starts {fmtDateTime(t.startDate)}
+                  </p>
+                )}
                 <p className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500">
                   <CalendarClock size={12} className={t.effectiveStatus === "Overdue" ? "text-red-500" : "text-[#F47C3C]"} />
-                  {fmtDate(t.dueDate)}
-                  <span className={t.effectiveStatus === "Overdue" ? "text-red-600" : "text-gray-400"}>
-                    · {dueLabel(t)}
-                  </span>
+                  {t.dueDate ? `Due ${fmtDateTime(t.dueDate)}` : "No due date"}
+                </p>
+                <p className={`text-[11px] font-bold pl-[18px] ${t.effectiveStatus === "Overdue" ? "text-red-600" : "text-gray-400"}`}>
+                  {dueLabel(t)}
                 </p>
                 <div className="flex items-center gap-3 text-[10px] font-bold text-gray-400">
                   <span className="flex items-center gap-1">

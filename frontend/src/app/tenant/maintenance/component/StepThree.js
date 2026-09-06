@@ -1,5 +1,7 @@
-import uploadToCloudinary from '@/app/utils/uploadToCloudinary';
+import { uploadMediaToCloudinary } from '@/app/utils/uploadToCloudinary';
+import { toast } from 'react-toastify';
 import React from 'react';
+import { isVideoFile } from './StepTwo';
 
 export default function StepThree({ formData = {}, setFormData, onBack, onSubmit, loading }) {
 
@@ -11,13 +13,19 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
 
   const handleAddPhotos = async (e) => {
     const files = Array.from(e.target.files);
+    e.target.value = "";
 
     const uploaded = [];
 
     for (const file of files) {
-      const result = await uploadToCloudinary(file);
-      uploaded.push(result.url);
+      try {
+        uploaded.push(await uploadMediaToCloudinary(file));
+      } catch (error) {
+        toast.error(error.message || `Could not upload "${file.name}"`);
+      }
     }
+
+    if (!uploaded.length) return;
 
     setFormData({
       ...formData,
@@ -120,11 +128,19 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
                       key={index}
                       className="relative w-full aspect-square rounded-xl overflow-hidden border border-gray-200 group"
                     >
-                      <img
-                        src={typeof photo === "string" ? photo : photo.url}
-                        alt="repair"
-                        className="w-full h-full object-cover"
-                      />
+                      {isVideoFile(photo) ? (
+                        <video
+                          src={typeof photo === "string" ? photo : photo.url}
+                          controls
+                          className="w-full h-full object-cover bg-black"
+                        />
+                      ) : (
+                        <img
+                          src={typeof photo === "string" ? photo : photo.url}
+                          alt="repair"
+                          className="w-full h-full object-cover"
+                        />
+                      )}
 
                       <button
                         onClick={() => handleRemovePhoto(index)}
@@ -141,7 +157,7 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
                     <input
                       type="file"
                       multiple
-                      accept="image/*"
+                      accept="image/*,video/*"
                       onChange={handleAddPhotos}
                       className="hidden"
                     />
@@ -150,7 +166,7 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
                 </div>
 
                 <p className="text-[11px] text-gray-400">
-                  {formData.photos?.length || 0} photos attached (optional)
+                  {formData.photos?.length || 0} photos / videos attached (optional)
                 </p>
 
               </div>

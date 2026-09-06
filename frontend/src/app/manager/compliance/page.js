@@ -18,6 +18,7 @@ const CATEGORIES = [
   "Carbon Monoxide Check",
   "EICR",
   "EPC",
+  "Fire Alarm Servicing",
   "Fire Safety",
   "Floor Plan",
   "Gas Safety",

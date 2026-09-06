@@ -47,10 +47,22 @@ export default function MaintenanceForm() {
   // ✅ SUBMIT API — create the maintenance request for the signed-in tenant.
   // The backend stamps the tenant's property/room/name automatically.
   const submitMaintenance = async () => {
-    // Collect resolved photo URLs (skip any local blob previews still uploading).
-    const photoUrls = (formData.photos || [])
-      .map((p) => (typeof p === 'string' ? p : p?.url))
-      .filter((u) => u && !u.startsWith('blob:'));
+    // Collect the uploaded attachments (skip any local blob previews still
+    // uploading). Older entries store a single cover photo in `image`, so send
+    // both — the backend keeps them in step.
+    const media = (formData.photos || [])
+      .map((p) => (typeof p === 'string' ? { url: p, type: 'image' } : p))
+      .filter((p) => p?.url && !p.url.startsWith('blob:'))
+      .map(({ url, publicId, name, type, format, bytes }) => ({
+        url,
+        publicId: publicId || '',
+        name: name || '',
+        type: type === 'video' ? 'video' : 'image',
+        format: format || '',
+        bytes: bytes || 0,
+      }));
+
+    const coverPhoto = media.find((p) => p.type === 'image')?.url || '';
 
     // Fold the extra contact fields into the description (the model has no
     // dedicated columns for them).
@@ -69,7 +81,8 @@ export default function MaintenanceForm() {
         category: formData.category || 'General',
         description: detail,
         priority: PRIORITY_MAP[formData.priority] || 'med',
-        image: photoUrls[0] || '',
+        media,
+        image: coverPhoto,
         ...(formData.issueStarted ? { date: formData.issueStarted } : {}),
       });
       setSubmitted(true);

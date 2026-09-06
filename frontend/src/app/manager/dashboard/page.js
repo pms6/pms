@@ -29,7 +29,7 @@ export default function ManagerDashboard() {
         const [propsRes, roomsRes, maintRes, compRes] = await Promise.all([
           api.get("/properties", { params: { limit: 50 } }),
           api.get("/rooms"), // or /rooms/stats if available
-          api.get("/maintenance", { params: { status: "open", limit: 5 } }),
+          api.get("/maintenance", { params: { open: 1, limit: 5 } }),
           api.get("/compliance", { params: { due: "soon", limit: 5, sort: "expiryDate" } }),
         ]);
 

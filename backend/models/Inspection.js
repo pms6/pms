@@ -14,6 +14,24 @@ const photoSchema = new mongoose.Schema(
   { _id: true }
 );
 
+// What kind of visit it is. The last four name the inspecting party — a visit
+// is filed under whoever carried it out.
+// MUST stay in sync with INSPECTION_TYPES in
+// frontend/src/app/admin/Inspection/page.js.
+export const INSPECTION_TYPES = [
+  "ROUTINE",
+  "MAINTENANCE",
+  "MOVE_IN",
+  "MOVE_OUT",
+  "SAFETY",
+  "COMPLIANCE",
+  "OTHER",
+  "COUNCIL",
+  "LANDLORD",
+  "EXTERNAL",
+  "SELF_INSPECTION",
+];
+
 const inspectionSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -40,7 +58,7 @@ const inspectionSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ["ROUTINE", "MAINTENANCE", "MOVE_IN", "MOVE_OUT", "SAFETY", "COMPLIANCE", "OTHER"],
+      enum: INSPECTION_TYPES,
       required: true,
     },
 

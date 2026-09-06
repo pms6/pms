@@ -1,7 +1,12 @@
 "use client"
-import uploadToCloudinary from '@/app/utils/uploadToCloudinary';
+import { uploadMediaToCloudinary } from '@/app/utils/uploadToCloudinary';
 import React, { useState } from 'react';
 import { toast } from 'react-toastify';
+
+// A clip of a dripping pipe says more than a still of a damp patch, so the
+// picker takes video as well as photos.
+export const isVideoFile = (item) =>
+  item?.type === 'video' || /\.(mp4|mov|webm|m4v)(\?|$)/i.test(item?.url || '');
 
 export default function StepTwo({ formData, setFormData, onNext, onBack }) {
   const [uploading, setUploading] = useState(false);
@@ -60,34 +65,41 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
       for (const file of files) {
         // 👇 temporary preview (instant UI)
         const tempUrl = URL.createObjectURL(file);
+        const type = file.type.startsWith("video/") ? "video" : "image";
 
         const tempId = Date.now() + Math.random();
 
-        // add temporary loading image
+        // add temporary loading item
         setFormData((prev) => ({
           ...prev,
           photos: [
             ...(prev.photos || []),
-            { url: tempUrl, loading: true, id: tempId },
+            { url: tempUrl, type, name: file.name, loading: true, id: tempId },
           ],
         }));
 
-        // upload to cloudinary
-        const result = await uploadToCloudinary(file);
+        try {
+          // upload to cloudinary
+          const result = await uploadMediaToCloudinary(file);
 
-        // replace temp with real image
-        setFormData((prev) => ({
-          ...prev,
-          photos: prev.photos.map((p) =>
-            p.id === tempId
-              ? { url: result.url, loading: false, id: tempId }
-              : p
-          ),
-        }));
+          // replace temp with the delivered asset
+          setFormData((prev) => ({
+            ...prev,
+            photos: prev.photos.map((p) =>
+              p.id === tempId ? { ...result, loading: false, id: tempId } : p
+            ),
+          }));
+        } catch (error) {
+          // Drop the failed preview rather than leaving a spinner behind, and
+          // name the file so the tenant knows which one to retry.
+          console.error(error);
+          toast.error(error.message || `Could not upload "${file.name}"`);
+          setFormData((prev) => ({
+            ...prev,
+            photos: prev.photos.filter((p) => p.id !== tempId),
+          }));
+        }
       }
-    } catch (error) {
-      console.error(error);
-      toast.error("Upload failed");
     } finally {
       setUploading(false);
     }
@@ -261,7 +273,7 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
                   <input
                     type="file"
                     multiple
-                    accept="image/*"
+                    accept="image/*,video/*"
                     onChange={handleFileUpload}
                     className="hidden"
                     id="photoUpload"
@@ -276,7 +288,7 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
                     </p>
 
                     <p className="text-[9px] text-gray-400">
-                      JPG, PNG, HEIC · Max 10MB each
+                      JPG, PNG, HEIC up to 10MB · MP4, MOV up to 100MB
                     </p>
 
                   </label>
@@ -290,13 +302,22 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
                     {formData.photos.map((photo, index) => (
                       <div key={index} className="relative group">
 
-                        {/* Image */}
-                        <img
-                          src={photo.url || photo}
-                          alt="uploaded"
-                          className={`w-full h-24 object-cover rounded-lg transition 
+                        {/* Image or video */}
+                        {isVideoFile(photo) ? (
+                          <video
+                            src={photo.url || photo}
+                            controls={!photo.loading}
+                            className={`w-full h-24 object-cover rounded-lg bg-black transition
                             ${photo.loading ? "opacity-50 blur-sm" : "opacity-100"}`}
-                        />
+                          />
+                        ) : (
+                          <img
+                            src={photo.url || photo}
+                            alt="uploaded"
+                            className={`w-full h-24 object-cover rounded-lg transition
+                            ${photo.loading ? "opacity-50 blur-sm" : "opacity-100"}`}
+                          />
+                        )}
 
                         {/* 🔥 Loading overlay */}
                         {photo.loading && (

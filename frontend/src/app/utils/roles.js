@@ -1,12 +1,12 @@
 // Role → route mapping shared by the header and the role-area guards.
 //
 // The backend `user.role` is only "organization" | "tenant" | "pending"
-// (lower-cased in AuthContext). Every organization team member — OWNER,
+// (lower-cased in AuthContext). Every organization team member — OWNER, ADMIN,
 // MANAGER, AGENT, FINANCE — has `user.role === "organization"`; their actual
 // team role lives on `user.organizationRole`. So routing must look at BOTH.
 
 export const ROLE_DASHBOARD = {
-  organization: "/admin/dashboard", // OWNER
+  organization: "/admin/dashboard", // OWNER and ADMIN
   manager: "/manager/dashboard",
   agent: "/agent/dashboard",
   finance: "/finance/dashboard",
@@ -15,7 +15,7 @@ export const ROLE_DASHBOARD = {
 };
 
 // The effective role used for routing + guards:
-// "organization" | "manager" | "agent" | "finance" | "operation" | "tenant" | null
+// "organization" | "manager" | "agent" | "finance" | "tenant" | null
 export function getEffectiveRole(user) {
   if (!user) return null;
   const base = (user.role || "").toLowerCase();
@@ -32,8 +32,11 @@ export function getEffectiveRole(user) {
       case "OPERATION":
         return "operation";
       case "OWNER":
+      case "ADMIN":
       default:
-        return "organization"; // owner uses the admin area
+        // ADMIN is a promoted member with the owner's rights, so it shares the
+        // admin area rather than getting a portal of its own.
+        return "organization";
     }
   }
 

@@ -29,6 +29,10 @@ import depositRegisterRoutes from "./depositRegister.route.js"
 import roomStatusRoutes from "./roomStatus.route.js"
 import referenceDataRoutes from "./referenceData.route.js"
 import clientDatabaseRoutes from "./clientDatabase.route.js"
+import inventoryRoutes from "./inventory.route.js"
+import cleaningScheduleRoutes from "./cleaningSchedule.route.js"
+import screenMonitorRoutes from "./screenMonitor.route.js"
+import presenceRoutes from "./presence.route.js"
 
 const router = express.Router();
 
@@ -77,5 +81,18 @@ router.use("/reference-data", referenceDataRoutes);
 router.use("/deposit-register", depositRegisterRoutes);
 router.use("/room-status", roomStatusRoutes);
 router.use("/client-database", clientDatabaseRoutes);
+
+// Inventory — the schedule of condition, flattened across every property and
+// room so the whole organisation reads as one sheet.
+router.use("/inventory", inventoryRoutes);
+
+// Cleaning Messages Schedule — the month-by-month sheet of property cleans.
+router.use("/cleaning-schedule", cleaningScheduleRoutes);
+
+// Staff screen monitoring — consented, working-hours-only screenshot sessions.
+router.use("/screen-monitor", screenMonitorRoutes);
+
+// Who on the team is at their desk right now.
+router.use("/presence", presenceRoutes);
 
 export default router;

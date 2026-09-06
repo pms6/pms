@@ -14,11 +14,11 @@ import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
 import {
   TASK_PRIORITIES,
   SETTABLE_STATUSES,
-  toInputDateTime,
   displayName,
   FIELD,
   LABEL,
 } from "../../Shared/tasks";
+import DateTimeField from "../../Shared/DateTimeField";
 
 export default function TaskForm({ members, initial, onCancel, onSave }) {
   const [form, setForm] = useState({
@@ -32,8 +32,10 @@ export default function TaskForm({ members, initial, onCancel, onSave }) {
         : initial?.status === "Completed"
           ? "Done"
           : initial?.status || "Not Started",
-    startDate: toInputDateTime(initial?.startDate) || toInputDateTime(new Date()),
-    dueDate: toInputDateTime(initial?.dueDate),
+    // ISO instants. The picker reads and writes them on a UK clock, so what the
+    // admin sets is what every member sees, wherever their machine is set.
+    startDate: initial?.startDate ? new Date(initial.startDate).toISOString() : "",
+    dueDate: initial?.dueDate ? new Date(initial.dueDate).toISOString() : "",
     adminRemarks: initial?.adminRemarks || "",
   });
   // Attachments already saved on the task, kept so an edit does not drop them.
@@ -58,7 +60,13 @@ export default function TaskForm({ members, initial, onCancel, onSave }) {
     if (!form.title.trim()) return setError("Task title is required.");
     if (!form.description.trim()) return setError("Task description is required.");
     if (form.assignees.length === 0) return setError("Assign the task to at least one team member.");
-    if (form.startDate && form.dueDate && form.dueDate < form.startDate) {
+    // Both are ISO instants now, so compare the instants rather than the
+    // strings — string order only held while these were "YYYY-MM-DDTHH:mm".
+    if (
+      form.startDate &&
+      form.dueDate &&
+      new Date(form.dueDate) < new Date(form.startDate)
+    ) {
       return setError("The due date/time cannot be before the start date/time.");
     }
 
@@ -162,7 +170,7 @@ export default function TaskForm({ members, initial, onCancel, onSave }) {
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={LABEL}>Priority</label>
             <select className={FIELD} value={form.priority} onChange={set("priority")}>
@@ -183,25 +191,25 @@ export default function TaskForm({ members, initial, onCancel, onSave }) {
               ))}
             </select>
           </div>
-          <div>
-            <label className={LABEL}>Start date & time</label>
-            <input
-              type="datetime-local"
-              className={FIELD}
-              value={form.startDate}
-              onChange={set("startDate")}
-            />
-          </div>
-          <div>
-            <label className={LABEL}>Due date & time</label>
-            <input
-              type="datetime-local"
-              className={FIELD}
-              value={form.dueDate}
-              min={form.startDate || undefined}
-              onChange={set("dueDate")}
-            />
-          </div>
+        </div>
+
+        {/* Dates get a row of their own — a date, a 12-hour clock and a
+            read-back line need the width, and they are the fields members ask
+            about most. */}
+        <div className="grid grid-cols-1 gap-4 rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+          <DateTimeField
+            label="Start date & time"
+            value={form.startDate}
+            onChange={(iso) => setForm((f) => ({ ...f, startDate: iso }))}
+            hint="When the assignee should begin"
+          />
+          <DateTimeField
+            label="Due date & time"
+            value={form.dueDate}
+            min={form.startDate || undefined}
+            onChange={(iso) => setForm((f) => ({ ...f, dueDate: iso }))}
+            hint="The deadline shown to everyone assigned"
+          />
         </div>
 
         <div>

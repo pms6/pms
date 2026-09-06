@@ -4,7 +4,45 @@ import mongoose from "mongoose";
 // PRIORITY_TONE / STATUS_TONE / STATUSES in
 // frontend/src/app/admin/maintenance/page.js.
 export const MAINTENANCE_PRIORITIES = ["urgent", "high", "med", "low"];
-export const MAINTENANCE_STATUSES = ["open", "assigned", "in_progress", "closed"];
+
+// "pending" and "sorted" mirror the Maintenance Booklet sheet; the other three
+// are the finer-grained lifecycle the app already recorded, kept so existing
+// rows keep validating.
+export const MAINTENANCE_STATUSES = [
+  "pending",
+  "open",
+  "assigned",
+  "in_progress",
+  "sorted",
+  "closed",
+];
+
+// Anything not in this list still counts as outstanding work.
+export const MAINTENANCE_RESOLVED_STATUSES = ["sorted", "closed"];
+
+// One numbered step of the "Solution" column, e.g.
+// { title: "Property Inspection", detail: "Kamran inspected the property…" }.
+const solutionStepSchema = new mongoose.Schema(
+  {
+    title: { type: String, trim: true, default: "" },
+    detail: { type: String, trim: true, default: "" },
+  },
+  { _id: false }
+);
+
+// A photo or video of the issue / the completed work. Uploaded straight to
+// Cloudinary by the browser, so only the delivery URL reaches us.
+const mediaSchema = new mongoose.Schema(
+  {
+    url: { type: String, trim: true, required: true },
+    publicId: { type: String, trim: true, default: "" },
+    name: { type: String, trim: true, default: "" },
+    type: { type: String, enum: ["image", "video"], default: "image" },
+    format: { type: String, trim: true, default: "" },
+    bytes: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
 
 const maintenanceSchema = new mongoose.Schema(
   {
@@ -26,9 +64,13 @@ const maintenanceSchema = new mongoose.Schema(
     // Human-friendly reference, e.g. "MR-1042". Generated on create.
     ref: { type: String, trim: true, index: true },
 
+    // The booklet's "Sr#" column — a per-organisation running number.
+    srNo: { type: Number, default: null, index: true },
+
     // ============================
     // Request detail
     // ============================
+    // The booklet's "Issue" column.
     title: { type: String, trim: true, required: true },
     description: { type: String, trim: true, default: "" },
     category: { type: String, trim: true, default: "General" },
@@ -65,14 +107,27 @@ const maintenanceSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: MAINTENANCE_STATUSES,
-      default: "open",
+      default: "pending",
     },
+
+    // ============================
+    // Solution ("what we did") — the booklet's widest column: a procedure
+    // heading followed by the numbered steps taken to resolve the issue.
+    // ============================
+    solutionTitle: { type: String, trim: true, default: "" },
+    solutionSteps: { type: [solutionStepSchema], default: [] },
 
     // null until quoted / invoiced.
     cost: { type: Number, default: null },
 
     date: { type: Date, default: Date.now },
 
+    // Photos and videos of the issue and the work done.
+    media: { type: [mediaSchema], default: [] },
+
+    // Legacy single cover photo, kept so records written before `media` (and
+    // the tenant report form, which posts one photo) keep rendering. The
+    // controller mirrors the first image of `media` into it.
     image: { type: String, trim: true, default: "" },
 
     // ============================

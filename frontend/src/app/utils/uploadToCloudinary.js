@@ -249,3 +249,72 @@ export const uploadAnyFileToCloudinary = async (file) => {
     resourceType: data.resource_type || "",
   };
 };
+// ---------------------------------------------------------------------------
+// Photo + video upload — used by the maintenance booklet, where the evidence
+// for a repair is as often a ten-second clip of a leak as it is a still.
+//
+// Separate from uploadAnyFileToCloudinary above for one reason: its 10MB cap.
+// That limit is Cloudinary's ceiling for *raw* files, which is the right guard
+// for the reference register's arbitrary attachments — but a phone video of a
+// blocked drain is routinely larger, and routing it through `auto` uploads it
+// as `video`, where the limit is far higher. Capping media at 10MB would push
+// exactly the recordings this feature exists for back into WhatsApp.
+// ---------------------------------------------------------------------------
+export const MEDIA_IMAGE_MAX_SIZE = 10 * 1024 * 1024; // 10MB
+export const MEDIA_VIDEO_MAX_SIZE = 100 * 1024 * 1024; // 100MB
+
+export const uploadMediaToCloudinary = async (file) => {
+  if (!cloudName || !uploadPreset) {
+    throw new Error("Cloudinary environment variables missing");
+  }
+  if (!file) {
+    throw new Error("No file selected");
+  }
+
+  const isImage = file.type.startsWith("image/");
+  const isVideo = file.type.startsWith("video/");
+  if (!isImage && !isVideo) {
+    throw new Error(`"${file.name}" is not a photo or video`);
+  }
+  if (file.size === 0) {
+    throw new Error(`"${file.name}" is empty`);
+  }
+
+  const limit = isVideo ? MEDIA_VIDEO_MAX_SIZE : MEDIA_IMAGE_MAX_SIZE;
+  if (file.size > limit) {
+    throw new Error(
+      `"${file.name}" is ${formatBytes(file.size)} — the limit is ${formatBytes(limit)}`
+    );
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", uploadPreset);
+
+  // `auto` routes the upload to Cloudinary's image or video pipeline by itself.
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
+    { method: "POST", body: formData }
+  );
+
+  const responseText = await response.text();
+  let data;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    throw new Error(`Server returned: ${responseText}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message || `Upload failed with status ${response.status}`);
+  }
+
+  return {
+    url: data.secure_url,
+    publicId: data.public_id,
+    name: file.name,
+    type: data.resource_type === "video" || isVideo ? "video" : "image",
+    format: data.format || file.type || "",
+    bytes: data.bytes || file.size,
+  };
+};

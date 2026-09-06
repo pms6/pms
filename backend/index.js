@@ -12,6 +12,7 @@ import cron from "node-cron";
 import { sendAllPendingReminders } from "./cranjob/complianceReminder.js";
 import { sendAllContractReminders } from "./cranjob/contractReminder.js";
 import { sendAllLocationDigests } from "./cranjob/locationDigest.js";
+import { purgeExpiredCaptures, closeAbandonedSessions } from "./controllers/screenMonitor.controller.js";
 
 const app = express();
 
@@ -57,6 +58,22 @@ cron.schedule("0 8 * * *", async () => {
   const contracts = await sendAllContractReminders();
   console.log(
     `Contract reminders sent: ${contracts.sentCount}, Skipped: ${contracts.skipped}, Errors: ${contracts.errors.length}`
+  );
+
+  // Staff screenshots past their organization's retention period are deleted
+  // outright. Monitoring that is proportionate today becomes a permanent file
+  // on someone if nothing ever clears it, so this runs whether or not an admin
+  // remembers to press the button.
+  // A session whose browser went away - a reload, a crash, a closed lid - has
+  // no way to tell us, so it is closed here rather than reading as "running"
+  // indefinitely on the admin board.
+  const closed = await closeAbandonedSessions();
+  if (closed.sessionsClosed) console.log(`Abandoned monitoring sessions closed: ${closed.sessionsClosed}`);
+
+  console.log("Purging expired staff monitoring screenshots...");
+  const purged = await purgeExpiredCaptures();
+  console.log(
+    `Screenshots removed: ${purged.capturesRemoved}, Empty sessions removed: ${purged.sessionsRemoved}`
   );
 });
 

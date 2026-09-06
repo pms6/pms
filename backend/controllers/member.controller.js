@@ -7,14 +7,22 @@ import bcrypt from "bcrypt";
 import env from "../config/env.js";
 import { sendEmail } from "../utils/sendEmail.js";
 
-// Only OWNER/MANAGER may manage the team (invite/update/activate/suspend/delete).
+// Only OWNER/ADMIN/MANAGER may manage the team
+// (invite/update/activate/suspend/delete).
 const canManageTeam = (req) =>
-    ["OWNER", "MANAGER"].includes(req.user?.organizationRole);
+    ["OWNER", "ADMIN", "MANAGER"].includes(req.user?.organizationRole);
+
+// The seats that carry admin rights: the admin portal, and the ability to hand
+// out or take away admin. OWNER is one of them but is not assignable.
+const ADMIN_ROLES = ["OWNER", "ADMIN"];
+
+const isAdmin = (req) => ADMIN_ROLES.includes(req.user?.organizationRole);
 
 // Roles a team manager may hand out. OWNER is deliberately absent: an
 // organization has exactly one owner and transferring that seat is a different
-// operation, so it must never be reachable from a role dropdown.
-const ASSIGNABLE_ROLES = ["MANAGER", "AGENT", "FINANCE", "OPERATION"];
+// operation, so it must never be reachable from a role dropdown. ADMIN is the
+// promotable equivalent — same rights, without giving the organization away.
+const ASSIGNABLE_ROLES = ["ADMIN", "MANAGER", "AGENT", "FINANCE", "OPERATION"];
 
 // Shared guard for every role change. Returns an { status, message } problem to
 // send back, or null when the change is allowed.
@@ -23,6 +31,16 @@ const roleChangeProblem = (req, member, role) => {
         return {
             status: 400,
             message: "Role must be one of: " + ASSIGNABLE_ROLES.join(", ")
+        };
+    }
+
+    // Only an admin may create another admin, or strip admin from someone.
+    // Without this a MANAGER — who can otherwise manage the team — could
+    // promote a colleague to ADMIN and reach the admin portal through them.
+    if ((role === "ADMIN" || member.role === "ADMIN") && !isAdmin(req)) {
+        return {
+            status: 403,
+            message: "Only an owner or admin can grant or remove admin rights"
         };
     }
 
@@ -67,11 +85,31 @@ export const MemberController = {
         try {
             const { email, role, name } = req.body;
 
-            // Only OWNER/MANAGER may invite.
+            // Only OWNER/ADMIN/MANAGER may invite.
             if (!canManageTeam(req)) {
                 return res.status(403).json({
                     success: false,
                     message: "Not authorized to manage team members"
+                });
+            }
+
+            // The invited seat is validated here as well as on a later role
+            // change: without it an invite could hand out any string the
+            // schema accepts — OWNER included — and skip every guard the role
+            // dropdown is subject to.
+            const invitedRole = role || "AGENT";
+
+            if (!ASSIGNABLE_ROLES.includes(invitedRole)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Role must be one of: " + ASSIGNABLE_ROLES.join(", ")
+                });
+            }
+
+            if (invitedRole === "ADMIN" && !isAdmin(req)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Only an owner or admin can invite someone as an admin"
                 });
             }
 
@@ -160,7 +198,7 @@ export const MemberController = {
             const member = await OrganizationMember.create({
                 organizationId,
                 userId: user._id,
-                role: role || "AGENT",
+                role: invitedRole,
                 status: "INVITED"
             });
 
@@ -169,11 +207,11 @@ export const MemberController = {
             
             await sendEmail({
                 email,
-                subject: `You've been invited to join ${organization.name} as ${role || "AGENT"}`,
+                subject: `You've been invited to join ${organization.name} as ${invitedRole}`,
                 html: `
                     <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
                         <h2 style="color: #F47C3C;">Welcome to ${organization.name}!</h2>
-                        <p>You've been invited to join as a <strong>${role || "AGENT"}</strong>.</p>
+                        <p>You've been invited to join as a <strong>${invitedRole}</strong>.</p>
                         
                         ${newPassword ? `
                             <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">

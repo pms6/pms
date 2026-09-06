@@ -9,16 +9,31 @@ import { useAuth } from "@/app/Context/AuthContext";
 // only ships classes it can find as literal strings in the source.
 const ROLE_TONE = {
     OWNER: "bg-orange-100 text-orange-700",
+    ADMIN: "bg-[#F47C3C] text-white",
     MANAGER: "bg-[#0F253B] text-white",
     AGENT: "bg-blue-100 text-blue-700",
-    FINANCE: "bg-green-100 text-green-700",
-    OPERATION: "bg-purple-100 text-purple-700"
+    FINANCE: "bg-green-100 text-green-700"
+};
+
+const ROLE_LABEL = {
+    OWNER: "Owner",
+    ADMIN: "Admin",
+    MANAGER: "Manager",
+    AGENT: "Agent",
+    FINANCE: "Finance"
 };
 
 // Roles a team manager may hand out — must match ASSIGNABLE_ROLES in
 // backend/controllers/member.controller.js. OWNER is not in the list: there is
-// exactly one owner and that seat is not transferable from this screen.
-const ASSIGNABLE_ROLES = ["MANAGER", "AGENT", "FINANCE", "OPERATION"];
+// exactly one owner and that seat is not transferable from this screen. ADMIN
+// is the promotable equivalent — full admin rights, without handing over the
+// organization.
+const ASSIGNABLE_ROLES = ["ADMIN", "MANAGER", "AGENT", "FINANCE"];
+
+// Only these seats may grant or remove ADMIN. The backend enforces the same
+// rule; this just keeps the option out of a manager's dropdown rather than
+// letting them pick it and get a 403.
+const ADMIN_ROLES = ["OWNER", "ADMIN"];
 
 const STATUS_TONE = {
     ACTIVE: "bg-green-100 text-green-700",
@@ -29,11 +44,21 @@ const STATUS_TONE = {
 /**
  * Shared team-management surface — used by both the admin (owner) and manager
  * areas. What a user can actually do is enforced by the backend based on their
- * organization role: OWNER/MANAGER may invite/activate/suspend/delete, and
- * nobody may act on the OWNER or on their own account.
+ * organization role: OWNER/ADMIN/MANAGER may invite/activate/suspend/delete,
+ * nobody may act on the OWNER or on their own account, and only an owner or
+ * admin may grant or remove ADMIN.
  */
 export default function TeamBoard() {
     const { user } = useAuth();
+
+    // Only an owner or an admin may hand out admin rights, so a manager never
+    // sees the option. The backend rejects it either way.
+    const canGrantAdmin = ADMIN_ROLES.includes(user?.organizationRole);
+    const assignableRoles = canGrantAdmin
+        ? ASSIGNABLE_ROLES
+        : ASSIGNABLE_ROLES.filter((r) => r !== "ADMIN");
+    const inviteRoles = assignableRoles;
+
     const [organizationId, setOrganizationId] = useState(null);
     const [members, setMembers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -162,8 +187,9 @@ export default function TeamBoard() {
         }
     };
 
-    // Move a member between MANAGER / AGENT / FINANCE. The backend rejects a
-    // change to OWNER, to the owner, or to your own seat.
+    // Move a member between ADMIN / MANAGER / AGENT / FINANCE. The backend rejects
+    // a change to OWNER, to the owner, to your own seat, or an admin change made
+    // by someone who is not an owner or admin.
     const handleRoleChange = async (memberId, role) => {
         try {
             setActionLoading(memberId);
@@ -275,17 +301,24 @@ export default function TeamBoard() {
                                 className="w-full p-3 border rounded-lg"
                                 required
                             />
+                            {/* Defaulted to OWNER, which quietly created a
+                                SECOND owner row for the organization. The
+                                backend now rejects OWNER here; Agent is the
+                                sensible starting seat. */}
                             <select
                                 name="role"
                                 className="w-full p-3 border rounded-lg"
-                                defaultValue="OWNER"
+                                defaultValue="AGENT"
                             >
-                                <option value="OWNER">OWNER</option>
-                                <option value="AGENT">Agent</option>
-                                <option value="MANAGER">Manager</option>
-                                <option value="FINANCE">Finance</option>
-                                <option value="OPERATION">Operation</option>
+                                {inviteRoles.map((r) => (
+                                    <option key={r} value={r}>{ROLE_LABEL[r] || r}</option>
+                                ))}
                             </select>
+                            <p className="text-xs text-gray-500 -mt-1">
+                                {canGrantAdmin
+                                    ? "An Admin gets the same access you have, including inviting and promoting other members."
+                                    : "Only an owner or admin can invite someone as an Admin."}
+                            </p>
                         </div>
 
                         <button
@@ -347,6 +380,11 @@ export default function TeamBoard() {
                         const isSelf = member.userId?.email && user?.email && member.userId.email === user.email;
                         const isOwner = member.role === "OWNER";
                         const locked = isSelf || isOwner; // owner / self cannot be suspended, re-roled or removed
+                        // A manager can manage the team but must not be able to
+                        // demote an admin — that would let them clear the seats
+                        // above them. Matches the backend guard.
+                        const roleLocked =
+                            locked || (member.role === "ADMIN" && !canGrantAdmin);
                         const busy = actionLoading === member._id;
                         // INVITED members are activated for the first time;
                         // SUSPENDED ones are reinstated. Same endpoint, and the
@@ -363,9 +401,18 @@ export default function TeamBoard() {
                                         {isSelf && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">You</span>}
                                     </p>
                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                        {locked ? (
-                                            <span className={`text-xs px-2 py-1 rounded-full ${ROLE_TONE[member.role] || "bg-gray-100 text-gray-700"}`}>
-                                                {member.role}
+                                        {roleLocked ? (
+                                            <span
+                                                className={`text-xs px-2 py-1 rounded-full ${ROLE_TONE[member.role] || "bg-gray-100 text-gray-700"}`}
+                                                title={
+                                                    isOwner
+                                                        ? "The organization owner's role cannot be changed"
+                                                        : isSelf
+                                                          ? "You cannot change your own role"
+                                                          : "Only an owner or admin can change an admin's role"
+                                                }
+                                            >
+                                                {ROLE_LABEL[member.role] || member.role}
                                             </span>
                                         ) : (
                                             <select
@@ -375,10 +422,15 @@ export default function TeamBoard() {
                                                 title="Change role"
                                                 className="text-xs px-2 py-1 rounded-full border border-gray-200 bg-white font-medium text-[#0F253B] cursor-pointer hover:border-[#F47C3C] focus:outline-none focus:ring-2 focus:ring-[#F47C3C]/40 disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
-                                                {ASSIGNABLE_ROLES.map((r) => (
-                                                    <option key={r} value={r}>{r}</option>
+                                                {assignableRoles.map((r) => (
+                                                    <option key={r} value={r}>{ROLE_LABEL[r] || r}</option>
                                                 ))}
                                             </select>
+                                        )}
+                                        {member.role === "ADMIN" && (
+                                            <span className="text-[10px] font-bold text-gray-400">
+                                                full admin access
+                                            </span>
                                         )}
                                         <span className={`text-xs px-2 py-1 rounded-full ${STATUS_TONE[member.status] || "bg-gray-100 text-gray-700"}`}>
                                             {member.status}

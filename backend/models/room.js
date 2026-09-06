@@ -338,6 +338,15 @@ const roomSchema = new mongoose.Schema(
           // Replacement value per unit, used for check-out deductions.
           price: Number,
           notes: String,
+          // Photos of the item (condition evidence). Multiple allowed.
+          // Mirrors Property.inventory.items[].images — without this path
+          // mongoose silently dropped every photo uploaded against a room.
+          images: [
+            {
+              url: String,
+              publicId: String,
+            },
+          ],
         },
       ],
     },

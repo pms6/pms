@@ -23,6 +23,7 @@ import Link from "next/link";
 import { PageHeader } from "../../Shared/ui";
 import api from "../../api/api";
 import TaskDetail from "../../Shared/TaskDetail";
+import DateTimeField from "../../Shared/DateTimeField";
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -30,7 +31,6 @@ import {
   STATUS_TONE,
   PRIORITY_DOT,
   fmtDateTime,
-  toInputDateTime,
   displayName,
   dueLabel,
   FIELD,
@@ -71,15 +71,20 @@ function Kpi({ icon: Icon, label, value, tone = "light" }) {
 
 /** Lightweight reschedule dialog (date/time + optional note). */
 function RescheduleModal({ task, onClose, onSave }) {
-  const [startDate, setStartDate] = useState(toInputDateTime(task?.startDate));
-  const [dueDate, setDueDate] = useState(toInputDateTime(task?.dueDate));
+  // ISO instants — the picker reads and writes them on a UK clock.
+  const [startDate, setStartDate] = useState(
+    task?.startDate ? new Date(task.startDate).toISOString() : ""
+  );
+  const [dueDate, setDueDate] = useState(
+    task?.dueDate ? new Date(task.dueDate).toISOString() : ""
+  );
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const submit = async (e) => {
     e.preventDefault();
-    if (startDate && dueDate && dueDate < startDate) {
+    if (startDate && dueDate && new Date(dueDate) < new Date(startDate)) {
       return setError("The due date/time cannot be before the start date/time.");
     }
     setSaving(true);
@@ -100,7 +105,7 @@ function RescheduleModal({ task, onClose, onSave }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6"
+        className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -118,25 +123,17 @@ function RescheduleModal({ task, onClose, onSave }) {
         )}
 
         <form onSubmit={submit} className="space-y-3">
-          <div>
-            <label className={LABEL}>Start date & time</label>
-            <input
-              type="datetime-local"
-              className={FIELD}
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className={LABEL}>Due date & time</label>
-            <input
-              type="datetime-local"
-              className={FIELD}
-              value={dueDate}
-              min={startDate || undefined}
-              onChange={(e) => setDueDate(e.target.value)}
-            />
-          </div>
+          <DateTimeField
+            label="Start date & time"
+            value={startDate}
+            onChange={setStartDate}
+          />
+          <DateTimeField
+            label="Due date & time"
+            value={dueDate}
+            min={startDate || undefined}
+            onChange={setDueDate}
+          />
           <div>
             <label className={LABEL}>
               Note <span className="text-gray-300 normal-case tracking-normal">(optional)</span>

@@ -18,6 +18,7 @@ import {
   Users,
   Search,
   Package,
+  Sparkles,
   UserRound,
   Receipt,
   ListChecks,
@@ -30,6 +31,7 @@ import {
   Contact,
 } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
+import ScreenMonitorToggle from "../Shared/ScreenMonitorToggle";
 
 // The manager portal mirrors the owner's, minus four sections the owner keeps
 // to themselves: Void, Maintenance, Compliance and Internet Details. Order
@@ -59,6 +61,7 @@ const NAV = [
   { href: "/manager/expenses", label: "Expenses", icon: Receipt },
   { href: "/manager/deposits", label: "Deposits", icon: ShieldCheck },
   { href: "/manager/suppliers", label: "Suppliers", icon: HardHat },
+  { href: "/manager/cleaning-schedule", label: "Cleaning Schedule", icon: Sparkles },
   { href: "/manager/reports", label: "Reports", icon: BarChart3 },
   { href: "/manager/feedback", label: "Feedback", icon: MessageSquare },
   { href: "/manager/audit", label: "Audit Log", icon: ClipboardCheck },
@@ -78,7 +81,7 @@ const NAV = [
 
 export default function ManagerLayout({ children }) {
   return (
-    <RoleShell role="manager" portalLabel="Manager" nav={NAV}>
+    <RoleShell role="manager" portalLabel="Manager" nav={NAV} headerExtra={<ScreenMonitorToggle />}>
       {children}
     </RoleShell>
   );

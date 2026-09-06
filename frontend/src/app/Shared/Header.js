@@ -19,8 +19,7 @@ const Header = () => {
     };
 
     // Route the "Dashboard" link to the correct area for the user's role
-    // (OWNER→admin, MANAGER→manager, AGENT→agent, FINANCE→finance,
-    // OPERATION→operation, tenant→tenant).
+    // (OWNER→admin, MANAGER→manager, AGENT→agent, FINANCE→finance, tenant→tenant).
     const dashboardPath = user ? dashboardPathFor(user) : "/";
 
     /* ------------------------------------------------------------------ */

@@ -28,6 +28,25 @@ const FINDING_STATUS = [
   { value: "FAIL", label: "Fail", tone: "bg-red-100 text-red-700" },
 ];
 
+// What kind of visit it is. The last four name the inspecting party and are
+// also offered on their own axis below, so a visit can be filed either way.
+// MUST stay in sync with INSPECTION_TYPES in backend/models/Inspection.js.
+const INSPECTION_TYPES = [
+  { value: "ROUTINE", label: "Routine" },
+  { value: "MAINTENANCE", label: "Maintenance" },
+  { value: "SAFETY", label: "Safety" },
+  { value: "MOVE_IN", label: "Move In" },
+  { value: "MOVE_OUT", label: "Move Out" },
+  { value: "COUNCIL", label: "Council" },
+  { value: "LANDLORD", label: "Landlord" },
+  { value: "EXTERNAL", label: "External" },
+  { value: "SELF_INSPECTION", label: "Self Inspection" },
+];
+
+// Falls back to the raw value so a legacy COMPLIANCE / OTHER record still reads.
+const typeLabel = (v) =>
+  INSPECTION_TYPES.find((o) => o.value === v)?.label || String(v || "—").replace(/_/g, " ");
+
 // Overall verdict for the visit, recorded when the report is submitted.
 const OUTCOMES = [
   { value: "PASS", label: "Passed", tone: "bg-green-100 text-green-700" },
@@ -525,7 +544,9 @@ export default function InspectionsPage() {
                       <td className="px-6 py-4">{new Date(inspection.date).toLocaleDateString()}</td>
                       <td className="px-6 py-4">{inspection.propertyId?.name || "—"}</td>
                       <td className="px-6 py-4">{inspection.roomId?.roomName || "—"}</td>
-                      <td className="px-6 py-4 font-medium">{inspection.type}</td>
+                      <td className="px-6 py-4 font-medium">
+                        {typeLabel(inspection.type)}
+                      </td>
                       <td className="px-6 py-4">{inspection.inspector?.name || "—"}</td>
                       <td className="px-6 py-4">
                         <div className="flex flex-col items-start gap-1">
@@ -629,17 +650,20 @@ export default function InspectionsPage() {
                 />
               </div>
 
-              <select
-                value={formData.type}
-                onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                className="w-full border border-gray-300 rounded-2xl px-4 py-3 focus:ring-2 focus:ring-orange-500 outline-none"
-              >
-                <option value="ROUTINE">Routine</option>
-                <option value="MAINTENANCE">Maintenance</option>
-                <option value="SAFETY">Safety</option>
-                <option value="MOVE_IN">Move In</option>
-                <option value="MOVE_OUT">Move Out</option>
-              </select>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                  Type
+                </label>
+                <select
+                  value={formData.type}
+                  onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                  className="w-full border border-gray-300 rounded-2xl px-4 py-3 focus:ring-2 focus:ring-orange-500 outline-none"
+                >
+                  {INSPECTION_TYPES.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
 
               <select
                 value={formData.propertyId}
@@ -925,7 +949,7 @@ export default function InspectionsPage() {
               <div>
                 <h2 className="text-2xl font-bold">{viewing.title}</h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  {new Date(viewing.date).toLocaleString()} · {viewing.type.replace("_", " ")}
+                  {new Date(viewing.date).toLocaleString()} · {typeLabel(viewing.type)}
                 </p>
               </div>
               <button

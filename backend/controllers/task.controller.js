@@ -7,46 +7,39 @@ import User from "../models/User.js";
 // ---------------------------------------------------------------------------
 // Permissions
 //
-// Admin  = the organization OWNER. Only they may create, assign, reassign,
-//          reschedule, edit or delete a task. Assignment in particular is
-//          owner-only: no other role can put work on somebody.
-// Member = MANAGER / AGENT / FINANCE / OPERATION. They can read and comment on
-//          a task if they can SEE it (below). What they cannot do is change a
-//          task: only the owner or an actual assignee may post a status
-//          update, and only the owner may assign.
+// Admin  = the organization OWNER, or a member promoted to ADMIN. Only they
+//          may create, assign, reassign, reschedule, edit or delete a task.
+//          Assignment in particular is admin-only: no other role can put work
+//          on somebody.
+// Member = MANAGER / AGENT / FINANCE. They can READ every task in their own
+//          organization and COMMENT on any of them, so the team has one shared
+//          view of the work. What they cannot do is change a task: only the
+//          owner or an actual assignee may post a status update, and only the
+//          owner may assign.
 //
-// Visibility is not flat. A task assigned to a non-OPERATION member (e.g. an
-// AGENT) is a private matter between the owner and that assignee — nobody
-// else on staff sees it in the team list. A task with an OPERATION assignee
-// is different: operation work is cross-cutting, so it is visible to the
-// WHOLE organization, comment-only for everyone except the owner and the
-// operation assignee themselves. See `canView` / `hasOperationAssignee`.
+// The three tiers, in one place:
 //
-// The tiers, in one place:
-//
-//   action              OWNER   assignee   other staff*   tenant
-//   ------------------  -----   --------   ------------   ------
-//   see task detail      yes      yes        yes/no†        no
-//   comment               yes      yes        yes/no†        no
-//   status update         yes      yes         no            no
-//   create / assign       yes      no          no            no
-//   edit / delete         yes      no          no            no
-//
-//   * "other staff" = staff who are not the owner and not an assignee.
-//   † yes only if the task has an OPERATION assignee; otherwise the task is
-//     invisible to them entirely (not merely read-only).
+//   action              ADMIN   assignee   other staff   tenant
+//   ------------------  -----   --------   -----------   ------
+//   see task detail      yes      yes         yes          no
+//   comment              yes      yes         yes          no
+//   status update        yes      yes         no           no
+//   create / assign      yes      no          no           no
+//   edit / delete        yes      no          no           no
 //
 // protect() also resolves an organizationId for TENANT accounts from their own
 // Tenant record, so every handler must check the role and not merely the
 // presence of an organizationId.
 // ---------------------------------------------------------------------------
-const STAFF_ROLES = ["OWNER", "MANAGER", "AGENT", "FINANCE", "OPERATION"];
+const STAFF_ROLES = ["OWNER", "ADMIN", "MANAGER", "AGENT", "FINANCE", "OPERATION"];
 
 const isStaff = (req) =>
   req.user?.role === "Organization" && STAFF_ROLES.includes(req.user?.organizationRole);
 
+const ADMIN_ROLES = ["OWNER", "ADMIN"];
+
 const isAdmin = (req) =>
-  req.user?.role === "Organization" && req.user?.organizationRole === "OWNER";
+  req.user?.role === "Organization" && ADMIN_ROLES.includes(req.user?.organizationRole);
 
 const denyNonStaff = (req, res) => {
   if (!isStaff(req)) {
@@ -65,7 +58,7 @@ const denyNonAdmin = (req, res) => {
   if (!isAdmin(req)) {
     res.status(403).json({
       success: false,
-      message: "Only the organization owner can create, assign or edit tasks.",
+      message: "Only an owner or admin can create, assign or edit tasks.",
     });
     return true;
   }
@@ -149,6 +142,30 @@ const toDateOrNull = (value) => {
   if (value === null || value === "") return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
+};
+
+// The business runs in the UK, so a date written into task history reads on a
+// UK clock in 12-hour form — not in whatever timezone the server happens to be
+// deployed in, which is what a bare toLocaleString() gives.
+// MUST stay in sync with fmtDateTime in frontend/src/app/Shared/tasks.js.
+const fmtUk = (value) => {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return "cleared";
+  const date = d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Europe/London",
+  });
+  const time = d
+    .toLocaleTimeString("en-GB", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "Europe/London",
+    })
+    .toLowerCase();
+  return `${date}, ${time}`;
 };
 
 const sanitizeAttachments = (list, user) =>
@@ -703,9 +720,7 @@ export const rescheduleTask = async (req, res) => {
     const stored = normalizeStatus(task.status);
     const note =
       remark?.trim() ||
-      `Rescheduled — due ${
-        task.dueDate ? new Date(task.dueDate).toLocaleString() : "cleared"
-      }`;
+      `Rescheduled — due ${task.dueDate ? fmtUk(task.dueDate) : "cleared"}`;
 
     task.progress.push({
       kind: "update",

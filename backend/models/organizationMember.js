@@ -15,10 +15,18 @@ const organizationMemberSchema = new mongoose.Schema(
         required:true
     },
 
+    // OWNER is the single seat that owns the organization and can never be
+    // reassigned from a role dropdown. ADMIN is the promotable equivalent: it
+    // grants the same admin portal and team-management rights, so an owner can
+    // have several admins without giving away the organization itself.
+    // MUST stay in sync with ORG_ROLES in
+    // backend/controllers/member.controller.js and ROLE_META in
+    // frontend/src/app/admin/users/page.js.
     role:{
         type:String,
         enum:[
             "OWNER",
+            "ADMIN",
             "MANAGER",
             "AGENT",
             "FINANCE",
