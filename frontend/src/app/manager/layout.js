@@ -31,7 +31,6 @@ import {
   Contact,
 } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
-import ScreenMonitorToggle from "../Shared/ScreenMonitorToggle";
 
 // The manager portal mirrors the owner's, minus four sections the owner keeps
 // to themselves: Void, Maintenance, Compliance and Internet Details. Order
@@ -81,7 +80,7 @@ const NAV = [
 
 export default function ManagerLayout({ children }) {
   return (
-    <RoleShell role="manager" portalLabel="Manager" nav={NAV} headerExtra={<ScreenMonitorToggle />}>
+    <RoleShell role="manager" portalLabel="Manager" nav={NAV}>
       {children}
     </RoleShell>
   );

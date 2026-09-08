@@ -12,7 +12,8 @@ const ROLE_TONE = {
     ADMIN: "bg-[#F47C3C] text-white",
     MANAGER: "bg-[#0F253B] text-white",
     AGENT: "bg-blue-100 text-blue-700",
-    FINANCE: "bg-green-100 text-green-700"
+    FINANCE: "bg-green-100 text-green-700",
+    OPERATION: "bg-purple-100 text-purple-700"
 };
 
 const ROLE_LABEL = {
@@ -20,7 +21,8 @@ const ROLE_LABEL = {
     ADMIN: "Admin",
     MANAGER: "Manager",
     AGENT: "Agent",
-    FINANCE: "Finance"
+    FINANCE: "Finance",
+    OPERATION: "Operation"
 };
 
 // Roles a team manager may hand out — must match ASSIGNABLE_ROLES in
@@ -28,7 +30,7 @@ const ROLE_LABEL = {
 // exactly one owner and that seat is not transferable from this screen. ADMIN
 // is the promotable equivalent — full admin rights, without handing over the
 // organization.
-const ASSIGNABLE_ROLES = ["ADMIN", "MANAGER", "AGENT", "FINANCE"];
+const ASSIGNABLE_ROLES = ["ADMIN", "MANAGER", "AGENT", "FINANCE", "OPERATION"];
 
 // Only these seats may grant or remove ADMIN. The backend enforces the same
 // rule; this just keeps the option out of a manager's dropdown rather than
@@ -187,7 +189,7 @@ export default function TeamBoard() {
         }
     };
 
-    // Move a member between ADMIN / MANAGER / AGENT / FINANCE. The backend rejects
+    // Move a member between ADMIN / MANAGER / AGENT / FINANCE / OPERATION. The backend rejects
     // a change to OWNER, to the owner, to your own seat, or an admin change made
     // by someone who is not an owner or admin.
     const handleRoleChange = async (memberId, role) => {

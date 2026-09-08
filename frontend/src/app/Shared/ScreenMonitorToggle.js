@@ -232,7 +232,7 @@ export default function ScreenMonitorToggle() {
 
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="relative flex items-center gap-2">
         {live ? (
           <>
             {/* Just a live dot. The screenshot count and last-capture time used
@@ -252,7 +252,7 @@ export default function ScreenMonitorToggle() {
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-50 text-red-600 text-xs font-bold hover:bg-red-100 disabled:opacity-50 transition-all"
             >
               {busy ? <Loader2 size={14} className="animate-spin" /> : <MonitorOff size={14} />}
-              End monitored shift
+              <span className="hidden sm:inline">End monitored shift</span>
             </button>
           </>
         ) : needsResume ? (
@@ -268,7 +268,7 @@ export default function ScreenMonitorToggle() {
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 text-amber-700 text-xs font-bold hover:bg-amber-100 disabled:opacity-50 transition-all"
             >
               {busy ? <Loader2 size={14} className="animate-spin" /> : <MonitorUp size={14} />}
-              Resume monitored shift
+              <span className="hidden sm:inline">Resume monitored shift</span>
             </button>
             <button
               onClick={stop}
@@ -290,14 +290,17 @@ export default function ScreenMonitorToggle() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-50 text-[#0F253B] text-xs font-bold hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
           >
             <MonitorUp size={14} />
-            Start monitored shift
+            <span className="hidden sm:inline">Start monitored shift</span>
           </button>
         )}
-      </div>
 
-      {error && (
-        <p className="text-[11px] font-bold text-red-600 mt-1 max-w-xs">{error}</p>
-      )}
+        {/* Below the row, not in it — an error must not make the header taller. */}
+        {error && (
+          <p className="absolute top-full right-0 mt-1 text-[10px] font-bold text-red-600 max-w-[220px] text-right pointer-events-none">
+            {error}
+          </p>
+        )}
+      </div>
 
       {/* The notice. Shown every time a shift starts, and the acknowledgement is
           recorded against the exact wording the member saw. */}

@@ -2,8 +2,6 @@
 
 import { LayoutDashboard, UserPlus, CalendarClock, ClipboardList, Megaphone, ListChecks } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
-import ScreenMonitorToggle from "../Shared/ScreenMonitorToggle";
-import LiveLocationToggle from "../Shared/LiveLocationToggle";
 
 const NAV = [
   { href: "/agent/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -16,15 +14,9 @@ const NAV = [
 
 export default function AgentLayout({ children }) {
   return (
-    <RoleShell
-      role="agent"
-      portalLabel="Agent"
-      nav={NAV}
-      // In the header rather than on one page: sharing has to be switchable
-      // from wherever the agent happens to be, and visible enough that they
-      // always know it is on.
-      headerExtra={<><LiveLocationToggle /><ScreenMonitorToggle /></>}
-    >
+    // Live location and screen monitoring both belong to the OPERATION seat
+    // now — the API refuses an agent either way, so the toggles are not shown.
+    <RoleShell role="agent" portalLabel="Agent" nav={NAV}>
       {children}
     </RoleShell>
   );

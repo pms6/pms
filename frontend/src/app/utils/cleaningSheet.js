@@ -12,7 +12,7 @@
 export const SHEET_COLUMNS = ["Property", "Date", "Day", "Status"];
 
 // Roughly the proportions of the original — Property is the wide one.
-const COLUMN_WIDTHS = [38, 14, 14, 12, 22, 40];
+const COLUMN_WIDTHS = [38, 14, 14, 12, 22, 46, 40];
 
 // The sheet writes 20/05/2026.
 export const fmtDate = (value) => {
@@ -74,13 +74,13 @@ export const groupByMonth = (rows = []) => {
  * order it shows it — the search box and the month / status filters are part of
  * the export.
  *
- * `extended` adds the Cleaner and Notes columns the app records but the
- * handwritten sheet had nowhere to put.
+ * `extended` adds the Cleaner, Message and Notes columns the app records but
+ * the handwritten sheet had nowhere to put.
  */
 export const exportCleaningSheet = async (rows = [], { extended = true } = {}) => {
   const XLSX = await import("xlsx");
 
-  const columns = extended ? [...SHEET_COLUMNS, "Cleaner", "Notes"] : SHEET_COLUMNS;
+  const columns = extended ? [...SHEET_COLUMNS, "Cleaner", "Message", "Notes"] : SHEET_COLUMNS;
   const aoa = [["Cleaning Messages Schedule"], []];
 
   for (const group of groupByMonth(rows)) {
@@ -93,7 +93,7 @@ export const exportCleaningSheet = async (rows = [], { extended = true } = {}) =
         dayName(row.date),
         statusText(row.status),
       ];
-      if (extended) cells.push(row.cleaner || "", row.notes || "");
+      if (extended) cells.push(row.cleaner || "", row.message || "", row.notes || "");
       aoa.push(cells);
     }
     aoa.push([]);

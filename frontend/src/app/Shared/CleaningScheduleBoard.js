@@ -62,6 +62,7 @@ function EntryModal({ initial, properties, onClose, onSave }) {
     date: toInputDate(initial?.date) || toInputDate(new Date()),
     status: initial?.status || "PENDING",
     cleaner: initial?.cleaner || "",
+    message: initial?.message || "",
     notes: initial?.notes || "",
   });
   const [error, setError] = useState("");
@@ -91,6 +92,7 @@ function EntryModal({ initial, properties, onClose, onSave }) {
         date: form.date,
         status: form.status,
         cleaner: form.cleaner.trim(),
+        message: form.message.trim(),
         notes: form.notes.trim(),
       });
     } catch (err) {
@@ -166,6 +168,20 @@ function EntryModal({ initial, properties, onClose, onSave }) {
           </div>
 
           <div>
+            <label className={LABEL}>Message</label>
+            <textarea
+              rows={3}
+              className={FIELD}
+              value={form.message}
+              onChange={set("message")}
+              placeholder="The cleaning message for this visit…"
+            />
+            <p className="text-[11px] text-gray-400 font-medium mt-1.5">
+              What goes out to the cleaner. Notes below stay in the office.
+            </p>
+          </div>
+
+          <div>
             <label className={LABEL}>Notes</label>
             <textarea rows={2} className={FIELD} value={form.notes} onChange={set("notes")} placeholder="Access, keys, anything to flag…" />
           </div>
@@ -219,6 +235,15 @@ function ViewModal({ row, onClose, onEdit }) {
           <ViewRow label="Month">{monthLabel(monthKey(row.date))}</ViewRow>
           <ViewRow label="Cleaner">{row.cleaner}</ViewRow>
         </div>
+
+        {row.message && (
+          <div className="mt-5">
+            <p className={LABEL}>Message</p>
+            <p className="text-sm text-[#0F253B] font-medium whitespace-pre-line leading-relaxed bg-gray-50 border border-gray-100 rounded-xl px-3.5 py-3">
+              {row.message}
+            </p>
+          </div>
+        )}
 
         {row.notes && (
           <div className="mt-5">
@@ -298,7 +323,7 @@ export default function CleaningScheduleBoard({
       .filter((r) => (statusFilter ? r.status === statusFilter : true))
       .filter((r) =>
         needle
-          ? [r.property, r.cleaner, r.notes, dayName(r.date)].some((v) =>
+          ? [r.property, r.cleaner, r.message, r.notes, dayName(r.date)].some((v) =>
               String(v || "").toLowerCase().includes(needle)
             )
           : true
@@ -458,15 +483,16 @@ export default function CleaningScheduleBoard({
                 <th className="px-4 py-3 w-32">Day</th>
                 <th className="px-4 py-3 w-28">Status</th>
                 <th className="px-4 py-3">Cleaner</th>
+                <th className="px-4 py-3">Message</th>
                 <th className="px-4 py-3 w-32 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin inline text-[#F47C3C]" /></td></tr>
+                <tr><td colSpan={7} className="px-5 py-10 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin inline text-[#F47C3C]" /></td></tr>
               ) : visible.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-14">
+                  <td colSpan={7} className="px-5 py-14">
                     <div className="flex flex-col items-center text-center">
                       <div className="w-12 h-12 rounded-2xl bg-gray-50 text-[#F47C3C] flex items-center justify-center mb-3">
                         <CalendarDays size={22} />
@@ -525,7 +551,7 @@ function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
   return (
     <>
       <tr className="bg-[#0F253B]/[0.03] border-y border-gray-100">
-        <td colSpan={6} className="px-4 py-2">
+        <td colSpan={7} className="px-4 py-2">
           <p className="text-xs font-bold uppercase tracking-widest text-[#0F253B]">
             {group.label || "Undated"}
             <span className="ml-2 font-medium normal-case tracking-normal text-gray-400">
@@ -560,6 +586,13 @@ function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
             </button>
           </td>
           <td className="px-4 py-3 text-gray-500 font-medium">{r.cleaner || "—"}</td>
+          <td className="px-4 py-3 text-gray-500 font-medium">
+            {r.message ? (
+              <span className="block truncate max-w-xs" title={r.message}>{r.message}</span>
+            ) : (
+              "—"
+            )}
+          </td>
           <td className="px-4 py-3">
             <div className="flex items-center justify-end gap-1">
               <button onClick={() => onView(r)} title="View" className="p-2 text-gray-400 hover:text-[#0F253B] hover:bg-gray-100 rounded-lg"><Eye size={16} /></button>

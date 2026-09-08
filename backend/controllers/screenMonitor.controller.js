@@ -12,6 +12,10 @@
 // but watching colleagues' screens is a different power and is kept to the
 // seats that own the organisation.
 //
+// And only the OPERATION seat is monitored at all — the same seat that shares
+// a live location (see agentLocation.controller.js). Monitoring follows the
+// people out doing the day-to-day work; the desk seats are not watched.
+//
 // The server, not the browser, decides when the next screenshot is due and
 // whether a capture is inside working hours — a client that picked its own
 // moments would make "random" meaningless.
@@ -24,6 +28,26 @@ const ADMIN_ROLES = ["OWNER", "ADMIN"];
 
 const isAdmin = (req) =>
   req.user?.role === "Organization" && ADMIN_ROLES.includes(req.user?.organizationRole);
+
+// The seats that are monitored. A list rather than a bare string so widening it
+// later is a one-line change, and so it reads the same way as SHARING_ROLES in
+// agentLocation.controller.js.
+const MONITORED_ROLES = ["OPERATION"];
+
+const isMonitored = (req) => MONITORED_ROLES.includes(req.user?.organizationRole);
+
+// Guards the staff-side endpoints. An admin reading the team board goes through
+// denyNonAdmin instead — being able to watch is not being watched.
+const denyNonMonitored = (req, res) => {
+  if (!isMonitored(req)) {
+    res.status(403).json({
+      success: false,
+      message: "Only an operation team member is screen monitored.",
+    });
+    return true;
+  }
+  return false;
+};
 
 const denyNonAdmin = (req, res) => {
   if (!isAdmin(req)) {
@@ -249,6 +273,8 @@ export const updatePolicy = async (req, res) => {
 // @route   GET /api/v1/screen-monitor/me
 export const getMySession = async (req, res) => {
   try {
+    if (denyNonMonitored(req, res)) return;
+
     const organizationId = req.user?.organizationId;
     if (!organizationId) {
       return res.status(401).json({ success: false, message: "Organization ID required" });
@@ -297,6 +323,8 @@ export const getMySession = async (req, res) => {
 // @route   POST /api/v1/screen-monitor/start
 export const startSession = async (req, res) => {
   try {
+    if (denyNonMonitored(req, res)) return;
+
     const organizationId = req.user?.organizationId;
     if (!organizationId) {
       return res.status(401).json({ success: false, message: "Organization ID required" });
@@ -388,6 +416,8 @@ export const stopSession = async (req, res) => {
 // @route   POST /api/v1/screen-monitor/capture
 export const addCapture = async (req, res) => {
   try {
+    if (denyNonMonitored(req, res)) return;
+
     const organizationId = req.user?.organizationId;
     const { url, publicId, width, height, bytes } = req.body || {};
 

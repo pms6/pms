@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Monitor,
   Loader2,
@@ -13,6 +13,7 @@ import {
   Clock,
   Users,
   Camera,
+  RefreshCw,
 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import OnlineStaffPanel from "./OnlineStaffPanel";
@@ -364,8 +365,20 @@ function SessionModal({ sessionId, onClose }) {
 /* ------------------------------------------------------------------ *
  * Board
  * ------------------------------------------------------------------ */
+// How stale the board is allowed to get while somebody is looking at it.
+// Sessions start, screenshots land and a session goes quiet without anything on
+// this page knowing, so it refetches rather than showing whatever was true when
+// it was opened.
+const REFRESH_MS = 5 * 60 * 1000;
+
+// The interval only decides when to CHECK; REFRESH_MS decides whether a refetch
+// is actually due. Checking more often than the refresh is what keeps the gap
+// at five minutes rather than up to ten when a manual reload lands just before
+// a tick.
+const TICK_MS = 60 * 1000;
+
 export default function StaffMonitoringBoard({
-  subtitle = "Consented, working-hours screen checks — owner and admin only",
+  subtitle = "Consented, working-hours screen checks of the operation team — owner and admin only",
 }) {
   const [sessions, setSessions] = useState([]);
   const [policy, setPolicy] = useState(null);
@@ -376,10 +389,25 @@ export default function StaffMonitoringBoard({
   const [openSession, setOpenSession] = useState(null);
   const [showPolicy, setShowPolicy] = useState(false);
   const [purging, setPurging] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadedAt, setLoadedAt] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  // When the data last arrived. A ref as well as state because the interval
+  // reads it to decide whether a refetch is due, and a ref does not make the
+  // effect re-run every time it changes.
+  const loadedAtRef = useRef(0);
+
+  /**
+   * A quiet load refetches in place: no spinner, no blanking the table out to
+   * "—" under someone who is reading it. The first load and an explicit retry
+   * are not quiet; the automatic refresh always is.
+   */
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else {
+      setLoading(true);
+      setError("");
+    }
     try {
       const [sRes, pRes] = await Promise.all([
         api.get("/screen-monitor/sessions"),
@@ -387,14 +415,44 @@ export default function StaffMonitoringBoard({
       ]);
       setSessions(sRes.data.data || []);
       setPolicy(pRes.data.data || null);
+      setError("");
+      loadedAtRef.current = Date.now();
+      setLoadedAt(new Date());
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load staff monitoring.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Refresh while the section is open.
+  //
+  // Two things it deliberately does not do: poll a hidden tab — a board left
+  // open on a second monitor overnight would otherwise call the API all night —
+  // and refetch underneath the open policy editor, which is pointless work
+  // while somebody is part-way through changing the settings.
+  useEffect(() => {
+    if (showPolicy) return undefined;
+
+    const refreshIfDue = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - loadedAtRef.current < REFRESH_MS) return;
+      load({ quiet: true });
+    };
+
+    const timer = setInterval(refreshIfDue, TICK_MS);
+    // Coming back to a tab that has been away: catch up on the way in rather
+    // than making them wait out the rest of the interval.
+    document.addEventListener("visibilitychange", refreshIfDue);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshIfDue);
+    };
+  }, [load, showPolicy]);
 
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -473,7 +531,7 @@ export default function StaffMonitoringBoard({
       {error && (
         <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
           {error}
-          <button onClick={load} className="ml-3 px-3 py-1 bg-red-100 hover:bg-red-200 rounded-lg text-xs font-bold">Retry</button>
+          <button onClick={() => load()} className="ml-3 px-3 py-1 bg-red-100 hover:bg-red-200 rounded-lg text-xs font-bold">Retry</button>
         </div>
       )}
 
@@ -553,6 +611,29 @@ export default function StaffMonitoringBoard({
               {l}
             </button>
           ))}
+        </div>
+
+        {/* Says when the numbers are from, so nobody reads a five-minute-old
+            board as this second's. The refresh itself is announced quietly — it
+            is not something anyone asked for and should not draw the eye. */}
+        <div className="ml-auto flex items-center gap-1.5 text-[11px] font-medium text-gray-400">
+          {refreshing ? (
+            <>
+              <RefreshCw size={12} className="animate-spin" />
+              Updating…
+            </>
+          ) : loadedAt ? (
+            <>
+              <RefreshCw size={12} className="text-gray-300" />
+              Updated {loadedAt.toLocaleTimeString()}
+              <button
+                onClick={() => load({ quiet: true })}
+                className="ml-1 font-bold text-[#F47C3C] hover:underline"
+              >
+                Refresh
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
 

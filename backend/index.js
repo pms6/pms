@@ -77,13 +77,15 @@ cron.schedule("0 8 * * *", async () => {
   );
 });
 
-// Hourly digest of where the agents who have live location switched ON are.
-// Organizations with nobody sharing are skipped, so a quiet hour sends nothing.
+// Hourly digest of where the operation team members who have live location
+// switched ON *and* are still sending positions are. Anyone whose device has
+// gone quiet is left out, and organizations left with nobody online are
+// skipped, so a quiet hour sends nothing.
 cron.schedule("0 * * * *", async () => {
   const result = await sendAllLocationDigests();
   if (result.organizations) {
     console.log(
-      `Location digests sent: ${result.sentCount}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`
+      `Location digests sent: ${result.sentCount}, Skipped: ${result.skipped}, Offline: ${result.offline}, Errors: ${result.errors.length}`
     );
   }
 });

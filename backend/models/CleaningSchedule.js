@@ -45,8 +45,11 @@ const cleaningScheduleSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Who is doing it, and anything the office needs to remember.
+    // Who is doing it, what goes out to them, and anything the office needs
+    // to remember. `message` is the cleaning message for this visit — the
+    // sheet is named after it — kept apart from `notes`, which is internal.
     cleaner: { type: String, trim: true, default: "" },
+    message: { type: String, trim: true, default: "" },
     notes: { type: String, trim: true, default: "" },
 
     isDeleted: { type: Boolean, default: false },

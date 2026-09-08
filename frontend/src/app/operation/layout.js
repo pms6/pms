@@ -3,6 +3,7 @@
 import { LayoutDashboard, CreditCard, UserPlus, CalendarClock, ShieldCheck, BarChart3, ListChecks, MapPin } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 import LiveLocationToggle from "../Shared/LiveLocationToggle";
+import ScreenMonitorToggle from "../Shared/ScreenMonitorToggle";
 
 // Invoices and Statements were removed rather than stubbed: this system has no
 // Invoice model — a rent charge IS the charge raised, and it lives on the Rent
@@ -18,7 +19,20 @@ const NAV = [
 
 export default function OperationLayout({ children }) {
   return (
-    <RoleShell role="operation" portalLabel="Operation" nav={NAV} headerExtra={<LiveLocationToggle />}>
+    // Both switches live in the header rather than on a page: they have to be
+    // reachable from wherever the member happens to be, and visible enough that
+    // they always know what is on.
+    <RoleShell
+      role="operation"
+      portalLabel="Operation"
+      nav={NAV}
+      headerExtra={
+        <div className="flex items-center gap-2">
+          <LiveLocationToggle />
+          <ScreenMonitorToggle />
+        </div>
+      }
+    >
       {children}
     </RoleShell>
   );

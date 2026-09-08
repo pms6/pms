@@ -7,6 +7,7 @@ const EDITABLE_KEYS = [
   "date",
   "status",
   "cleaner",
+  "message",
   "notes",
 ];
 
@@ -17,6 +18,7 @@ const pickPayload = (body) => {
   }
   if (payload.property !== undefined) payload.property = String(payload.property).trim();
   if (payload.cleaner !== undefined) payload.cleaner = String(payload.cleaner).trim();
+  if (payload.message !== undefined) payload.message = String(payload.message).trim();
   if (payload.notes !== undefined) payload.notes = String(payload.notes).trim();
   if (payload.propertyId === "") payload.propertyId = null;
   if (payload.status !== undefined && !CLEANING_STATUSES.includes(payload.status)) {

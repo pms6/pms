@@ -18,10 +18,12 @@ const REFRESH_MS = 30 * 1000;
 
 const ROLE_LABEL = {
   OWNER: "Owner", ADMIN: "Admin", MANAGER: "Manager", AGENT: "Agent", FINANCE: "Finance",
+  OPERATION: "Operation",
 };
 
 const PORTAL_LABEL = {
   admin: "Admin portal", manager: "Manager portal", agent: "Agent portal", finance: "Finance portal",
+  operation: "Operation portal",
 };
 
 const ago = (d) => {

@@ -150,7 +150,7 @@ export default function LiveLocationToggle() {
   if (!loaded) return null;
 
   return (
-    <div className="flex flex-col items-end">
+    <div className="relative flex items-center">
       <button
         onClick={toggle}
         disabled={busy}
@@ -180,16 +180,21 @@ export default function LiveLocationToggle() {
         </span>
       </button>
 
-      {active && lastPingAt && (
-        <span className="text-[10px] font-medium text-gray-400 mt-0.5 hidden sm:block">
-          Sent {lastPingAt.toLocaleTimeString()}
-        </span>
-      )}
-
-      {error && (
-        <span className="text-[10px] font-bold text-red-500 mt-0.5 max-w-[220px] text-right">
-          {error}
-        </span>
+      {/* Hung below the header rather than stacked in it: pointer-events-none
+          so it never swallows a click meant for what is underneath. */}
+      {(error || (active && lastPingAt)) && (
+        <div className="absolute top-full right-0 mt-1 flex flex-col items-end pointer-events-none">
+          {active && lastPingAt && (
+            <span className="text-[10px] font-medium text-gray-400 whitespace-nowrap hidden sm:block">
+              Sent {lastPingAt.toLocaleTimeString()}
+            </span>
+          )}
+          {error && (
+            <span className="text-[10px] font-bold text-red-500 max-w-[220px] text-right">
+              {error}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
