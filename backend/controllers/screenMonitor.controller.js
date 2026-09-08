@@ -12,9 +12,8 @@
 // but watching colleagues' screens is a different power and is kept to the
 // seats that own the organisation.
 //
-// And only the OPERATION seat is monitored at all — the same seat that shares
-// a live location (see agentLocation.controller.js). Monitoring follows the
-// people out doing the day-to-day work; the desk seats are not watched.
+// Every staff seat can run a monitored shift — the button is shown in every
+// staff portal. Reading other people's sessions is still OWNER / ADMIN only.
 //
 // The server, not the browser, decides when the next screenshot is due and
 // whether a capture is inside working hours — a client that picked its own
@@ -29,10 +28,9 @@ const ADMIN_ROLES = ["OWNER", "ADMIN"];
 const isAdmin = (req) =>
   req.user?.role === "Organization" && ADMIN_ROLES.includes(req.user?.organizationRole);
 
-// The seats that are monitored. A list rather than a bare string so widening it
-// later is a one-line change, and so it reads the same way as SHARING_ROLES in
-// agentLocation.controller.js.
-const MONITORED_ROLES = ["OPERATION"];
+// The seats that can run a monitored shift — every staff role. Kept as a list
+// so it can be narrowed again in one line if a seat should be exempt.
+const MONITORED_ROLES = ["OWNER", "ADMIN", "MANAGER", "AGENT", "FINANCE", "OPERATION"];
 
 const isMonitored = (req) => MONITORED_ROLES.includes(req.user?.organizationRole);
 
@@ -42,7 +40,7 @@ const denyNonMonitored = (req, res) => {
   if (!isMonitored(req)) {
     res.status(403).json({
       success: false,
-      message: "Only an operation team member is screen monitored.",
+      message: "Your account cannot run a monitored shift.",
     });
     return true;
   }

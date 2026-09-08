@@ -69,6 +69,9 @@ export default function AdminVoidPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [dayFilter, setDayFilter] = useState("");
+  // Quick length band — "" | "daily" | "weekly" | "monthly". A void is Daily if
+  // it lasted a single day, Weekly if 2–7, Monthly if 8 or more.
+  const [lengthBucket, setLengthBucket] = useState("");
   const [propertyFilter, setPropertyFilter] = useState("");
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -277,6 +280,13 @@ export default function AdminVoidPage() {
 
       if (dayFilter && Number(item.voidDays || 0) !== Number(dayFilter)) return false;
 
+      if (lengthBucket) {
+        const d = Number(item.voidDays || 0);
+        if (lengthBucket === "daily" && d > 1) return false;
+        if (lengthBucket === "weekly" && (d < 2 || d > 7)) return false;
+        if (lengthBucket === "monthly" && d < 8) return false;
+      }
+
       if (propertyFilter) {
         const pid =
           item.propertyId && typeof item.propertyId === "object"
@@ -303,7 +313,7 @@ export default function AdminVoidPage() {
 
       return true;
     });
-  }, [voidPeriods, dayFilter, propertyFilter, search, periodType, selectedMonth]);
+  }, [voidPeriods, dayFilter, lengthBucket, propertyFilter, search, periodType, selectedMonth]);
 
   // Active only (for the “Void Periods” count)
   const countedPeriods = useMemo(
@@ -890,6 +900,29 @@ export default function AdminVoidPage() {
             </span>
           </div>
 
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              ["daily", "Daily"],
+              ["weekly", "Weekly"],
+              ["monthly", "Monthly"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() =>
+                  setLengthBucket((current) => (current === value ? "" : value))
+                }
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-bold transition-all ${
+                  lengthBucket === value
+                    ? "bg-[#0F253B] text-white"
+                    : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           <select
             value={dayFilter}
             onChange={(event) => setDayFilter(event.target.value)}
@@ -950,11 +983,12 @@ export default function AdminVoidPage() {
             />
           </div>
 
-          {(dayFilter || propertyFilter || search || periodType !== "all") && (
+          {(dayFilter || lengthBucket || propertyFilter || search || periodType !== "all") && (
             <button
               type="button"
               onClick={() => {
                 setDayFilter("");
+                setLengthBucket("");
                 setPropertyFilter("");
                 setSearch("");
                 setPeriodType("all");

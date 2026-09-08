@@ -379,7 +379,7 @@ const REFRESH_MS = 5 * 60 * 1000;
 const TICK_MS = 60 * 1000;
 
 export default function StaffMonitoringBoard({
-  subtitle = "Consented, working-hours screen checks of the operation team — owner and admin only",
+  subtitle = "Consented, working-hours screen checks of the team — owner and admin only",
 }) {
   const [sessions, setSessions] = useState([]);
   const [policy, setPolicy] = useState(null);

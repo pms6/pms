@@ -35,6 +35,7 @@ import {
   Contact,
 } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
+import ScreenMonitorToggle from "../Shared/ScreenMonitorToggle";
 
 const NAV = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -81,7 +82,12 @@ const NAV = [
 
 export default function AdminLayout({ children }) {
   return (
-    <RoleShell role="organization" portalLabel="organization" nav={NAV}>
+    <RoleShell
+      role="organization"
+      portalLabel="organization"
+      nav={NAV}
+      headerExtra={<ScreenMonitorToggle />}
+    >
       {children}
     </RoleShell>
   );

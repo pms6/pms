@@ -15,6 +15,8 @@ import {
   Building2,
   CheckCircle2,
   Circle,
+  Mail,
+  Phone,
 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import api from "@/app/api/api";
@@ -40,6 +42,15 @@ export const CLEANING_STATUSES = ["PENDING", "DONE"];
 const STATUS_LABEL = { PENDING: "Pending", DONE: "Done" };
 const STATUS_TONE = { PENDING: "amber", DONE: "green" };
 
+// Each new visit's checklist starts with these — kept in sync with
+// DEFAULT_CLEANING_TASKS in backend/models/CleaningSchedule.js.
+const DEFAULT_CLEANING_TASKS = ["Fridge Cleaning", "Machine Descaling"];
+
+const normaliseTasks = (tasks) =>
+  Array.isArray(tasks) && tasks.length
+    ? tasks.map((t) => ({ name: t?.name || "", done: Boolean(t?.done) }))
+    : DEFAULT_CLEANING_TASKS.map((name) => ({ name, done: false }));
+
 const FIELD =
   "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
 const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
@@ -62,7 +73,11 @@ function EntryModal({ initial, properties, onClose, onSave }) {
     property: initial?.property || "",
     date: toInputDate(initial?.date) || toInputDate(new Date()),
     status: initial?.status || "PENDING",
-    cleaner: initial?.cleaner || "",
+    emailSent: Boolean(initial?.emailSent),
+    callMade: Boolean(initial?.callMade),
+    contactEmail: initial?.contactEmail || "",
+    contactPhone: initial?.contactPhone || "",
+    tasks: normaliseTasks(initial?.tasks),
     message: initial?.message || "",
     notes: initial?.notes || "",
   });
@@ -70,6 +85,25 @@ function EntryModal({ initial, properties, onClose, onSave }) {
   const [saving, setSaving] = useState(false);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const toggle = (k) => () => setForm((f) => ({ ...f, [k]: !f[k] }));
+
+  /* --- task checklist --- */
+  const setTaskName = (i) => (e) =>
+    setForm((f) => ({
+      ...f,
+      tasks: f.tasks.map((t, idx) => (idx === i ? { ...t, name: e.target.value } : t)),
+    }));
+
+  const toggleTask = (i) => () =>
+    setForm((f) => ({
+      ...f,
+      tasks: f.tasks.map((t, idx) => (idx === i ? { ...t, done: !t.done } : t)),
+    }));
+
+  const addTask = () => setForm((f) => ({ ...f, tasks: [...f.tasks, { name: "", done: false }] }));
+
+  const removeTask = (i) =>
+    setForm((f) => ({ ...f, tasks: f.tasks.filter((_, idx) => idx !== i) }));
 
   // Picking from the portfolio fills the address; the field stays editable
   // because the sheet carries addresses that aren't property records yet.
@@ -83,6 +117,14 @@ function EntryModal({ initial, properties, onClose, onSave }) {
     e.preventDefault();
     if (!form.property.trim()) { setError("Property is required"); return; }
     if (!form.date) { setError("Date is required"); return; }
+    if (form.emailSent && !form.contactEmail.trim()) {
+      setError("Add the email address the message was sent to");
+      return;
+    }
+    if (form.callMade && !form.contactPhone.trim()) {
+      setError("Add the number that was called");
+      return;
+    }
 
     setSaving(true);
     setError("");
@@ -92,7 +134,14 @@ function EntryModal({ initial, properties, onClose, onSave }) {
         property: form.property.trim(),
         date: form.date,
         status: form.status,
-        cleaner: form.cleaner.trim(),
+        emailSent: form.emailSent,
+        callMade: form.callMade,
+        // Only keep the detail for the channel that was actually used.
+        contactEmail: form.emailSent ? form.contactEmail.trim() : "",
+        contactPhone: form.callMade ? form.contactPhone.trim() : "",
+        tasks: form.tasks
+          .map((t) => ({ name: t.name.trim(), done: t.done }))
+          .filter((t) => t.name),
         message: form.message.trim(),
         notes: form.notes.trim(),
       });
@@ -164,8 +213,104 @@ function EntryModal({ initial, properties, onClose, onSave }) {
           </div>
 
           <div>
-            <label className={LABEL}>Cleaner</label>
-            <input className={FIELD} value={form.cleaner} onChange={set("cleaner")} placeholder="Who is attending" />
+            <label className={LABEL}>Contact</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={toggle("emailSent")}
+                className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-bold transition-all ${
+                  form.emailSent
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                    : "bg-gray-50 border-gray-100 text-gray-500 hover:bg-gray-100"
+                }`}
+              >
+                {form.emailSent ? <CheckCircle2 size={15} /> : <Mail size={15} />}
+                Email sent
+              </button>
+              <button
+                type="button"
+                onClick={toggle("callMade")}
+                className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-bold transition-all ${
+                  form.callMade
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                    : "bg-gray-50 border-gray-100 text-gray-500 hover:bg-gray-100"
+                }`}
+              >
+                {form.callMade ? <CheckCircle2 size={15} /> : <Phone size={15} />}
+                Call made
+              </button>
+            </div>
+
+            {(form.emailSent || form.callMade) && (
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {form.emailSent && (
+                  <input
+                    type="email"
+                    className={FIELD}
+                    value={form.contactEmail}
+                    onChange={set("contactEmail")}
+                    placeholder="Email address the message went to"
+                  />
+                )}
+                {form.callMade && (
+                  <input
+                    type="tel"
+                    className={FIELD}
+                    value={form.contactPhone}
+                    onChange={set("contactPhone")}
+                    placeholder="Number that was called"
+                  />
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Tasks</p>
+              <button
+                type="button"
+                onClick={addTask}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-[#F47C3C] hover:bg-orange-50 rounded-lg"
+              >
+                <Plus size={13} /> Add task
+              </button>
+            </div>
+
+            {form.tasks.length === 0 && (
+              <p className="text-xs text-gray-400 font-medium">No tasks on this visit.</p>
+            )}
+
+            {form.tasks.map((t, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleTask(i)}
+                  title={t.done ? "Mark as not done" : "Mark as done"}
+                  className="shrink-0 text-gray-300 hover:text-emerald-600"
+                >
+                  {t.done ? (
+                    <CheckCircle2 size={18} className="text-emerald-600" />
+                  ) : (
+                    <Circle size={18} />
+                  )}
+                </button>
+                <input
+                  className="flex-1 px-3 py-2 bg-white border border-gray-100 rounded-lg text-sm font-medium text-[#0F253B] outline-none focus:ring-2 focus:ring-[#F47C3C]"
+                  value={t.name}
+                  onChange={setTaskName(i)}
+                  placeholder="e.g. Fridge Cleaning"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeTask(i)}
+                  title="Remove task"
+                  className="shrink-0 p-1.5 text-gray-300 hover:text-red-600"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
           </div>
 
           <div>
@@ -234,8 +379,33 @@ function ViewModal({ row, onClose, onEdit }) {
 
         <div className="grid grid-cols-2 gap-4">
           <ViewRow label="Month">{monthLabel(monthKey(row.date))}</ViewRow>
-          <ViewRow label="Cleaner">{row.cleaner}</ViewRow>
+          <ViewRow label="Contact">
+            {[
+              row.emailSent && `Email sent${row.contactEmail ? ` — ${row.contactEmail}` : ""}`,
+              row.callMade && `Call made${row.contactPhone ? ` — ${row.contactPhone}` : ""}`,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "None yet"}
+          </ViewRow>
         </div>
+
+        {Array.isArray(row.tasks) && row.tasks.length > 0 && (
+          <div className="mt-5">
+            <p className={LABEL}>Tasks</p>
+            <ul className="space-y-1.5">
+              {row.tasks.map((t, i) => (
+                <li key={i} className="flex items-center gap-2 text-sm font-medium text-[#0F253B]">
+                  {t.done ? (
+                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+                  ) : (
+                    <Circle size={15} className="text-gray-300 shrink-0" />
+                  )}
+                  <span className={t.done ? "line-through text-gray-400" : ""}>{t.name}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {row.message && (
           <div className="mt-5">
@@ -324,9 +494,15 @@ export default function CleaningScheduleBoard({
       .filter((r) => (statusFilter ? r.status === statusFilter : true))
       .filter((r) =>
         needle
-          ? [r.property, r.cleaner, r.message, r.notes, dayName(r.date)].some((v) =>
-              String(v || "").toLowerCase().includes(needle)
-            )
+          ? [
+              r.property,
+              r.message,
+              r.notes,
+              r.contactEmail,
+              r.contactPhone,
+              dayName(r.date),
+              ...(Array.isArray(r.tasks) ? r.tasks.map((t) => t.name) : []),
+            ].some((v) => String(v || "").toLowerCase().includes(needle))
           : true
       );
   }, [rows, q, month, statusFilter]);
@@ -364,6 +540,21 @@ export default function CleaningScheduleBoard({
     } catch (err) {
       setRows(snapshot);
       alert(err.response?.data?.message || "Failed to update status");
+    }
+  };
+
+  // Tick a single task off a row's checklist without opening the editor.
+  const toggleTask = async (row, index) => {
+    const tasks = (row.tasks || []).map((t, i) =>
+      i === index ? { ...t, done: !t.done } : t
+    );
+    const snapshot = rows;
+    setRows((prev) => prev.map((r) => (r._id === row._id ? { ...r, tasks } : r)));
+    try {
+      await api.put(`/cleaning-schedule/${row._id}`, { tasks });
+    } catch (err) {
+      setRows(snapshot);
+      alert(err.response?.data?.message || "Failed to update task");
     }
   };
 
@@ -483,17 +674,18 @@ export default function CleaningScheduleBoard({
                 <th className="px-4 py-3 w-32">Date</th>
                 <th className="px-4 py-3 w-32">Day</th>
                 <th className="px-4 py-3 w-28">Status</th>
-                <th className="px-4 py-3">Cleaner</th>
+                <th className="px-4 py-3 w-36">Contact</th>
+                <th className="px-4 py-3">Tasks</th>
                 <th className="px-4 py-3">Message</th>
                 <th className="px-4 py-3 w-32 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} className="px-5 py-10 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin inline text-[#F47C3C]" /></td></tr>
+                <tr><td colSpan={8} className="px-5 py-10 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin inline text-[#F47C3C]" /></td></tr>
               ) : visible.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-14">
+                  <td colSpan={8} className="px-5 py-14">
                     <div className="flex flex-col items-center text-center">
                       <div className="w-12 h-12 rounded-2xl bg-gray-50 text-[#F47C3C] flex items-center justify-center mb-3">
                         <CalendarDays size={22} />
@@ -518,6 +710,7 @@ export default function CleaningScheduleBoard({
                     onEdit={setModal}
                     onDelete={remove}
                     onToggle={toggleStatus}
+                    onToggleTask={toggleTask}
                   />
                 ))
               )}
@@ -547,12 +740,12 @@ export default function CleaningScheduleBoard({
 }
 
 // One month block — the band, then its rows, as the sheet prints it.
-function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
+function FragmentGroup({ group, onView, onEdit, onDelete, onToggle, onToggleTask }) {
   const done = group.rows.filter((r) => r.status === "DONE").length;
   return (
     <>
       <tr className="bg-[#0F253B]/[0.03] border-y border-gray-100">
-        <td colSpan={7} className="px-4 py-2">
+        <td colSpan={8} className="px-4 py-2">
           <p className="text-xs font-bold uppercase tracking-widest text-[#0F253B]">
             {group.label || "Undated"}
             <span className="ml-2 font-medium normal-case tracking-normal text-gray-400">
@@ -586,7 +779,49 @@ function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
               <Badge tone={STATUS_TONE[r.status] || "gray"}>{STATUS_LABEL[r.status] || r.status}</Badge>
             </button>
           </td>
-          <td className="px-4 py-3 text-gray-500 font-medium">{r.cleaner || "—"}</td>
+          <td className="px-4 py-3">
+            <div className="flex flex-wrap gap-1">
+              {r.emailSent && (
+                <Badge tone="green">
+                  <span className="flex items-center gap-1" title={r.contactEmail || "Email sent"}>
+                    <Mail size={10} /> Email
+                  </span>
+                </Badge>
+              )}
+              {r.callMade && (
+                <Badge tone="green">
+                  <span className="flex items-center gap-1" title={r.contactPhone || "Call made"}>
+                    <Phone size={10} /> Call
+                  </span>
+                </Badge>
+              )}
+              {!r.emailSent && !r.callMade && <span className="text-gray-400 font-medium">—</span>}
+            </div>
+          </td>
+          <td className="px-4 py-3">
+            {Array.isArray(r.tasks) && r.tasks.length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {r.tasks.map((t, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => onToggleTask(r, i)}
+                    title={t.done ? "Mark as not done" : "Mark as done"}
+                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold transition-all ${
+                      t.done
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                    }`}
+                  >
+                    {t.done ? <CheckCircle2 size={11} /> : <Circle size={11} />}
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <span className="text-gray-400 font-medium">—</span>
+            )}
+          </td>
           <td className="px-4 py-3 text-gray-500 font-medium">
             {r.message ? (
               <span className="block truncate max-w-xs" title={r.message}>{r.message}</span>

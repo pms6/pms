@@ -2,6 +2,7 @@
 
 import { LayoutDashboard, UserPlus, CalendarClock, ClipboardList, Megaphone, ListChecks } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
+import ScreenMonitorToggle from "../Shared/ScreenMonitorToggle";
 
 const NAV = [
   { href: "/agent/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -14,9 +15,14 @@ const NAV = [
 
 export default function AgentLayout({ children }) {
   return (
-    // Live location and screen monitoring both belong to the OPERATION seat
-    // now — the API refuses an agent either way, so the toggles are not shown.
-    <RoleShell role="agent" portalLabel="Agent" nav={NAV}>
+    // A monitored shift can be started from any staff portal; live location
+    // stays on the OPERATION seat.
+    <RoleShell
+      role="agent"
+      portalLabel="Agent"
+      nav={NAV}
+      headerExtra={<ScreenMonitorToggle />}
+    >
       {children}
     </RoleShell>
   );

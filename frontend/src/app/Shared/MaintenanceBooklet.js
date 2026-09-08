@@ -20,6 +20,7 @@ import {
   Download,
   Film,
   ImageIcon,
+  FileText,
 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import api from "@/app/api/api";
@@ -76,6 +77,14 @@ const blankStep = () => ({ title: "", detail: "" });
 const isVideo = (item) =>
   item?.type === "video" || /\.(mp4|mov|webm|m4v|avi|mkv)(\?|$)/i.test(item?.url || "");
 
+const isPdf = (item) =>
+  item?.type === "pdf" ||
+  item?.format === "pdf" ||
+  /\.pdf(\?|$)/i.test(item?.url || "");
+
+// Icon + label for an attachment's caption line.
+const mediaKind = (item) => (isVideo(item) ? "Video" : isPdf(item) ? "PDF" : "Photo");
+
 // Older entries stored a single `image` string; fold it into the gallery so
 // nothing uploaded before the media field existed disappears from the screen.
 const mediaOf = (m) => {
@@ -86,11 +95,26 @@ const mediaOf = (m) => {
   return list;
 };
 
-/** One read-only attachment tile — a thumbnail, or an inline video player. */
+/** One read-only attachment tile — a thumbnail, an inline video player, or a
+ * PDF card that opens the document in a new tab. */
 function MediaTile({ item, className = "" }) {
   if (isVideo(item)) {
     return (
       <video src={item.url} controls className={`rounded-xl border border-gray-100 bg-black object-cover ${className}`} />
+    );
+  }
+  if (isPdf(item)) {
+    return (
+      <a
+        href={item.url}
+        target="_blank"
+        rel="noreferrer"
+        title={item.name || "Open PDF"}
+        className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border border-gray-100 bg-red-50 text-red-600 hover:bg-red-100 transition-colors ${className}`}
+      >
+        <FileText size={22} />
+        <span className="text-[10px] font-bold uppercase tracking-widest">PDF</span>
+      </a>
     );
   }
   return (
@@ -386,11 +410,11 @@ function RequestModal({ initial, properties, suppliers, onClose, onSave }) {
             <textarea rows={2} className={FIELD} value={form.description} onChange={set("description")} placeholder="Details of the issue…" />
           </div>
 
-          {/* ---- Photos & videos ---- */}
+          {/* ---- Photos, videos & PDFs ---- */}
           <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
-                <ImageIcon size={13} /> Photos &amp; Videos
+                <ImageIcon size={13} /> Photos, Videos &amp; PDFs
               </p>
               {uploading > 0 && (
                 <span className="text-[11px] font-bold text-gray-400 flex items-center gap-1.5">
@@ -401,9 +425,9 @@ function RequestModal({ initial, properties, suppliers, onClose, onSave }) {
 
             <label className="flex flex-col items-center justify-center gap-1 py-5 rounded-xl border-2 border-dashed border-gray-200 bg-white hover:border-[#F47C3C] hover:bg-orange-50/40 cursor-pointer transition-all">
               <UploadCloud size={20} className="text-gray-300" />
-              <span className="text-xs font-bold text-[#0F253B]">Add photos or videos</span>
-              <span className="text-[11px] text-gray-400 font-medium">Images up to 10MB · video up to 100MB</span>
-              <input type="file" accept="image/*,video/*" multiple className="hidden" onChange={addMedia} />
+              <span className="text-xs font-bold text-[#0F253B]">Add photos, videos or PDFs</span>
+              <span className="text-[11px] text-gray-400 font-medium">Images &amp; PDFs up to 15MB · video up to 100MB</span>
+              <input type="file" accept="image/*,video/*,application/pdf" multiple className="hidden" onChange={addMedia} />
             </label>
 
             {form.media.length > 0 && (
@@ -420,8 +444,8 @@ function RequestModal({ initial, properties, suppliers, onClose, onSave }) {
                       <X size={13} />
                     </button>
                     <p className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-gray-400 truncate">
-                      {isVideo(item) ? <Film size={11} /> : <ImageIcon size={11} />}
-                      <span className="truncate">{item.name || (isVideo(item) ? "Video" : "Photo")}</span>
+                      {isVideo(item) ? <Film size={11} /> : isPdf(item) ? <FileText size={11} /> : <ImageIcon size={11} />}
+                      <span className="truncate">{item.name || mediaKind(item)}</span>
                     </p>
                   </div>
                 ))}
@@ -631,14 +655,14 @@ function ViewModal({ entry, onClose, onEdit }) {
 
         {media.length > 0 && (
           <div className="mt-5">
-            <p className={LABEL}>Photos &amp; Videos ({media.length})</p>
+            <p className={LABEL}>Photos, Videos &amp; PDFs ({media.length})</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {media.map((item) => (
                 <div key={item.url}>
                   <MediaTile item={item} className="w-full h-32" />
                   <p className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-gray-400 truncate">
-                    {isVideo(item) ? <Film size={11} /> : <ImageIcon size={11} />}
-                    <span className="truncate">{item.name || (isVideo(item) ? "Video" : "Photo")}</span>
+                    {isVideo(item) ? <Film size={11} /> : isPdf(item) ? <FileText size={11} /> : <ImageIcon size={11} />}
+                    <span className="truncate">{item.name || mediaKind(item)}</span>
                   </p>
                 </div>
               ))}
@@ -937,7 +961,6 @@ function FragmentRow({ m, srNo, open, steps, onToggle, onStatus, onView, onEdit,
               <option key={s} value={s}>{nice(s)}</option>
             ))}
           </select>
-          <div className="mt-1"><Badge tone={STATUS_TONE[m.status] || "gray"}>{nice(m.status)}</Badge></div>
         </td>
         <td className="px-4 py-3 text-right font-bold text-[#0F253B] whitespace-nowrap">{m.cost != null ? money(m.cost) : "—"}</td>
         <td className="px-4 py-3">

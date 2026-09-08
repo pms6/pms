@@ -38,7 +38,11 @@ const cleanMedia = (media) => {
       url: String(f?.url ?? "").trim(),
       publicId: String(f?.publicId ?? "").trim(),
       name: String(f?.name ?? "").trim(),
-      type: f?.type === "video" ? "video" : "image",
+      type: ["video", "pdf"].includes(f?.type)
+        ? f.type
+        : String(f?.format ?? "").toLowerCase() === "pdf" || /\.pdf(\?|$)/i.test(f?.url ?? "")
+        ? "pdf"
+        : "image",
       format: String(f?.format ?? "").trim(),
       bytes: Number(f?.bytes) || 0,
     }))

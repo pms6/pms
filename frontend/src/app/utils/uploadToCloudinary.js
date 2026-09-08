@@ -262,6 +262,10 @@ export const uploadAnyFileToCloudinary = async (file) => {
 // ---------------------------------------------------------------------------
 export const MEDIA_IMAGE_MAX_SIZE = 10 * 1024 * 1024; // 10MB
 export const MEDIA_VIDEO_MAX_SIZE = 100 * 1024 * 1024; // 100MB
+// PDFs attached to a maintenance entry — a quote, an invoice, a report. Routed
+// through Cloudinary's `auto` endpoint, which stores a PDF as an `image`
+// resource, so the 15MB image-tier limit applies.
+export const MEDIA_PDF_MAX_SIZE = 15 * 1024 * 1024; // 15MB
 
 export const uploadMediaToCloudinary = async (file) => {
   if (!cloudName || !uploadPreset) {
@@ -273,14 +277,19 @@ export const uploadMediaToCloudinary = async (file) => {
 
   const isImage = file.type.startsWith("image/");
   const isVideo = file.type.startsWith("video/");
-  if (!isImage && !isVideo) {
-    throw new Error(`"${file.name}" is not a photo or video`);
+  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+  if (!isImage && !isVideo && !isPdf) {
+    throw new Error(`"${file.name}" is not a photo, video or PDF`);
   }
   if (file.size === 0) {
     throw new Error(`"${file.name}" is empty`);
   }
 
-  const limit = isVideo ? MEDIA_VIDEO_MAX_SIZE : MEDIA_IMAGE_MAX_SIZE;
+  const limit = isVideo
+    ? MEDIA_VIDEO_MAX_SIZE
+    : isPdf
+    ? MEDIA_PDF_MAX_SIZE
+    : MEDIA_IMAGE_MAX_SIZE;
   if (file.size > limit) {
     throw new Error(
       `"${file.name}" is ${formatBytes(file.size)} — the limit is ${formatBytes(limit)}`
@@ -309,11 +318,18 @@ export const uploadMediaToCloudinary = async (file) => {
     throw new Error(data?.error?.message || `Upload failed with status ${response.status}`);
   }
 
+  const type =
+    data.resource_type === "video" || isVideo
+      ? "video"
+      : isPdf || data.format === "pdf"
+      ? "pdf"
+      : "image";
+
   return {
     url: data.secure_url,
     publicId: data.public_id,
     name: file.name,
-    type: data.resource_type === "video" || isVideo ? "video" : "image",
+    type,
     format: data.format || file.type || "",
     bytes: data.bytes || file.size,
   };

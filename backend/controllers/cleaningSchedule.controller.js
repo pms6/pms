@@ -6,10 +6,24 @@ const EDITABLE_KEYS = [
   "property",
   "date",
   "status",
+  "emailSent",
+  "callMade",
+  "contactEmail",
+  "contactPhone",
+  "tasks",
   "cleaner",
   "message",
   "notes",
 ];
+
+// [{ name, done }] straight from the board's checklist editor. Drop blank rows
+// and coerce the flag so a stray string can't slip into the schema.
+const cleanTasks = (tasks) => {
+  if (!Array.isArray(tasks)) return [];
+  return tasks
+    .map((t) => ({ name: String(t?.name ?? "").trim(), done: Boolean(t?.done) }))
+    .filter((t) => t.name);
+};
 
 const pickPayload = (body) => {
   const payload = {};
@@ -20,6 +34,14 @@ const pickPayload = (body) => {
   if (payload.cleaner !== undefined) payload.cleaner = String(payload.cleaner).trim();
   if (payload.message !== undefined) payload.message = String(payload.message).trim();
   if (payload.notes !== undefined) payload.notes = String(payload.notes).trim();
+  if (payload.emailSent !== undefined) payload.emailSent = Boolean(payload.emailSent);
+  if (payload.callMade !== undefined) payload.callMade = Boolean(payload.callMade);
+  if (payload.contactEmail !== undefined) payload.contactEmail = String(payload.contactEmail).trim();
+  if (payload.contactPhone !== undefined) payload.contactPhone = String(payload.contactPhone).trim();
+  // A channel that wasn't used carries no detail.
+  if (payload.emailSent === false) payload.contactEmail = "";
+  if (payload.callMade === false) payload.contactPhone = "";
+  if (payload.tasks !== undefined) payload.tasks = cleanTasks(payload.tasks);
   if (payload.propertyId === "") payload.propertyId = null;
   if (payload.status !== undefined && !CLEANING_STATUSES.includes(payload.status)) {
     delete payload.status;

@@ -37,7 +37,9 @@ const mediaSchema = new mongoose.Schema(
     url: { type: String, trim: true, required: true },
     publicId: { type: String, trim: true, default: "" },
     name: { type: String, trim: true, default: "" },
-    type: { type: String, enum: ["image", "video"], default: "image" },
+    // "pdf" covers documents attached to an entry — a quote, an invoice, a
+    // contractor's report — which Cloudinary stores as an `image` resource.
+    type: { type: String, enum: ["image", "video", "pdf"], default: "image" },
     format: { type: String, trim: true, default: "" },
     bytes: { type: Number, default: 0 },
   },
