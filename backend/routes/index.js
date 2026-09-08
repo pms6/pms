@@ -26,7 +26,6 @@ import internetDetailRoutes from "./internetDetail.route.js"
 import checkInRoutes from "./checkIn.route.js"
 import checkOutRoutes from "./checkOut.route.js"
 import depositRegisterRoutes from "./depositRegister.route.js"
-import roomStatusRoutes from "./roomStatus.route.js"
 import referenceDataRoutes from "./referenceData.route.js"
 import clientDatabaseRoutes from "./clientDatabase.route.js"
 import inventoryRoutes from "./inventory.route.js"
@@ -79,7 +78,6 @@ router.use("/check-ins", checkInRoutes);
 router.use("/check-outs", checkOutRoutes);
 router.use("/reference-data", referenceDataRoutes);
 router.use("/deposit-register", depositRegisterRoutes);
-router.use("/room-status", roomStatusRoutes);
 router.use("/client-database", clientDatabaseRoutes);
 
 // Inventory — the schedule of condition, flattened across every property and

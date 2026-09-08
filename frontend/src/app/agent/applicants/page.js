@@ -5,6 +5,7 @@ import { Plus, Pencil, Trash2, X, ChevronDown, ChevronRight } from "lucide-react
 import { PageHeader, Badge } from "../../Shared/ui";
 import { applicantEntries } from "../../Shared/applicant";
 import api from "../../api/api";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const REF_STATUS = ["pending", "passed", "failed"];
 const ONBOARDING = ["in_progress", "complete"];
@@ -51,7 +52,7 @@ function ApplicantModal({ initial, leads, onClose, onSaved }) {
   const labelCls = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-bold text-[#0F253B]">{isEdit ? "Edit Applicant" : "New Applicant"}</h3>

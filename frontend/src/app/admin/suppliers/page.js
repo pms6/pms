@@ -5,6 +5,7 @@ import { Plus, Upload, Download, Search, X, Star, Eye, Pencil, Archive, FileText
 import { PageHeader, Badge } from "../../Shared/ui";
 import { SPECIALISMS, SUPPLIER_PERMISSIONS } from "../_data/dummy";
 import api from "../../api/api";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const FIELD = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
 const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
@@ -60,7 +61,7 @@ function SupplierModal({ initial, onClose, onSave }) {
   const allSpecs = [...new Set([...SPECIALISMS, ...form.specialisms])];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-bold text-[#0F253B]">{isEdit ? "Supplier" : "New Supplier"}</h3>

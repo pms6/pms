@@ -7,7 +7,6 @@ import {
   Download,
   Filter,
   History,
-  Home,
   Pencil,
   Plus,
   RotateCcw,
@@ -223,6 +222,26 @@ export default function AdminVoidPage() {
       );
     }
 
+    if (periodType === "week") {
+      // Monday-based start of the current week (UTC)
+      const dow = (now.getUTCDay() + 6) % 7;
+      const weekStart = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dow)
+      );
+      return start >= weekStart;
+    }
+
+    if (periodType === "thisMonth") {
+      return (
+        start.getUTCFullYear() === now.getUTCFullYear() &&
+        start.getUTCMonth() === now.getUTCMonth()
+      );
+    }
+
+    if (periodType === "thisYear") {
+      return start.getUTCFullYear() === now.getUTCFullYear();
+    }
+
     if (periodType === "6months") {
       const sixMonthsAgo = new Date(
         Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1)
@@ -311,11 +330,25 @@ export default function AdminVoidPage() {
     [visiblePeriods]
   );
 
+  // Average void loss per void day across the selected period, plus the
+  // week / month / year run-rate projected from it (30-day month, same as
+  // the daily-rent model used throughout this page).
+  const voidPerDay = useMemo(
+    () => (totalDays > 0 ? totalVoid / totalDays : 0),
+    [totalVoid, totalDays]
+  );
+  const voidPerWeek = voidPerDay * 7;
+  const voidPerMonth = voidPerDay * 30;
+  const voidPerYear = voidPerDay * 365;
+
   const stats = [
     { label: "Total Void", value: money(totalVoid), icon: CalendarRange, tone: "navy" },
+    { label: "Void / Week", value: money(voidPerWeek), icon: CalendarRange, tone: "light" },
+    { label: "Void / Month", value: money(voidPerMonth), icon: CalendarRange, tone: "light" },
+    { label: "Void / Year", value: money(voidPerYear), icon: CalendarRange, tone: "light" },
+    { label: "Void / Day", value: rate(voidPerDay), icon: CalendarRange, tone: "light" },
     { label: "Void Periods", value: countedPeriods.length, icon: DoorOpen, tone: "light" },
     { label: "Void Days", value: totalDays, icon: CalendarRange, tone: "light" },
-    { label: "Rooms", value: rooms.length, icon: Home, tone: "light" },
   ];
 
   const handleField = (field) => (event) => {
@@ -527,6 +560,9 @@ export default function AdminVoidPage() {
         timeZone: "UTC",
       });
     }
+    if (periodType === "week") return "This week";
+    if (periodType === "thisMonth") return "This month";
+    if (periodType === "thisYear") return "This year";
     if (periodType === "6months") return "Last 6 months";
     if (periodType === "12months") return "Last 12 months";
     return "All time";
@@ -592,7 +628,7 @@ export default function AdminVoidPage() {
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+      <div className="grid gap-6">
         {/* Form */}
         <form
           ref={formRef}
@@ -809,79 +845,6 @@ export default function AdminVoidPage() {
             )}
           </div>
         </form>
-
-        {/* Room list */}
-        <div className="rounded-2xl border border-gray-100 bg-white p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-bold text-[#0F253B]">Room list</h2>
-            <Badge tone="blue">{rooms.length} rooms</Badge>
-          </div>
-
-          {rooms.length === 0 && (
-            <p className="rounded-xl border border-dashed border-gray-200 px-4 py-6 text-center text-sm font-medium text-gray-400">
-              No rooms found in your organisation.
-            </p>
-          )}
-
-          <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
-            {rooms.map((room) => {
-              const roomPropertyId =
-                room.propertyId && typeof room.propertyId === "object"
-                  ? room.propertyId._id
-                  : room.propertyId;
-              const isOccupied = room.status === "OCCUPIED";
-              const isSelected = String(form.roomId) === String(room._id);
-
-              return (
-                <button
-                  key={room._id}
-                  type="button"
-                  disabled={isOccupied}
-                  onClick={() => {
-                    if (isOccupied) return;
-                    setForm((current) => ({
-                      ...current,
-                      propertyId: roomPropertyId || current.propertyId,
-                      roomId: room._id,
-                    }));
-                  }}
-                  className={`w-full rounded-xl border p-3 text-left transition-all ${
-                    isSelected
-                      ? "border-[#F47C3C] bg-orange-50"
-                      : isOccupied
-                      ? "border-gray-100 bg-gray-100 opacity-60 cursor-not-allowed"
-                      : "border-gray-100 bg-gray-50 hover:bg-white"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-bold text-[#0F253B]">
-                        {room.roomName || room.roomNumber || "Room"}
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        {getPropertyName(roomPropertyId)}
-                      </p>
-                    </div>
-                    <Badge tone={isOccupied ? "orange" : "green"}>
-                      {room.status || "AVAILABLE"}
-                    </Badge>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
-                    <span>Rent</span>
-                    <span className="font-bold text-[#0F253B]">
-                      {money(room.monthlyRent || 0)}
-                    </span>
-                  </div>
-                  {isOccupied && (
-                    <p className="mt-1.5 text-[11px] font-medium text-amber-600">
-                      Occupied – cannot add void
-                    </p>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
       </div>
 
       {/* Table + filters */}
@@ -902,6 +865,9 @@ export default function AdminVoidPage() {
               className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-medium outline-none focus:border-[#F47C3C] focus:bg-white"
             >
               <option value="all">All time</option>
+              <option value="week">This week</option>
+              <option value="thisMonth">This month</option>
+              <option value="thisYear">This year</option>
               <option value="month">Specific month</option>
               <option value="6months">Last 6 months</option>
               <option value="12months">Last 12 months</option>
@@ -1034,7 +1000,7 @@ export default function AdminVoidPage() {
               <p className="text-xs text-blue-600 mt-0.5">
                 {countedPeriods.length} active ·{" "}
                 {visiblePeriods.filter((p) => p.isDeleted).length} removed ·{" "}
-                {totalDays} days
+                {totalDays} days · {rate(voidPerDay)} / day
               </p>
             </div>
             <div className="text-right">
@@ -1042,6 +1008,9 @@ export default function AdminVoidPage() {
                 Total void loss
               </p>
               <p className="text-xl font-bold text-blue-900">{money(totalVoid)}</p>
+              <p className="text-[11px] font-medium text-blue-600">
+                {rate(voidPerDay)} per void day
+              </p>
             </div>
           </div>
         )}

@@ -17,6 +17,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 import api from "@/app/api/api";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 // Map the backend status enum to tenant-facing presentation.
 const STATUS = {
@@ -315,7 +316,7 @@ function RescheduleRequestModal({ viewing, onClose, onConfirm }) {
     "w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none transition focus:bg-white focus:ring-2 focus:ring-amber-400";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl"
         onClick={(e) => e.stopPropagation()}

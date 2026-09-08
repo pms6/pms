@@ -5,6 +5,7 @@ import { Plus, Search, X, Pencil, Trash2, FileText, Paperclip, Loader2 } from "l
 import { PageHeader, Badge } from "../../Shared/ui";
 import { OWNER_STATUS, money } from "../_data/dummy";
 import api from "@/app/api/api";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const PAYOUT_TONE = { paid: "green", due: "amber", pending: "blue" };
 const statusMeta = (v) => OWNER_STATUS.find((s) => s.v === v) || { label: v, tone: "gray" };
@@ -66,7 +67,7 @@ function OwnerModal({ initial, propertyOptions, onClose, onSave }) {
   const labelCls = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-bold text-[#0F253B]">{isEdit ? "Edit Owner" : "Add Property Owner"}</h3>

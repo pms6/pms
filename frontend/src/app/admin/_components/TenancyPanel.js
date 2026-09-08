@@ -8,6 +8,7 @@ import {
 import { Badge } from "../../Shared/ui";
 import RentCollectionPanel from "./RentCollectionPanel";
 import { tenants, money } from "../_data/dummy";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const INTERESTS = ["Fitness", "Cooking", "Live music", "Cycling", "Films", "Travel"];
 
@@ -72,7 +73,7 @@ export default function TenancyPanel({ tenancy, propertyName, onClose }) {
   const act = (label) => () => alert(`${label} (demo)`);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-3xl bg-[#F8FAFC] h-full overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
         {/* Sticky header */}
         <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-5 sm:px-6 py-4 flex items-center justify-between">

@@ -26,7 +26,6 @@ import {
   LogIn,
   LogOut,
   PiggyBank,
-  Table2,
   Database,
   Contact,
 } from "lucide-react";
@@ -71,7 +70,6 @@ const NAV = [
   // The registers that replace the office spreadsheets, in the same order as
   // the owner portal.
   { href: "/manager/client-database", label: "Client Database", icon: Database },
-  { href: "/manager/room-status", label: "Room Status List", icon: Table2 },
   { href: "/manager/check-in", label: "Check-in", icon: LogIn },
   { href: "/manager/reference-data", label: "Reference Data", icon: Contact },
   { href: "/manager/deposit-register", label: "Deposit", icon: PiggyBank },

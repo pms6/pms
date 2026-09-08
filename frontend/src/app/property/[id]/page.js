@@ -32,6 +32,7 @@ import {
   propertyLocation,
   formatMoney,
 } from "../../utils/listings";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const FALLBACK = (seed) =>
   `https://picsum.photos/seed/${encodeURIComponent(seed || "pms")}/1200/800`;
@@ -553,7 +554,7 @@ function EnquiryModal({ property, room, onClose }) {
   const title = room ? `${room.title || room.roomName}` : property.name;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-6"
         onClick={(e) => e.stopPropagation()}

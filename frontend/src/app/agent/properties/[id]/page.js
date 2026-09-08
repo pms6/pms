@@ -7,6 +7,7 @@ import { ArrowLeft, MapPin, UserRound, Plus, Pencil, Trash2, BedDouble, PoundSte
 import { Badge } from "../../../Shared/ui";
 import TenantSelect from "../../_components/TenantSelect";
 import { properties, RENTAL_TYPES, GUARANTOR_REQ, LETTING_STATUS, LETTING_STATUS_TONE, viewings, maintenance, inspections, deposits, reviews, money } from "../../_data/dummy";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const typeTone = (v) => RENTAL_TYPES.find((t) => t.v === v)?.tone || "orange";
 const FIELD = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
@@ -51,7 +52,7 @@ function RoomModal({ initial, onClose, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-bold text-[#0F253B]">{isEdit ? "Edit Room" : "Add Room"}</h3>

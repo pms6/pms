@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { X, Loader2, UserRound } from "lucide-react";
 import api from "../../../api/api";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 // Helper for ImportExcelModal compatibility
 export function toOccupancyPayload(f) {
@@ -157,7 +158,7 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4 overflow-y-auto" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4 overflow-y-auto" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl max-h-[92vh] sm:max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="p-5 sm:p-6 pb-4 border-b flex justify-between items-start shrink-0">
           <div>

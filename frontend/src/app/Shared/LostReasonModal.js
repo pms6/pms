@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { X, Loader2 } from "lucide-react";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 // Common reasons, offered as one-tap fills for the remark box.
 const PRESETS = [
@@ -36,7 +37,7 @@ export default function LostReasonModal({ lead, onCancel, onConfirm }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onCancel)}>
       <div
         className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7"
         onClick={(e) => e.stopPropagation()}

@@ -249,8 +249,6 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
         Every client here is a{" "}
         <Link href={`${basePath}/check-in`} className="font-bold text-[#F47C3C] hover:underline">check-in</Link>{" "}
         record, so editing or deleting a row changes that record — and the change shows on the{" "}
-        <Link href={`${basePath}/room-status`} className="font-bold text-[#F47C3C] hover:underline">room status list</Link>{" "}
-        and the{" "}
         <Link href={`${basePath}/deposit-register`} className="font-bold text-[#F47C3C] hover:underline">deposit register</Link>{" "}
         too. Room counts and room status come from the room records.
       </div>

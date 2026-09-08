@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, Pencil, Trash2, Search, X, MapPin, DoorOpen, UserRound } from "lucide-react";
 import api from "../api/api";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const STATUS_BADGE = {
   active: "bg-emerald-100 text-emerald-700",
@@ -76,7 +77,7 @@ function PropertyModal({ initial, owners, onOwnersChange, onClose, onSaved }) {
   const labelCls = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-bold text-[#0F253B]">{isEdit ? "Edit Property" : "Add Property"}</h3>

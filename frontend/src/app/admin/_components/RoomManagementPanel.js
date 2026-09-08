@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Badge } from "../../Shared/ui";
 import { viewings, leads, welcomePack, money } from "../_data/dummy";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const AMENITIES = ["Wi-Fi", "Desk & chair", "Wardrobe", "En-suite", "Smart TV"];
 
@@ -42,7 +43,7 @@ export default function RoomManagementPanel({ room, property, onEdit, onClose })
   const LETTING_TONE = { Available: "green", "Available Soon": "amber", Occupied: "orange" };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-3xl bg-[#F8FAFC] h-full overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-5 sm:px-6 py-4 flex items-center justify-between">
           <div>

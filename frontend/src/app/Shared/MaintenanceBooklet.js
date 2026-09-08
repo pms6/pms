@@ -25,6 +25,7 @@ import { PageHeader, Badge } from "./ui";
 import api from "@/app/api/api";
 import { uploadMediaToCloudinary } from "@/app/utils/uploadToCloudinary";
 import { exportMaintenanceSheet } from "@/app/utils/maintenanceSheet";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 /* ------------------------------------------------------------------ *
  * The Maintenance Booklet — the sheet the office keeps by hand:
@@ -280,7 +281,7 @@ function RequestModal({ initial, properties, suppliers, onClose, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

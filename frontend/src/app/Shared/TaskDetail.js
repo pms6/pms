@@ -11,6 +11,7 @@ import {
   PRIORITY_TONE, STATUS_TONE, SETTABLE_STATUSES,
   fmtDate, fmtDateTime, displayName, dueLabel, FIELD, LABEL,
 } from "./tasks";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 function Meta({ label, value, icon: Icon }) {
   return (
@@ -140,7 +141,7 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-3xl bg-white rounded-3xl shadow-2xl max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

@@ -810,12 +810,14 @@ export const getAvailableRooms = async (req, res) => {
       const property = room.propertyId;
       const tenancy = tenancyByRoom[room._id.toString()];
 
-      // Determine leave / available-from date
+      // Determine leave / available-from date. An `availableFrom` the office
+      // set on the room itself is the deliberate answer to "when is this free?"
+      // so it takes precedence over the fixed-term end we infer from tenancy.
       let leaveDate = null;
-      if (tenancy?.fixedTermEnd) {
-        leaveDate = new Date(tenancy.fixedTermEnd);
-      } else if (room.availableFrom) {
+      if (room.availableFrom) {
         leaveDate = new Date(room.availableFrom);
+      } else if (tenancy?.fixedTermEnd) {
+        leaveDate = new Date(tenancy.fixedTermEnd);
       }
 
       // Ex-tenant name
@@ -876,20 +878,25 @@ export const getAvailableRooms = async (req, res) => {
       };
 
       // Decision logic
+      //
+      // A "free from" date still in the future — whether it came from an
+      // `availableFrom` the office typed on the room, or the end of the
+      // current fixed term — means the room is NOT available yet. It belongs
+      // in Coming Soon, no matter what the room's status flag says.
+      //
+      // The one exception is `availableImmediately`, a deliberate tick in the
+      // room form: it always wins and keeps the room in Available Now.
+      const hasFutureFreeDate = leaveDate && leaveDate > now;
+
       const isAvailableNow =
-        room.status === "AVAILABLE" ||
         room.availableImmediately === true ||
-        !tenancy ||
-        (leaveDate && leaveDate <= now);
+        (!hasFutureFreeDate &&
+          (room.status === "AVAILABLE" ||
+            !tenancy ||
+            (leaveDate && leaveDate <= now)));
 
       const isComingSoon =
-        leaveDate &&
-        leaveDate > now &&
-        leaveDate <= futureLimit &&
-        (room.status === "OCCUPIED" ||
-          room.status === "AVAILABLE_SOON" ||
-          room.status === "RESERVED" ||
-          !!tenancy);
+        !isAvailableNow && hasFutureFreeDate && leaveDate <= futureLimit;
 
       if (isAvailableNow) {
         row.status = "Available Now";

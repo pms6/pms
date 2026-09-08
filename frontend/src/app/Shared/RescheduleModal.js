@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { X, Loader2, CalendarClock, ArrowRight } from "lucide-react";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const PRESETS = [
   "Tenant requested",
@@ -54,7 +55,7 @@ export default function RescheduleModal({ viewing, onClose, onConfirm }) {
     "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

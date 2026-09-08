@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { X, FileSpreadsheet, Download, UploadCloud, Loader2, CheckCircle2, AlertTriangle, Mail } from "lucide-react";
 import api from "../../../api/api";
 import { toOccupancyPayload } from "./AddOccupancyModal";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 /* Canonical import columns → also the template header row (in order). */
 const COLUMNS = [
@@ -110,7 +111,7 @@ export default function ImportExcelModal({ onClose, onImported }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-3xl max-h-[90vh] flex flex-col bg-white rounded-3xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}

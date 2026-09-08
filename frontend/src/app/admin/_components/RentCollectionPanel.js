@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Badge } from "../../Shared/ui";
 import { money } from "../_data/dummy";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const STATUS_TONE = { Paid: "green", Due: "amber", Overdue: "red" };
 
@@ -81,7 +82,7 @@ export default function RentCollectionPanel({ charge, onClose }) {
   const currentDue = charge.status === "paid" ? 0 : amount;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-3xl bg-[#F8FAFC] h-full overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-5 sm:px-6 py-4 flex items-center justify-between">
           <div>

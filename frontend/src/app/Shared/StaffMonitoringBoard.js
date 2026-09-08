@@ -18,6 +18,7 @@ import {
 import { PageHeader, Badge } from "./ui";
 import OnlineStaffPanel from "./OnlineStaffPanel";
 import api from "@/app/api/api";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 /* ---------------------------------------------------------------------------
  * Staff monitoring — the admin's review surface.
@@ -121,7 +122,7 @@ function PolicyModal({ policy, onClose, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

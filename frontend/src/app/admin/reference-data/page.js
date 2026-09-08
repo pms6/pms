@@ -27,6 +27,7 @@ import {
   exportCsv,
   exportRowCsv,
 } from "../../utils/registers";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const FIELD =
   "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
@@ -353,7 +354,7 @@ function ReferenceModal({ initial, properties, candidates, onClose, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -559,7 +560,7 @@ function ReferenceDetail({ row, onClose }) {
     ) : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-xl bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

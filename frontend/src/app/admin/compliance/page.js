@@ -12,6 +12,7 @@ import {
 import { ExpiryBadge } from "../../Components/PropertyContract";
 import PdfFrame from "../../Shared/PdfFrame";
 import { fileKind, kindLabel } from "../../Shared/fileType";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const STATUS_TONE = { expired: "red", warning: "amber", valid: "green" };
 
@@ -391,7 +392,7 @@ function ComplianceModal({ record, properties, onClose, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-bold text-[#0F253B]">

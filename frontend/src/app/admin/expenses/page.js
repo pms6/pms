@@ -20,6 +20,7 @@ import { fileKind, kindLabel } from "../../Shared/fileType";
 import PdfFrame from "../../Shared/PdfFrame";
 import api from "../../api/api";
 import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 // MUST stay in sync with EXPENSE_CATEGORIES in backend/models/Expense.js.
 const EXPENSE_CATEGORIES = [
@@ -363,7 +364,7 @@ function ExpenseModal({ expense, properties, onClose, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

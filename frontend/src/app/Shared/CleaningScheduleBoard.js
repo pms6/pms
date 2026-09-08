@@ -26,6 +26,7 @@ import {
   monthKey,
   monthLabel,
 } from "@/app/utils/cleaningSheet";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 /* ------------------------------------------------------------------ *
  * The Cleaning Messages Schedule — the office's month-by-month sheet:
@@ -103,7 +104,7 @@ function EntryModal({ initial, properties, onClose, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -213,7 +214,7 @@ function ViewRow({ label, children }) {
 
 function ViewModal({ row, onClose, onEdit }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

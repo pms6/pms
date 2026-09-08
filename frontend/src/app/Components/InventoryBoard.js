@@ -27,6 +27,7 @@ import {
 import { exportInventorySheet, scopeLabel } from "@/app/utils/inventorySheet";
 import api from "@/app/api/api";
 import uploadToCloudinary from "../utils/uploadToCloudinary";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const FIELD =
   "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
@@ -138,7 +139,7 @@ function ItemModal({ initial, scopes, onClose, onSave }) {
   const value = (Number(form.quantity) || 0) * (Number(form.price) || 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -333,7 +334,7 @@ function ViewRow({ label, children }) {
 
 function ViewModal({ row, onClose, onEdit }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-xl bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

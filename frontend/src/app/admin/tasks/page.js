@@ -36,6 +36,7 @@ import {
   FIELD,
   LABEL,
 } from "../../Shared/tasks";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const STATUS_META = {
   "Not Started": { icon: Circle, tone: "text-slate-500 bg-slate-100" },
@@ -103,7 +104,7 @@ function RescheduleModal({ task, onClose, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-6"
         onClick={(e) => e.stopPropagation()}

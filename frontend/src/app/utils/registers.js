@@ -1,7 +1,7 @@
 // Shared vocabulary and formatting for the admin "Database" registers —
-// Room Status List, Check-in, Deposit and Check-out.
+// Client Database, Check-in, Deposit and Check-out.
 //
-// The four screens read the same records from different angles, so the enum
+// These screens read the same records from different angles, so the enum
 // labels, tones and the money/date formatting live here rather than being
 // re-declared (and drifting) on each page.
 //

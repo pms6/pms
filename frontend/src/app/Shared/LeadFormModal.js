@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { X, Loader2, Clock3 } from "lucide-react";
 import api from "../api/api";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 // "pending" is the intake stage every lead is created into — see the Lead
 // model. It is listed so an EDIT can send a lead back to it.
@@ -173,7 +174,7 @@ export default function LeadFormModal({ lead, properties = [], onClose, onSaved 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+      onClick={guardModalClose(onClose)}
     >
       <div
         className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[90vh] overflow-y-auto"

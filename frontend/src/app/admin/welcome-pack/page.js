@@ -5,6 +5,7 @@ import { Plus, Wifi, PhoneCall, Video, Trash2, Edit2, Eye, X, Building2, FileTex
 import { PageHeader } from "../../Shared/ui";
 import api from "../../api/api";
 import { uploadFileToCloudinary } from "@/app/utils/uploadToCloudinary";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const FIELD = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
 const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
@@ -213,7 +214,7 @@ function CardModal({ properties, initialData, onClose, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-bold text-[#0F253B]">{initialData ? "Update Info Card" : "New Information Card"}</h3>

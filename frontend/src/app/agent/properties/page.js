@@ -6,6 +6,7 @@ import { Plus, MapPin, BedDouble, Search, X, UploadCloud, UserRound, DoorOpen, T
 import { PageHeader, Badge } from "../../Shared/ui";
 import TenantSelect from "../_components/TenantSelect";
 import { properties, owners, RENTAL_TYPES, TENANT_TYPES, GUARANTOR_REQ, LETTING_STATUS, LETTING_STATUS_TONE, img, money } from "../_data/dummy";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const typeMeta = (v) => RENTAL_TYPES.find((t) => t.v === v);
 const typeTone = (v) => typeMeta(v)?.tone || "gray";
@@ -121,7 +122,7 @@ function PropertyModal({ onClose, onCreate }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-bold text-[#0F253B]">New Property</h3>

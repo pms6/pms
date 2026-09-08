@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 function ViewingModal({ onClose, onCreate, leads, properties }) {
   const [form, setForm] = useState({
@@ -16,7 +17,7 @@ function ViewingModal({ onClose, onCreate, leads, properties }) {
   const field = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl text-sm font-medium";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div className="w-full max-w-md bg-white rounded-3xl p-7" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-xl font-bold mb-5">Schedule Viewing</h3>
         <form onSubmit={(e) => { e.preventDefault(); onCreate(form); }} className="space-y-4">
