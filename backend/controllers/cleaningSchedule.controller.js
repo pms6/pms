@@ -10,10 +10,8 @@ const EDITABLE_KEYS = [
   "category",
   "date",
   "status",
-  "emailSent",
+  "messageSent",
   "callMade",
-  "contactEmail",
-  "contactPhone",
   "cleaner",
   "message",
   "notes",
@@ -51,13 +49,8 @@ const pickPayload = (body) => {
   if (payload.cleaner !== undefined) payload.cleaner = String(payload.cleaner).trim();
   if (payload.message !== undefined) payload.message = String(payload.message).trim();
   if (payload.notes !== undefined) payload.notes = String(payload.notes).trim();
-  if (payload.emailSent !== undefined) payload.emailSent = Boolean(payload.emailSent);
+  if (payload.messageSent !== undefined) payload.messageSent = Boolean(payload.messageSent);
   if (payload.callMade !== undefined) payload.callMade = Boolean(payload.callMade);
-  if (payload.contactEmail !== undefined) payload.contactEmail = String(payload.contactEmail).trim();
-  if (payload.contactPhone !== undefined) payload.contactPhone = String(payload.contactPhone).trim();
-  // A channel that wasn't used carries no detail.
-  if (payload.emailSent === false) payload.contactEmail = "";
-  if (payload.callMade === false) payload.contactPhone = "";
   if (payload.files !== undefined) payload.files = cleanFiles(payload.files);
   if (payload.propertyId === "") payload.propertyId = null;
   if (payload.status !== undefined && !CLEANING_STATUSES.includes(payload.status)) {

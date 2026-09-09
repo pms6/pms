@@ -18,15 +18,15 @@ export const CLEANING_STATUSES = ["PENDING", "DONE"];
 // MUST stay in sync with CLEANING_CATEGORIES in
 // frontend/src/app/Shared/CleaningScheduleBoard.js.
 export const CLEANING_CATEGORIES = [
+  "Cleaning Schedule",
+  "Self Inspection",
   "Fridge Cleaning",
   "Washing Machine Descaling",
-  "Self Inspection",
 ];
 
-// Rows written before categories existed have none. They keep reading as fridge
-// cleaning, which is what the sheet was overwhelmingly used for — see the note
-// on the field below.
-export const DEFAULT_CLEANING_CATEGORY = "Fridge Cleaning";
+// Rows written before categories existed have none. They keep reading as the
+// general "Cleaning Schedule", which the board also shows by default.
+export const DEFAULT_CLEANING_CATEGORY = "Cleaning Schedule";
 
 // One piece of evidence for a visit: a photo of the cleaned fridge, a clip of
 // the machine running its descale cycle, a signed inspection sheet.
@@ -101,13 +101,10 @@ const cleaningScheduleSchema = new mongoose.Schema(
       index: true,
     },
 
-    // How the cleaning message was sent for this visit. The office chases each
-    // clean by email, by phone, or both — these record which was done, and the
-    // address / number it went to.
-    emailSent: { type: Boolean, default: false },
+    // How the cleaning message was chased for this visit — by message, by call,
+    // or both. Just flags: which channel was used, nothing more.
+    messageSent: { type: Boolean, default: false },
     callMade: { type: Boolean, default: false },
-    contactEmail: { type: String, trim: true, default: "" },
-    contactPhone: { type: String, trim: true, default: "" },
 
     // What goes out to the cleaner, and anything the office needs to remember.
     // `message` is the cleaning message for this visit — the sheet is named

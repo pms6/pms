@@ -15,13 +15,9 @@ import {
   Building2,
   CheckCircle2,
   Circle,
-  Mail,
-  Phone,
-  Paperclip,
   Refrigerator,
   WashingMachine,
   ClipboardCheck,
-  LayoutGrid,
 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import { MediaUploader, MediaViewerModal, AttachmentRow } from "./MediaAttachments";
@@ -48,40 +44,45 @@ export const CLEANING_STATUSES = ["PENDING", "DONE"];
 const STATUS_LABEL = { PENDING: "Pending", DONE: "Done" };
 const STATUS_TONE = { PENDING: "amber", DONE: "green" };
 
-// The three jobs the office runs on its properties. The board is read one
-// category at a time from the tiles across the top, the way the compliance
-// register is read one certificate type at a time.
+// The sections the board is split into. Each tile across the top is one of
+// these, read on its own — the way the compliance register is read one
+// certificate type at a time. "Cleaning Schedule" is the general list and the
+// one shown by default.
 // MUST stay in sync with CLEANING_CATEGORIES in
 // backend/models/CleaningSchedule.js.
 export const CLEANING_CATEGORIES = [
+  "Cleaning Schedule",
+  "Self Inspection",
   "Fridge Cleaning",
   "Washing Machine Descaling",
-  "Self Inspection",
 ];
 
-// Rows written before categories existed have none — they read as the category
-// the sheet was overwhelmingly used for, matching the schema default.
-const DEFAULT_CATEGORY = "Fridge Cleaning";
+// Rows written before categories existed have none — they read as the general
+// "Cleaning Schedule", matching the schema default.
+const DEFAULT_CATEGORY = "Cleaning Schedule";
 const categoryOf = (row) =>
   CLEANING_CATEGORIES.includes(row?.category) ? row.category : DEFAULT_CATEGORY;
 
 const CATEGORY_ICON = {
+  "Cleaning Schedule": Sparkles,
+  "Self Inspection": ClipboardCheck,
   "Fridge Cleaning": Refrigerator,
   "Washing Machine Descaling": WashingMachine,
-  "Self Inspection": ClipboardCheck,
 };
 
 const CATEGORY_TONE = {
+  "Cleaning Schedule": "gray",
+  "Self Inspection": "orange",
   "Fridge Cleaning": "blue",
   "Washing Machine Descaling": "amber",
-  "Self Inspection": "orange",
 };
 
-// The table has no room for "Washing Machine Descaling" in full.
+// The table has no room for the longer names in full.
 const CATEGORY_SHORT = {
+  "Cleaning Schedule": "Schedule",
+  "Self Inspection": "Inspection",
   "Fridge Cleaning": "Fridge",
   "Washing Machine Descaling": "Descaling",
-  "Self Inspection": "Inspection",
 };
 
 const filesOf = (row) => (Array.isArray(row?.files) ? row.files : []);
@@ -92,10 +93,7 @@ const matchesSearch = (row, needle) =>
   [
     row.property,
     categoryOf(row),
-    row.message,
     row.notes,
-    row.contactEmail,
-    row.contactPhone,
     dayName(row.date),
     ...filesOf(row).map((f) => f.name),
   ].some((v) => String(v || "").toLowerCase().includes(needle));
@@ -125,11 +123,8 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
       : defaultCategory,
     date: toInputDate(initial?.date) || toInputDate(new Date()),
     status: initial?.status || "PENDING",
-    emailSent: Boolean(initial?.emailSent),
+    messageSent: Boolean(initial?.messageSent),
     callMade: Boolean(initial?.callMade),
-    contactEmail: initial?.contactEmail || "",
-    contactPhone: initial?.contactPhone || "",
-    message: initial?.message || "",
     notes: initial?.notes || "",
   });
 
@@ -158,14 +153,6 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
     e.preventDefault();
     if (!form.property.trim()) { setError("Property is required"); return; }
     if (!form.date) { setError("Date is required"); return; }
-    if (form.emailSent && !form.contactEmail.trim()) {
-      setError("Add the email address the message was sent to");
-      return;
-    }
-    if (form.callMade && !form.contactPhone.trim()) {
-      setError("Add the number that was called");
-      return;
-    }
     // Saving mid-upload would drop whatever has not landed yet.
     if (uploadingCount) { setError("Wait for the uploads to finish"); return; }
 
@@ -178,12 +165,8 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
         category: form.category,
         date: form.date,
         status: form.status,
-        emailSent: form.emailSent,
+        messageSent: form.messageSent,
         callMade: form.callMade,
-        // Only keep the detail for the channel that was actually used.
-        contactEmail: form.emailSent ? form.contactEmail.trim() : "",
-        contactPhone: form.callMade ? form.contactPhone.trim() : "",
-        message: form.message.trim(),
         notes: form.notes.trim(),
         files,
       });
@@ -236,34 +219,8 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
             />
           </div>
 
-          {/* Which of the three jobs this is. Buttons rather than a select:
-              there are only three, and the icon says which at a glance. */}
-          <div>
-            <label className={LABEL}>Category</label>
-            <div className="grid grid-cols-3 gap-2">
-              {CLEANING_CATEGORIES.map((c) => {
-                const Icon = CATEGORY_ICON[c];
-                const active = form.category === c;
-                return (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setForm((f) => ({ ...f, category: c }))}
-                    className={`flex flex-col items-center gap-1.5 px-2 py-3 rounded-xl border text-center transition-all ${
-                      active
-                        ? "bg-[#0F253B] text-white border-[#0F253B] shadow-sm"
-                        : "bg-gray-50 text-gray-500 border-gray-100 hover:bg-gray-100"
-                    }`}
-                  >
-                    <Icon size={18} className={active ? "text-[#F47C3C]" : "text-gray-400"} />
-                    <span className="text-[10px] font-bold uppercase tracking-wider leading-tight">
-                      {c}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          {/* The section this entry belongs to is set by the card selected on
+              the board, so the form does not ask again. */}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -283,71 +240,47 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
             </div>
           </div>
 
-          <div>
-            <label className={LABEL}>Contact</label>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={toggle("emailSent")}
-                className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-bold transition-all ${
-                  form.emailSent
-                    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-                    : "bg-gray-50 border-gray-100 text-gray-500 hover:bg-gray-100"
-                }`}
-              >
-                {form.emailSent ? <CheckCircle2 size={15} /> : <Mail size={15} />}
-                Email sent
-              </button>
+          {/* Call and Message are tracked separately — each is its own labelled
+              tick, styled like the Done toggle. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className={LABEL}>Call</label>
               <button
                 type="button"
                 onClick={toggle("callMade")}
-                className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-bold transition-all ${
+                className={`w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-bold transition-all ${
                   form.callMade
                     ? "bg-emerald-50 border-emerald-200 text-emerald-700"
                     : "bg-gray-50 border-gray-100 text-gray-500 hover:bg-gray-100"
                 }`}
               >
-                {form.callMade ? <CheckCircle2 size={15} /> : <Phone size={15} />}
-                Call made
+                {form.callMade ? (
+                  <CheckCircle2 size={15} className="text-emerald-600" />
+                ) : (
+                  <Circle size={15} className="text-gray-300" />
+                )}
+                Call
               </button>
             </div>
-
-            {(form.emailSent || form.callMade) && (
-              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {form.emailSent && (
-                  <input
-                    type="email"
-                    className={FIELD}
-                    value={form.contactEmail}
-                    onChange={set("contactEmail")}
-                    placeholder="Email address the message went to"
-                  />
+            <div>
+              <label className={LABEL}>Message</label>
+              <button
+                type="button"
+                onClick={toggle("messageSent")}
+                className={`w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-bold transition-all ${
+                  form.messageSent
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                    : "bg-gray-50 border-gray-100 text-gray-500 hover:bg-gray-100"
+                }`}
+              >
+                {form.messageSent ? (
+                  <CheckCircle2 size={15} className="text-emerald-600" />
+                ) : (
+                  <Circle size={15} className="text-gray-300" />
                 )}
-                {form.callMade && (
-                  <input
-                    type="tel"
-                    className={FIELD}
-                    value={form.contactPhone}
-                    onChange={set("contactPhone")}
-                    placeholder="Number that was called"
-                  />
-                )}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label className={LABEL}>Message</label>
-            <textarea
-              rows={3}
-              className={FIELD}
-              value={form.message}
-              onChange={set("message")}
-              placeholder="The cleaning message for this visit…"
-            />
-            <p className="text-[11px] text-gray-400 font-medium mt-1.5">
-              What goes out to the cleaner. Notes below stay in the office.
-            </p>
+                Message
+              </button>
+            </div>
           </div>
 
           <div>
@@ -411,26 +344,29 @@ function ViewModal({ row, onClose, onEdit, onViewFiles }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <ViewRow label="Month">{monthLabel(monthKey(row.date))}</ViewRow>
-          <ViewRow label="Contact">
-            {[
-              row.emailSent && `Email sent${row.contactEmail ? ` — ${row.contactEmail}` : ""}`,
-              row.callMade && `Call made${row.contactPhone ? ` — ${row.contactPhone}` : ""}`,
-            ]
-              .filter(Boolean)
-              .join(" · ") || "None yet"}
+          <ViewRow label="Call">
+            <span className="flex items-center gap-1.5">
+              {row.callMade ? (
+                <CheckCircle2 size={15} className="text-emerald-600" />
+              ) : (
+                <Circle size={15} className="text-gray-300" />
+              )}
+              Call
+            </span>
+          </ViewRow>
+          <ViewRow label="Message">
+            <span className="flex items-center gap-1.5">
+              {row.messageSent ? (
+                <CheckCircle2 size={15} className="text-emerald-600" />
+              ) : (
+                <Circle size={15} className="text-gray-300" />
+              )}
+              Message
+            </span>
           </ViewRow>
         </div>
-
-        {row.message && (
-          <div className="mt-5">
-            <p className={LABEL}>Message</p>
-            <p className="text-sm text-[#0F253B] font-medium whitespace-pre-line leading-relaxed bg-gray-50 border border-gray-100 rounded-xl px-3.5 py-3">
-              {row.message}
-            </p>
-          </div>
-        )}
 
         {row.notes && (
           <div className="mt-5">
@@ -491,7 +427,7 @@ export default function CleaningScheduleBoard({
   const [month, setMonth] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   // "All" or one of CLEANING_CATEGORIES — the tiles across the top.
-  const [category, setCategory] = useState("All");
+  const [category, setCategory] = useState(DEFAULT_CATEGORY);
 
   const [modal, setModal] = useState(null); // {} = create, row = edit
   const [viewing, setViewing] = useState(null);
@@ -536,16 +472,13 @@ export default function CleaningScheduleBoard({
       .filter((r) => (statusFilter ? r.status === statusFilter : true))
       .filter((r) => (needle ? matchesSearch(r, needle) : true));
 
-    const counts = { All: { total: base.length, done: 0 } };
+    const counts = {};
     for (const c of CLEANING_CATEGORIES) counts[c] = { total: 0, done: 0 };
 
     for (const r of base) {
       const c = categoryOf(r);
       counts[c].total++;
-      if (r.status === "DONE") {
-        counts[c].done++;
-        counts.All.done++;
-      }
+      if (r.status === "DONE") counts[c].done++;
     }
     return counts;
   }, [rows, q, month, statusFilter]);
@@ -555,7 +488,7 @@ export default function CleaningScheduleBoard({
     return rows
       .filter((r) => (month ? monthKey(r.date) === month : true))
       .filter((r) => (statusFilter ? r.status === statusFilter : true))
-      .filter((r) => (category === "All" ? true : categoryOf(r) === category))
+      .filter((r) => categoryOf(r) === category)
       .filter((r) => (needle ? matchesSearch(r, needle) : true));
   }, [rows, q, month, statusFilter, category]);
 
@@ -614,8 +547,8 @@ export default function CleaningScheduleBoard({
     { label: "Months", value: months.length },
   ];
 
-  // "All" plus the three jobs, as the register's own tabs.
-  const categoryTiles = ["All", ...CLEANING_CATEGORIES];
+  // One tile per section — the register's own tabs.
+  const categoryTiles = CLEANING_CATEGORIES;
 
   return (
     <div className="space-y-5">
@@ -663,7 +596,7 @@ export default function CleaningScheduleBoard({
           filters currently set. */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {categoryTiles.map((c) => {
-          const Icon = c === "All" ? LayoutGrid : CATEGORY_ICON[c];
+          const Icon = CATEGORY_ICON[c] || Sparkles;
           const stat = categoryCounts[c] || { total: 0, done: 0 };
           const selected = category === c;
 
@@ -704,7 +637,7 @@ export default function CleaningScheduleBoard({
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search property, cleaner, day…"
+            placeholder="Search property, day…"
             className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]"
           />
         </div>
@@ -754,18 +687,17 @@ export default function CleaningScheduleBoard({
                 <th className="px-4 py-3 w-32">Date</th>
                 <th className="px-4 py-3 w-32">Day</th>
                 <th className="px-4 py-3 w-28">Status</th>
-                <th className="px-4 py-3 w-36">Contact</th>
-                <th className="px-4 py-3 w-24">Files</th>
-                <th className="px-4 py-3">Message</th>
+                <th className="px-4 py-3 w-24">Call</th>
+                <th className="px-4 py-3 w-28">Message</th>
                 <th className="px-4 py-3 w-32 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={9} className="px-5 py-10 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin inline text-[#F47C3C]" /></td></tr>
+                <tr><td colSpan={8} className="px-5 py-10 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin inline text-[#F47C3C]" /></td></tr>
               ) : visible.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-5 py-14">
+                  <td colSpan={8} className="px-5 py-14">
                     <div className="flex flex-col items-center text-center">
                       <div className="w-12 h-12 rounded-2xl bg-gray-50 text-[#F47C3C] flex items-center justify-center mb-3">
                         <CalendarDays size={22} />
@@ -787,7 +719,6 @@ export default function CleaningScheduleBoard({
                     key={group.month || "undated"}
                     group={group}
                     onView={setViewing}
-                    onViewFiles={setViewingFiles}
                     onEdit={setModal}
                     onDelete={remove}
                     onToggle={toggleStatus}
@@ -825,9 +756,8 @@ export default function CleaningScheduleBoard({
         <EntryModal
           initial={modal._id ? modal : null}
           properties={properties}
-          // A new entry opens on whichever category the board is showing, so
-          // working through one register does not mean re-picking it every time.
-          defaultCategory={category === "All" ? CLEANING_CATEGORIES[0] : category}
+          // A new entry belongs to whichever section the board is showing.
+          defaultCategory={category}
           onClose={() => setModal(null)}
           onSave={save}
         />
@@ -837,12 +767,12 @@ export default function CleaningScheduleBoard({
 }
 
 // One month block — the band, then its rows, as the sheet prints it.
-function FragmentGroup({ group, onView, onViewFiles, onEdit, onDelete, onToggle }) {
+function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
   const done = group.rows.filter((r) => r.status === "DONE").length;
   return (
     <>
       <tr className="bg-[#0F253B]/[0.03] border-y border-gray-100">
-        <td colSpan={9} className="px-4 py-2">
+        <td colSpan={8} className="px-4 py-2">
           <p className="text-xs font-bold uppercase tracking-widest text-[#0F253B]">
             {group.label || "Undated"}
             <span className="ml-2 font-medium normal-case tracking-normal text-gray-400">
@@ -882,44 +812,24 @@ function FragmentGroup({ group, onView, onViewFiles, onEdit, onDelete, onToggle 
             </button>
           </td>
           <td className="px-4 py-3">
-            <div className="flex flex-wrap gap-1">
-              {r.emailSent && (
-                <Badge tone="green">
-                  <span className="flex items-center gap-1" title={r.contactEmail || "Email sent"}>
-                    <Mail size={10} /> Email
-                  </span>
-                </Badge>
+            <span className="flex items-center gap-1.5 font-medium text-[#0F253B]">
+              {r.callMade ? (
+                <CheckCircle2 size={15} className="text-emerald-600" />
+              ) : (
+                <Circle size={15} className="text-gray-300" />
               )}
-              {r.callMade && (
-                <Badge tone="green">
-                  <span className="flex items-center gap-1" title={r.contactPhone || "Call made"}>
-                    <Phone size={10} /> Call
-                  </span>
-                </Badge>
-              )}
-              {!r.emailSent && !r.callMade && <span className="text-gray-400 font-medium">—</span>}
-            </div>
+              Call
+            </span>
           </td>
           <td className="px-4 py-3">
-            {filesOf(r).length > 0 ? (
-              <button
-                type="button"
-                onClick={() => onViewFiles(r)}
-                title={`View ${filesOf(r).length} attached file${filesOf(r).length === 1 ? "" : "s"}`}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-2 py-1 text-[11px] font-bold text-[#0F253B] hover:bg-gray-200"
-              >
-                <Paperclip size={11} /> {filesOf(r).length}
-              </button>
-            ) : (
-              <span className="text-gray-300 font-medium">—</span>
-            )}
-          </td>
-          <td className="px-4 py-3 text-gray-500 font-medium">
-            {r.message ? (
-              <span className="block truncate max-w-xs" title={r.message}>{r.message}</span>
-            ) : (
-              "—"
-            )}
+            <span className="flex items-center gap-1.5 font-medium text-[#0F253B]">
+              {r.messageSent ? (
+                <CheckCircle2 size={15} className="text-emerald-600" />
+              ) : (
+                <Circle size={15} className="text-gray-300" />
+              )}
+              Message
+            </span>
           </td>
           <td className="px-4 py-3">
             <div className="flex items-center justify-end gap-1">

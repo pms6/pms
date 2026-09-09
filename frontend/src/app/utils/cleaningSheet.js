@@ -12,7 +12,7 @@
 export const SHEET_COLUMNS = ["Property", "Category", "Date", "Day", "Status"];
 
 // Roughly the proportions of the original — Property is the wide one.
-const COLUMN_WIDTHS = [38, 22, 14, 14, 12, 20, 10, 46, 40];
+const COLUMN_WIDTHS = [38, 22, 14, 14, 12, 10, 12, 40];
 
 // The sheet writes 20/05/2026.
 export const fmtDate = (value) => {
@@ -74,30 +74,20 @@ export const groupByMonth = (rows = []) => {
  * order it shows it — the search box and the month / status filters are part of
  * the export.
  *
- * `extended` adds the Contact, Message and Notes columns the app records
- * but the handwritten sheet had nowhere to put.
+ * `extended` adds the Call, Message and Notes columns the app records but the
+ * handwritten sheet had nowhere to put. Call and Message are separate columns.
  */
-const contactText = (row) =>
-  [
-    row.emailSent && `Email${row.contactEmail ? `: ${row.contactEmail}` : ""}`,
-    row.callMade && `Call${row.contactPhone ? `: ${row.contactPhone}` : ""}`,
-  ]
-    .filter(Boolean)
-    .join(" / ");
+const yesNo = (v) => (v ? "Yes" : "");
 
 // Rows written before categories existed read as the schema's default, so the
 // export never leaves the column blank.
-const categoryText = (row) => row.category || "Fridge Cleaning";
-
-// The files themselves cannot go in a spreadsheet, so the count is what is
-// worth carrying — it says which visits have evidence behind them.
-const filesCount = (row) => (Array.isArray(row.files) ? row.files.length : 0);
+const categoryText = (row) => row.category || "Cleaning Schedule";
 
 export const exportCleaningSheet = async (rows = [], { extended = true } = {}) => {
   const XLSX = await import("xlsx");
 
   const columns = extended
-    ? [...SHEET_COLUMNS, "Contact", "Files", "Message", "Notes"]
+    ? [...SHEET_COLUMNS, "Call", "Message", "Notes"]
     : SHEET_COLUMNS;
   const aoa = [["Cleaning Messages Schedule"], []];
 
@@ -113,12 +103,7 @@ export const exportCleaningSheet = async (rows = [], { extended = true } = {}) =
         statusText(row.status),
       ];
       if (extended)
-        cells.push(
-          contactText(row),
-          filesCount(row) || "",
-          row.message || "",
-          row.notes || ""
-        );
+        cells.push(yesNo(row.callMade), yesNo(row.messageSent), row.notes || "");
       aoa.push(cells);
     }
     aoa.push([]);
