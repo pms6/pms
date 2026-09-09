@@ -154,7 +154,7 @@ function ViewRow({ label, children }) {
 /* ------------------------------------------------------------------ *
  * Create / edit modal
  * ------------------------------------------------------------------ */
-function RequestModal({ initial, properties, suppliers, onClose, onSave }) {
+function RequestModal({ initial, srNo, properties, suppliers, onClose, onSave }) {
   const isEdit = Boolean(initial?._id);
 
   const [form, setForm] = useState({
@@ -325,7 +325,7 @@ function RequestModal({ initial, properties, suppliers, onClose, onSave }) {
         <div className="flex items-center justify-between mb-5">
           <div>
             <h3 className="text-xl font-bold text-[#0F253B]">
-              {isEdit ? `Edit Entry${initial.srNo ? ` #${initial.srNo}` : ""}` : "New Booklet Entry"}
+              {isEdit ? `Edit Entry${srNo ? ` #${srNo}` : ""}` : "New Booklet Entry"}
             </h3>
             <p className="text-xs text-gray-400 font-medium">Property, issue, status and the solution taken</p>
           </div>
@@ -599,7 +599,7 @@ function SolutionDetail({ m }) {
 /* ------------------------------------------------------------------ *
  * View — the whole booklet entry, read-only
  * ------------------------------------------------------------------ */
-function ViewModal({ entry, onClose, onEdit }) {
+function ViewModal({ entry, srNo, onClose, onEdit }) {
   // Render the row we already have straight away, then refresh from the API so
   // the panel reflects anything a colleague changed since the list was loaded.
   const [m, setM] = useState(entry);
@@ -630,7 +630,7 @@ function ViewModal({ entry, onClose, onEdit }) {
               {refreshing && <Loader2 size={14} className="animate-spin text-gray-300" />}
             </div>
             <p className="text-xs text-gray-400 font-medium">
-              Entry {m.srNo ? `#${m.srNo}` : "—"}
+              Entry {srNo ? `#${srNo}` : "—"}
               {m.ref ? ` · ${m.ref}` : ""}
             </p>
           </div>
@@ -741,12 +741,20 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
 
   useEffect(() => { load(); }, [load]);
 
-  // The booklet reads top-to-bottom by Sr#; rows written before Sr# existed
-  // fall back to their creation order.
+  // Outstanding work first (pending / assigned / in progress), sorted issues
+  // drop to the bottom automatically — the office reads the top of the list.
+  // Within each group the order is creation order (stored srNo, createdAt
+  // fallback for rows written before srNo existed).
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
+    const done = (m) => (RESOLVED_STATUSES.includes(m.status) ? 1 : 0);
     return [...list]
-      .sort((a, b) => (a.srNo || 0) - (b.srNo || 0) || new Date(a.createdAt) - new Date(b.createdAt))
+      .sort(
+        (a, b) =>
+          done(a) - done(b) ||
+          (a.srNo || 0) - (b.srNo || 0) ||
+          new Date(a.createdAt) - new Date(b.createdAt)
+      )
       .filter((m) => (filter ? m.status === filter : true))
       .filter((m) =>
         needle
@@ -755,6 +763,16 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
           : true
       );
   }, [list, filter, q]);
+
+  // Sr# shown in the table is the row's POSITION in the list as it reads now —
+  // always 1..N with no gaps. The stored srNo is a permanent record id and
+  // keeps its number when an entry is removed, which is why deleting one during
+  // testing left a hole in the sequence.
+  const posOf = useMemo(() => {
+    const map = new Map();
+    rows.forEach((m, i) => map.set(m._id, i + 1));
+    return map;
+  }, [rows]);
 
   // Create or update, then refresh. Throws on failure so the modal shows it.
   const save = async (payload) => {
@@ -765,7 +783,8 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
   };
 
   const remove = async (m) => {
-    if (!confirm(`Delete booklet entry ${m.srNo ? `#${m.srNo} ` : ""}"${m.title}"?`)) return;
+    const pos = posOf.get(m._id);
+    if (!confirm(`Delete booklet entry ${pos ? `#${pos} ` : ""}"${m.title}"?`)) return;
     const snapshot = list;
     setViewing((v) => (v?._id === m._id ? null : v));
     setList((prev) => prev.filter((x) => x._id !== m._id));
@@ -907,7 +926,7 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
                     <FragmentRow
                       key={m._id}
                       m={m}
-                      srNo={m.srNo || i + 1}
+                      srNo={i + 1}
                       open={open}
                       steps={steps}
                       onToggle={() => setExpanded(open ? null : m._id)}
@@ -927,6 +946,7 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
       {viewing && (
         <ViewModal
           entry={viewing}
+          srNo={posOf.get(viewing._id)}
           onClose={() => setViewing(null)}
           onEdit={(entry) => { setViewing(null); setModal(entry); }}
         />
@@ -935,6 +955,7 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
       {modal !== null && (
         <RequestModal
           initial={modal._id ? modal : null}
+          srNo={modal?._id ? posOf.get(modal._id) : null}
           properties={properties}
           suppliers={suppliers}
           onClose={() => setModal(null)}

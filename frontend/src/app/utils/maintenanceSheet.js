@@ -92,7 +92,8 @@ export const exportMaintenanceSheet = async (rows = []) => {
   const XLSX = await import("xlsx");
 
   const aoa = [["Maintenance Booklet"], [], SHEET_COLUMNS];
-  rows.forEach((row, i) => aoa.push(rowToCells(row, row.srNo || i + 1)));
+  // Sr# is the row's position in this export — 1..N, no gaps from removed rows.
+  rows.forEach((row, i) => aoa.push(rowToCells(row, i + 1)));
 
   const worksheet = XLSX.utils.aoa_to_sheet(aoa);
   worksheet["!cols"] = COLUMN_WIDTHS.map((wch) => ({ wch }));
