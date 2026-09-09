@@ -8,6 +8,8 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "backfill:maintenance-srno": "node scripts/backfillMaintenanceSrNo.js",
+    "seed:clients-from-checkins": "node scripts/seedClientsFromCheckIns.js",
+    "check:cloudinary-delete": "node scripts/checkCloudinaryDelete.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",

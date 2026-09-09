@@ -63,10 +63,18 @@ const screenMonitorSessionSchema = new mongoose.Schema(
     endedAt: { type: Date, default: null },
 
     // How the session finished: the member stopped it, they revoked the browser
-    // share, or the server closed it when the working-hours window ended.
+    // share, the server closed it when the working-hours window ended or when
+    // monitoring was switched off for the organisation, or it was abandoned.
     endedReason: {
       type: String,
-      enum: ["", "STOPPED", "SHARE_REVOKED", "OUT_OF_HOURS", "EXPIRED"],
+      enum: [
+        "",
+        "STOPPED",
+        "SHARE_REVOKED",
+        "OUT_OF_HOURS",
+        "MONITORING_OFF",
+        "EXPIRED",
+      ],
       default: "",
     },
 

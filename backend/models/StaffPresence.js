@@ -32,7 +32,8 @@ const staffPresenceSchema = new mongoose.Schema(
     email: { type: String, trim: true, lowercase: true, default: "" },
     role: { type: String, trim: true, default: "" },
 
-    // Which portal they are in — "admin" / "manager" / "agent" / "finance".
+    // Which portal they are in — "admin" / "manager" / "agent" / "finance" /
+    // "operation". The accepted list lives in controllers/presence.controller.js.
     portal: { type: String, trim: true, default: "" },
 
     // The last heartbeat. Online is derived from how recent this is.

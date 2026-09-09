@@ -217,7 +217,7 @@ export default function AdminCheckIn() {
     <div className="space-y-5">
       <PageHeader
         title="Check-in"
-        subtitle="Every tenant moving in — rent, deposit, contract, agent and bank"
+        subtitle="Every room rented out — rent, deposit, contract, agent and bank. Filtered and ordered by the room rented date."
         action={
           <div className="flex flex-wrap gap-2">
             <button
@@ -261,12 +261,25 @@ export default function AdminCheckIn() {
           />
         </div>
 
-        <select value={f.year} onChange={set("year")} className={CONTROL}>
+        {/* Both read the room rented date — a room counts as rented out in the
+            period it left the market, not the one the tenant moved in. */}
+        <select
+          value={f.year}
+          onChange={set("year")}
+          className={CONTROL}
+          title="Filters on the room rented date"
+        >
           <option value="">All years</option>
           {years.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
 
-        <select value={f.month} onChange={set("month")} className={CONTROL} disabled={!f.year}>
+        <select
+          value={f.month}
+          onChange={set("month")}
+          className={CONTROL}
+          disabled={!f.year}
+          title="Filters on the room rented date"
+        >
           <option value="">All months</option>
           {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
         </select>
@@ -334,8 +347,8 @@ export default function AdminCheckIn() {
                     <td className="px-5 py-3 text-right font-bold text-[#0F253B]">{money(r.rent)}</td>
                     <td className="px-5 py-3 text-right text-gray-500">{money(r.deposit)}</td>
                     <td className="px-5 py-3 text-gray-500">{ordinal(r.paymentDueDay)}</td>
-                    <td className="px-5 py-3 text-gray-500">{date(r.roomRentedDate)}</td>
-                    <td className="px-5 py-3 font-semibold text-[#0F253B]">{date(r.checkInDate)}</td>
+                    <td className="px-5 py-3 font-semibold text-[#0F253B]">{date(r.roomRentedDate)}</td>
+                    <td className="px-5 py-3 text-gray-500">{date(r.checkInDate)}</td>
                     <td className="px-5 py-3 text-gray-500">
                       {r.contractStart || r.contractEnd ? (
                         <span className="text-[11px]">{date(r.contractStart)} → {date(r.contractEnd)}</span>
@@ -362,7 +375,7 @@ export default function AdminCheckIn() {
       {viewing && (
         <RecordDetail
           title={viewing.tenant}
-          subtitle={`${viewing.property}${viewing.room ? ` · ${viewing.room}` : ""} · checked in ${date(viewing.checkInDate)}`}
+          subtitle={`${viewing.property}${viewing.room ? ` · ${viewing.room}` : ""} · rented ${date(viewing.roomRentedDate)}`}
           sections={detailSections(viewing)}
           onClose={() => setViewing(null)}
           footer={

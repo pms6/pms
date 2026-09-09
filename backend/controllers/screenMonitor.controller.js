@@ -22,6 +22,7 @@
 import mongoose from "mongoose";
 import ScreenMonitorPolicy from "../models/ScreenMonitorPolicy.js";
 import ScreenMonitorSession from "../models/ScreenMonitorSession.js";
+import { destroyMany, canDeleteFromCloudinary } from "../utils/cloudinaryDelete.js";
 
 const ADMIN_ROLES = ["OWNER", "ADMIN"];
 
@@ -202,6 +203,11 @@ export const getPolicy = async (req, res) => {
         ...policy.toObject(),
         withinWorkingHours: withinWorkingHours(policy),
         overnight: isOvernightWindow(policy),
+        // Whether the server can actually delete a screenshot from storage.
+        // Retention is a promise to the people being monitored, so when it
+        // cannot be kept the admin looking at this board is who needs to know
+        // — not a line in a log nobody reads.
+        deletionConfigured: canDeleteFromCloudinary(),
       },
     });
   } catch (error) {
@@ -435,20 +441,37 @@ export const addCapture = async (req, res) => {
       return res.status(404).json({ success: false, message: "No monitored shift is running." });
     }
 
+    // Closing the session and refusing the screenshot, for the two reasons
+    // monitoring must stop mid-shift. Both discard the frame that came with the
+    // request rather than storing one last picture on the way out.
+    const closeAndRefuse = async (reason, message) => {
+      session.status = "ENDED";
+      session.endedAt = new Date();
+      session.endedReason = reason;
+      session.nextCaptureAt = null;
+      await session.save();
+      return res.status(409).json({ success: false, message });
+    };
+
+    // The master switch. Checked here and not only on start: an admin who
+    // turns monitoring off expects it to stop, and a shift that was already
+    // running would otherwise keep photographing the screen until the member
+    // happened to close the tab.
+    if (!policy.enabled) {
+      return closeAndRefuse(
+        "MONITORING_OFF",
+        "Screen monitoring was switched off — the monitored shift was closed and the screenshot discarded."
+      );
+    }
+
     // Outside the agreed window the session closes rather than quietly keeping
     // the screenshot — capturing outside working hours is the specific thing
     // the policy exists to prevent.
     if (!withinWorkingHours(policy)) {
-      session.status = "ENDED";
-      session.endedAt = new Date();
-      session.endedReason = "OUT_OF_HOURS";
-      session.nextCaptureAt = null;
-      await session.save();
-
-      return res.status(409).json({
-        success: false,
-        message: "Working hours have ended — the monitored shift was closed and the screenshot discarded.",
-      });
+      return closeAndRefuse(
+        "OUT_OF_HOURS",
+        "Working hours have ended — the monitored shift was closed and the screenshot discarded."
+      );
     }
 
     const now = new Date();
@@ -499,10 +522,17 @@ export const getSessions = async (req, res) => {
       if (to) filter.startedAt.$lte = new Date(to);
     }
 
-    const sessions = await ScreenMonitorSession.find(filter)
-      .sort({ startedAt: -1 })
-      .limit(200)
-      .lean();
+    // Capped, but the cap is stated in the response rather than the list just
+    // ending — an admin looking for a session from two months ago should not be
+    // left thinking it was never recorded.
+    const MAX = 200;
+    const requested = Number(req.query.limit);
+    const limit = Number.isInteger(requested) && requested > 0 ? Math.min(requested, MAX) : MAX;
+
+    const [sessions, matching] = await Promise.all([
+      ScreenMonitorSession.find(filter).sort({ startedAt: -1 }).limit(limit).lean(),
+      ScreenMonitorSession.countDocuments(filter),
+    ]);
 
     // The list carries counts, not the screenshots — a board that shipped every
     // frame would put hundreds of images on screen nobody asked to see.
@@ -526,7 +556,13 @@ export const getSessions = async (req, res) => {
       viewCount: s.viewedBy?.length || 0,
     }));
 
-    return res.status(200).json({ success: true, count: data.length, data });
+    return res.status(200).json({
+      success: true,
+      count: data.length,
+      total: matching,
+      truncated: matching > data.length,
+      data,
+    });
   } catch (error) {
     console.error("Get Monitor Sessions Error:", error);
     return res.status(500).json({ success: false, message: "Failed to load monitoring sessions." });
@@ -576,16 +612,31 @@ export const deleteSession = async (req, res) => {
   try {
     if (denyNonAdmin(req, res)) return;
 
-    const result = await ScreenMonitorSession.deleteOne({
+    // Read it first: the screenshots have to be removed from Cloudinary, and
+    // once the row is gone there is nothing left to say which files they were.
+    const session = await ScreenMonitorSession.findOne({
       _id: req.params.id,
       organizationId: req.user.organizationId,
-    });
+    })
+      .select("captures.publicId")
+      .lean();
 
-    if (!result.deletedCount) {
+    if (!session) {
       return res.status(404).json({ success: false, message: "Session not found." });
     }
 
-    return res.status(200).json({ success: true, message: "Session deleted." });
+    const images = await destroyMany((session.captures || []).map((c) => c.publicId));
+
+    await ScreenMonitorSession.deleteOne({ _id: session._id });
+
+    // Say so when the files outlived the record. Reporting a clean delete while
+    // the images are still served from a public URL is the failure worth being
+    // loud about.
+    const message = images.failed
+      ? `Session deleted, but ${images.failed} screenshot(s) could not be removed from storage (${images.reasons.join("; ")}).`
+      : "Session and its screenshots deleted.";
+
+    return res.status(200).json({ success: true, message, data: images });
   } catch (error) {
     console.error("Delete Monitor Session Error:", error);
     return res.status(500).json({ success: false, message: "Failed to delete the session." });
@@ -596,13 +647,6 @@ export const deleteSession = async (req, res) => {
 // RETENTION
 // ===========================================================================
 
-/**
- * Drop screenshots older than the organisation's retention period, and remove
- * sessions left with nothing. Called by the daily job; also exposed so an admin
- * can run it on demand.
- *
- * A hard delete, not a soft one: "we deleted it" has to mean the image is gone.
- */
 /**
  * Close sessions nobody is feeding any more.
  *
@@ -621,10 +665,25 @@ export const closeAbandonedSessions = async () => {
   return { sessionsClosed: result.modifiedCount || 0 };
 };
 
+/**
+ * Drop screenshots older than the organisation's retention period, and remove
+ * sessions left with nothing. Called by the daily job; also exposed so an admin
+ * can run it on demand.
+ *
+ * A hard delete, not a soft one: "we deleted it" has to mean the image is gone.
+ * So the file is removed from Cloudinary FIRST, and only the captures whose
+ * image actually went are dropped from the record. A capture whose file could
+ * not be deleted is deliberately kept, because the row is the only remaining
+ * record of a file that is still out there — losing it would leave the image
+ * public and untracked, which is worse than keeping it one more day. The next
+ * run tries again.
+ */
 export const purgeExpiredCaptures = async () => {
   const policies = await ScreenMonitorPolicy.find().lean();
   let capturesRemoved = 0;
   let sessionsRemoved = 0;
+  let imagesFailed = 0;
+  const reasons = [];
 
   for (const policy of policies) {
     const cutoff = new Date(Date.now() - (policy.retentionDays || 30) * 24 * 60 * 60 * 1000);
@@ -635,8 +694,28 @@ export const purgeExpiredCaptures = async () => {
     });
 
     for (const session of sessions) {
+      const expired = session.captures.filter((c) => c.capturedAt < cutoff);
+      if (!expired.length) continue;
+
+      // Delete the files, then keep only the captures whose file is really gone.
+      const images = await destroyMany(expired.map((c) => c.publicId));
+      imagesFailed += images.failed;
+      for (const reason of images.reasons) {
+        if (!reasons.includes(reason)) reasons.push(reason);
+      }
+
+      const stillStored = new Set();
+      if (images.failed) {
+        // Which ones failed is not reported per id, so on any failure the
+        // safe reading is that a capture with a publicId may still exist.
+        // Those are kept; ones with no publicId at all have no file to keep.
+        for (const c of expired) if (c.publicId) stillStored.add(String(c._id));
+      }
+
       const before = session.captures.length;
-      session.captures = session.captures.filter((c) => c.capturedAt >= cutoff);
+      session.captures = session.captures.filter(
+        (c) => c.capturedAt >= cutoff || stillStored.has(String(c._id))
+      );
       capturesRemoved += before - session.captures.length;
 
       if (session.captures.length === 0 && session.status === "ENDED") {
@@ -648,7 +727,23 @@ export const purgeExpiredCaptures = async () => {
     }
   }
 
-  return { capturesRemoved, sessionsRemoved };
+  // Warn only when it actually bit: something reached its retention date and
+  // could not be deleted. Saying it on every run — most of which have nothing
+  // to purge — is how a line that matters gets trained out of being read.
+  if (imagesFailed) {
+    const fix = canDeleteFromCloudinary()
+      ? ""
+      : " Set CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET in backend/.env and restart the API" +
+        " (check them with: npm run check:cloudinary-delete).";
+
+    console.warn(
+      `[screen-monitor] ${imagesFailed} expired screenshot(s) could not be deleted from ` +
+        `storage, so their records are being kept rather than losing track of a file that ` +
+        `still exists — ${reasons.join("; ")}.${fix}`
+    );
+  }
+
+  return { capturesRemoved, sessionsRemoved, imagesFailed, reasons };
 };
 
 // @desc    Run the retention purge now
@@ -657,11 +752,11 @@ export const runPurge = async (req, res) => {
   try {
     if (denyNonAdmin(req, res)) return;
     const result = await purgeExpiredCaptures();
-    return res.status(200).json({
-      success: true,
-      message: `Removed ${result.capturesRemoved} screenshot(s) past their retention period.`,
-      data: result,
-    });
+    const message = result.imagesFailed
+      ? `Removed ${result.capturesRemoved} screenshot(s); ${result.imagesFailed} could not be deleted from storage and were kept on record (${result.reasons.join("; ")}).`
+      : `Removed ${result.capturesRemoved} screenshot(s) past their retention period.`;
+
+    return res.status(200).json({ success: true, message, data: result });
   } catch (error) {
     console.error("Purge Captures Error:", error);
     return res.status(500).json({ success: false, message: "Failed to run the purge." });

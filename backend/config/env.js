@@ -22,6 +22,17 @@ const env = {
 
   corsOrigin: process.env.CORS_ORIGIN || "*",
 
+  // How many reverse proxies sit in front of this app.
+  //
+  // Behind a load balancer (Render, Heroku, nginx) every request arrives from
+  // the proxy's own address, so without this the rate limiter sees ONE client
+  // and its per-IP budget becomes a single global budget shared by every user —
+  // which the screen-monitor and presence polling exhaust first. 1 is right for
+  // a single proxy; raise it only to the number of hops you actually run, since
+  // trusting more than exist lets a client spoof its address through
+  // X-Forwarded-For.
+  trustProxy: Number(process.env.TRUST_PROXY ?? (process.env.NODE_ENV === "production" ? 1 : 0)),
+
   // ✅ Add this
   clientUrl: process.env.CLIENT_URL || "http://localhost:3000",
 

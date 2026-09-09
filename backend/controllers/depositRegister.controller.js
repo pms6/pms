@@ -48,7 +48,10 @@ const lineFromCheckIn = (checkIn, checkOut) => {
     taken,
     bank: checkIn.bank || "",
     agent: checkIn.agent || "",
-    takenOn: checkIn.checkInDate || null,
+    // The deposit is taken at the check-in, but that date is optional now that
+    // the register is keyed on when the room was rented — fall back to it
+    // rather than leaving the column blank.
+    takenOn: checkIn.checkInDate || checkIn.roomRentedDate || null,
     rent: checkIn.rent || 0,
 
     // Money out — null until a check-out settles it
@@ -123,7 +126,7 @@ export const getDepositRegister = async (req, res) => {
     const [checkIns, checkOuts] = await Promise.all([
       CheckIn.find(checkInFilter)
         .select(
-          "property room tenant propertyId deposit rent bank agent checkInDate status"
+          "property room tenant propertyId deposit rent bank agent roomRentedDate checkInDate status"
         )
         .lean(),
       CheckOut.find(checkOutFilter)

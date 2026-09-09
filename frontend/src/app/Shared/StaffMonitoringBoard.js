@@ -32,10 +32,13 @@ const DAYS = [
   [1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [7, "Sun"],
 ];
 
+// MUST stay in sync with the endedReason enum in
+// backend/models/ScreenMonitorSession.js.
 const END_REASON = {
   STOPPED: "Ended by staff member",
   SHARE_REVOKED: "Screen sharing stopped",
   OUT_OF_HOURS: "Working hours ended",
+  MONITORING_OFF: "Monitoring switched off",
   EXPIRED: "Expired",
   "": "—",
 };
@@ -392,6 +395,9 @@ export default function StaffMonitoringBoard({
   const [purging, setPurging] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadedAt, setLoadedAt] = useState(null);
+  // How many sessions exist behind the server's cap, so a truncated list says
+  // so instead of looking like the whole history.
+  const [total, setTotal] = useState(0);
 
   // When the data last arrived. A ref as well as state because the interval
   // reads it to decide whether a refetch is due, and a ref does not make the
@@ -415,6 +421,7 @@ export default function StaffMonitoringBoard({
         api.get("/screen-monitor/policy"),
       ]);
       setSessions(sRes.data.data || []);
+      setTotal(sRes.data.total ?? (sRes.data.data || []).length);
       setPolicy(pRes.data.data || null);
       setError("");
       loadedAtRef.current = Date.now();
@@ -471,7 +478,11 @@ export default function StaffMonitoringBoard({
   const remove = async (s) => {
     if (!confirm(`Delete this session and its ${s.captureCount} screenshot(s) for ${s.email}?`)) return;
     try {
-      await api.delete(`/screen-monitor/sessions/${s._id}`);
+      const res = await api.delete(`/screen-monitor/sessions/${s._id}`);
+      // The server says when the images outlived the record. Swallowing that
+      // let a delete look clean while the screenshots were still served from a
+      // public URL — the one outcome worth interrupting somebody for.
+      if (res.data?.data?.failed) alert(res.data.message);
       await load();
     } catch (err) {
       alert(err.response?.data?.message || "Delete failed");
@@ -528,6 +539,23 @@ export default function StaffMonitoringBoard({
           </div>
         }
       />
+
+      {/* Retention is the promise that makes this feature proportionate. If the
+          server cannot delete a screenshot, say so here rather than letting the
+          policy screen keep advertising a retention period it cannot enforce. */}
+      {policy && policy.deletionConfigured === false && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-bold text-amber-800 flex items-center gap-2">
+            <ShieldAlert size={15} /> Screenshots cannot be deleted from storage
+          </p>
+          <p className="mt-1 text-xs font-medium text-amber-700">
+            Expired screenshots are being kept on record instead of removed, so the{" "}
+            {policy.retentionDays}-day retention period is not being enforced. Set
+            CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET in the server&apos;s .env and restart
+            the API.
+          </p>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
@@ -711,6 +739,14 @@ export default function StaffMonitoringBoard({
             </tbody>
           </table>
         </div>
+
+        {/* The server caps the list. Saying so beats an admin concluding a
+            session from three months ago was never recorded. */}
+        {total > sessions.length && (
+          <div className="border-t border-gray-100 px-4 py-3 text-[11px] font-medium text-gray-400">
+            Showing the {sessions.length} most recent of {total} sessions.
+          </div>
+        )}
       </div>
 
       {openSession && <SessionModal sessionId={openSession} onClose={() => setOpenSession(null)} />}

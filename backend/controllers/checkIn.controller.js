@@ -40,6 +40,39 @@ const EDITABLE_KEYS = [
 
 const NUMERIC_KEYS = ["rent", "deposit"];
 const DATE_KEYS = ["roomRentedDate", "checkInDate", "contractStart", "contractEnd"];
+
+// ---------------------------------------------------------------------------
+// The register's primary date
+//
+// A room is counted as rented out on the date it was RENTED, not the date the
+// tenant moved in — the two can be weeks apart, and it is the first that takes
+// the room off the market. So roomRentedDate is what the year/month filter, the
+// ordering and the monthly totals all read.
+//
+// The one wrinkle is history: rows imported from the spreadsheets before that
+// column was captured carry only a check-in date. Filtering them out of every
+// period would read as data loss, so they fall back to checkInDate — which, for
+// those rows, is the only date there is.
+// ---------------------------------------------------------------------------
+
+/** The date this row is counted on, as a timestamp. 0 when it carries neither. */
+const rentedOn = (row) => {
+  const d = row.roomRentedDate || row.checkInDate;
+  const t = d ? new Date(d).getTime() : 0;
+  return Number.isNaN(t) ? 0 : t;
+};
+
+/**
+ * Mongo condition for "rented within [start, end)", honouring the same
+ * fallback: a row with no roomRentedDate is matched on its check-in date.
+ */
+const rentedBetween = (start, end) => ({
+  $or: [
+    { roomRentedDate: { $gte: start, $lt: end } },
+    { roomRentedDate: null, checkInDate: { $gte: start, $lt: end } },
+  ],
+});
+
 const REF_KEYS = ["propertyId", "roomId", "tenantId", "tenancyId"];
 
 const pickPayload = (body) => {
@@ -138,6 +171,11 @@ export const getCheckIns = async (req, res) => {
 
     const filter = { organizationId, isDeleted: false };
 
+    // The period filter and the free-text search each need their own $or, so
+    // they are collected here and combined under one $and — assigning both to
+    // filter.$or would silently drop the first.
+    const clauses = [];
+
     if (year) {
       const y = Number(year);
       if (!Number.isInteger(y)) {
@@ -148,15 +186,13 @@ export const getCheckIns = async (req, res) => {
         if (!Number.isInteger(m) || m < 1 || m > 12) {
           return res.status(400).json({ success: false, message: "month must be 1-12." });
         }
-        filter.checkInDate = {
-          $gte: new Date(Date.UTC(y, m - 1, 1)),
-          $lt: new Date(Date.UTC(y, m, 1)),
-        };
+        clauses.push(
+          rentedBetween(new Date(Date.UTC(y, m - 1, 1)), new Date(Date.UTC(y, m, 1)))
+        );
       } else {
-        filter.checkInDate = {
-          $gte: new Date(Date.UTC(y, 0, 1)),
-          $lt: new Date(Date.UTC(y + 1, 0, 1)),
-        };
+        clauses.push(
+          rentedBetween(new Date(Date.UTC(y, 0, 1)), new Date(Date.UTC(y + 1, 0, 1)))
+        );
       }
     }
 
@@ -166,16 +202,26 @@ export const getCheckIns = async (req, res) => {
     if (status) filter.status = status;
 
     if (search) {
-      filter.$or = [
-        { tenant: { $regex: search, $options: "i" } },
-        { property: { $regex: search, $options: "i" } },
-        { room: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
-        { phone: { $regex: search, $options: "i" } },
-      ];
+      clauses.push({
+        $or: [
+          { tenant: { $regex: search, $options: "i" } },
+          { property: { $regex: search, $options: "i" } },
+          { room: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+          { phone: { $regex: search, $options: "i" } },
+        ],
+      });
     }
 
-    const rows = await CheckIn.find(filter).sort({ checkInDate: -1, createdAt: -1 }).lean();
+    if (clauses.length) filter.$and = clauses;
+
+    const rows = await CheckIn.find(filter).lean();
+
+    // Newest first by the date the room was rented. Sorted here rather than in
+    // Mongo because the order depends on the checkInDate fallback, which no
+    // single index can express — and the endpoint already loads every matching
+    // row to total them, so there is nothing to stream.
+    rows.sort((a, b) => rentedOn(b) - rentedOn(a) || new Date(b.createdAt) - new Date(a.createdAt));
 
     // The filter dropdowns need every agent and bank in use, not just the ones
     // surviving the current filter — otherwise picking an agent empties the
@@ -223,12 +269,12 @@ export const getMonthlyCheckIns = async (req, res) => {
     const rows = await CheckIn.find({
       organizationId,
       isDeleted: false,
-      checkInDate: {
-        $gte: new Date(Date.UTC(year, 0, 1)),
-        $lt: new Date(Date.UTC(year + 1, 0, 1)),
-      },
+      ...rentedBetween(
+        new Date(Date.UTC(year, 0, 1)),
+        new Date(Date.UTC(year + 1, 0, 1))
+      ),
     })
-      .select("checkInDate rent deposit")
+      .select("roomRentedDate checkInDate rent deposit")
       .lean();
 
     const months = Array.from({ length: 12 }, (_, i) => ({
@@ -239,8 +285,9 @@ export const getMonthlyCheckIns = async (req, res) => {
     }));
 
     for (const r of rows) {
-      // getUTCMonth to match how the range above was built.
-      const idx = new Date(r.checkInDate).getUTCMonth();
+      // Bucketed on the date the room was rented, so the sheet reports what the
+      // office counts. getUTCMonth to match how the range above was built.
+      const idx = new Date(rentedOn(r)).getUTCMonth();
       months[idx].count += 1;
       months[idx].rent += r.rent || 0;
       months[idx].deposit += r.deposit || 0;
@@ -305,8 +352,10 @@ export const createCheckIn = async (req, res) => {
     if (!payload.tenant || !String(payload.tenant).trim()) {
       return res.status(400).json({ success: false, message: "A tenant name is required." });
     }
-    if (!payload.checkInDate) {
-      return res.status(400).json({ success: false, message: "A check-in date is required." });
+    if (!payload.roomRentedDate) {
+      return res
+        .status(400)
+        .json({ success: false, message: "A room rented date is required." });
     }
 
     const invalid = normalisePayload(payload);
@@ -342,6 +391,15 @@ export const updateCheckIn = async (req, res) => {
   try {
     const organizationId = req.user?.organizationId;
     const payload = pickPayload(req.body);
+
+    // Clearing the rented date would take the row out of every period the
+    // register counts, so say so plainly rather than letting the schema's
+    // required validator report it as a cast error.
+    if ("roomRentedDate" in payload && !payload.roomRentedDate) {
+      return res
+        .status(400)
+        .json({ success: false, message: "A room rented date is required." });
+    }
 
     const invalid = normalisePayload(payload);
     if (invalid) return res.status(400).json({ success: false, message: invalid });

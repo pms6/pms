@@ -1,9 +1,13 @@
 // controllers/cleaningSchedule.controller.js
-import CleaningSchedule, { CLEANING_STATUSES } from "../models/CleaningSchedule.js";
+import CleaningSchedule, {
+  CLEANING_STATUSES,
+  CLEANING_CATEGORIES,
+} from "../models/CleaningSchedule.js";
 
 const EDITABLE_KEYS = [
   "propertyId",
   "property",
+  "category",
   "date",
   "status",
   "emailSent",
@@ -14,7 +18,12 @@ const EDITABLE_KEYS = [
   "cleaner",
   "message",
   "notes",
+  "files",
 ];
+
+// Cloudinary's classification of an upload, narrowed to what the viewer knows
+// how to render. Anything else is a file you download rather than preview.
+const FILE_TYPES = ["image", "video", "pdf", "file"];
 
 // [{ name, done }] straight from the board's checklist editor. Drop blank rows
 // and coerce the flag so a stray string can't slip into the schema.
@@ -23,6 +32,24 @@ const cleanTasks = (tasks) => {
   return tasks
     .map((t) => ({ name: String(t?.name ?? "").trim(), done: Boolean(t?.done) }))
     .filter((t) => t.name);
+};
+
+// The evidence attached to a visit, straight from the board's uploader. A URL
+// is the only thing that makes an attachment worth keeping, so entries without
+// one are dropped rather than stored as empty rows.
+const cleanFiles = (files) => {
+  if (!Array.isArray(files)) return [];
+  return files
+    .filter((f) => f?.url)
+    .map((f) => ({
+      name: String(f.name ?? "").trim(),
+      url: String(f.url).trim(),
+      publicId: String(f.publicId ?? "").trim(),
+      type: FILE_TYPES.includes(f.type) ? f.type : "file",
+      format: String(f.format ?? "").trim(),
+      bytes: Number(f.bytes) > 0 ? Number(f.bytes) : 0,
+      uploadedAt: f.uploadedAt ? new Date(f.uploadedAt) : new Date(),
+    }));
 };
 
 const pickPayload = (body) => {
@@ -42,9 +69,15 @@ const pickPayload = (body) => {
   if (payload.emailSent === false) payload.contactEmail = "";
   if (payload.callMade === false) payload.contactPhone = "";
   if (payload.tasks !== undefined) payload.tasks = cleanTasks(payload.tasks);
+  if (payload.files !== undefined) payload.files = cleanFiles(payload.files);
   if (payload.propertyId === "") payload.propertyId = null;
   if (payload.status !== undefined && !CLEANING_STATUSES.includes(payload.status)) {
     delete payload.status;
+  }
+  // An unrecognised category is dropped rather than rejected, so the schema
+  // default decides — the same way an unrecognised status is handled above.
+  if (payload.category !== undefined && !CLEANING_CATEGORIES.includes(payload.category)) {
+    delete payload.category;
   }
   return payload;
 };
@@ -68,10 +101,11 @@ export const getCleaningSchedule = async (req, res) => {
       return res.status(401).json({ success: false, message: "Organization ID required" });
     }
 
-    const { status, month, propertyId, from, to } = req.query;
+    const { status, category, month, propertyId, from, to } = req.query;
 
     const filter = { organizationId, isDeleted: false };
     if (status && CLEANING_STATUSES.includes(status)) filter.status = status;
+    if (category && CLEANING_CATEGORIES.includes(category)) filter.category = category;
     if (propertyId) filter.propertyId = propertyId;
 
     const range = monthRange(month);

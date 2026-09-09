@@ -16,6 +16,10 @@ import { purgeExpiredCaptures, closeAbandonedSessions } from "./controllers/scre
 
 const app = express();
 
+// How many proxy hops to trust when reading a client's address. This has to be
+// set before the rate limiter, which keys on it — see the note in config/env.js.
+app.set("trust proxy", env.trustProxy);
+
 // Connect Database
 await connectDB();
 
@@ -39,10 +43,16 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 // Rate Limiter
+//
+// The budget is per client address, so it only divides between users when
+// `trust proxy` above is set correctly for the deployment. The ceiling allows
+// for the app's polling floor: a staff member with a monitored shift running
+// sends a presence heartbeat and a monitor poll every minute, and that is
+// before they do any actual work.
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 1000,
+    max: 2000,
     standardHeaders: true,
     legacyHeaders: false,
   })
@@ -61,20 +71,30 @@ cron.schedule("0 8 * * *", async () => {
   );
 
   // Staff screenshots past their organization's retention period are deleted
-  // outright. Monitoring that is proportionate today becomes a permanent file
-  // on someone if nothing ever clears it, so this runs whether or not an admin
-  // remembers to press the button.
-  // A session whose browser went away - a reload, a crash, a closed lid - has
-  // no way to tell us, so it is closed here rather than reading as "running"
-  // indefinitely on the admin board.
-  const closed = await closeAbandonedSessions();
-  if (closed.sessionsClosed) console.log(`Abandoned monitoring sessions closed: ${closed.sessionsClosed}`);
-
+  // outright - from Cloudinary as well as from the record. Monitoring that is
+  // proportionate today becomes a permanent file on someone if nothing ever
+  // clears it, so this runs whether or not an admin remembers to press the
+  // button.
   console.log("Purging expired staff monitoring screenshots...");
   const purged = await purgeExpiredCaptures();
   console.log(
-    `Screenshots removed: ${purged.capturesRemoved}, Empty sessions removed: ${purged.sessionsRemoved}`
+    `Screenshots removed: ${purged.capturesRemoved}, Empty sessions removed: ${purged.sessionsRemoved}` +
+      (purged.imagesFailed ? `, FAILED to delete from storage: ${purged.imagesFailed}` : "")
   );
+});
+
+// A monitored shift whose browser went away - a reload, a crash, a closed lid -
+// has no way to tell us, so the server closes it once its next screenshot is an
+// hour overdue.
+//
+// Hourly, not daily: the abandon threshold is an hour, and running the sweep
+// once a morning left a laptop closed at 9am still reading as "running" on the
+// admin board until 8am the next day.
+cron.schedule("15 * * * *", async () => {
+  const closed = await closeAbandonedSessions();
+  if (closed.sessionsClosed) {
+    console.log(`Abandoned monitoring sessions closed: ${closed.sessionsClosed}`);
+  }
 });
 
 // Hourly digest of where the operation team members who have live location

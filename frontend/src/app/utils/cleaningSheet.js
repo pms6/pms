@@ -9,10 +9,10 @@
 // actually exports — the same pattern internetSheet.js and maintenanceSheet.js
 // use.
 
-export const SHEET_COLUMNS = ["Property", "Date", "Day", "Status"];
+export const SHEET_COLUMNS = ["Property", "Category", "Date", "Day", "Status"];
 
 // Roughly the proportions of the original — Property is the wide one.
-const COLUMN_WIDTHS = [38, 14, 14, 12, 20, 34, 46, 40];
+const COLUMN_WIDTHS = [38, 22, 14, 14, 12, 20, 34, 10, 46, 40];
 
 // The sheet writes 20/05/2026.
 export const fmtDate = (value) => {
@@ -90,11 +90,19 @@ const tasksText = (row) =>
     .map((t) => `${t.done ? "✓" : "✗"} ${t.name}`)
     .join(", ");
 
+// Rows written before categories existed read as the schema's default, so the
+// export never leaves the column blank.
+const categoryText = (row) => row.category || "Fridge Cleaning";
+
+// The files themselves cannot go in a spreadsheet, so the count is what is
+// worth carrying — it says which visits have evidence behind them.
+const filesCount = (row) => (Array.isArray(row.files) ? row.files.length : 0);
+
 export const exportCleaningSheet = async (rows = [], { extended = true } = {}) => {
   const XLSX = await import("xlsx");
 
   const columns = extended
-    ? [...SHEET_COLUMNS, "Contact", "Tasks", "Message", "Notes"]
+    ? [...SHEET_COLUMNS, "Contact", "Tasks", "Files", "Message", "Notes"]
     : SHEET_COLUMNS;
   const aoa = [["Cleaning Messages Schedule"], []];
 
@@ -104,12 +112,19 @@ export const exportCleaningSheet = async (rows = [], { extended = true } = {}) =
     for (const row of group.rows) {
       const cells = [
         row.property || "",
+        categoryText(row),
         fmtDate(row.date),
         dayName(row.date),
         statusText(row.status),
       ];
       if (extended)
-        cells.push(contactText(row), tasksText(row), row.message || "", row.notes || "");
+        cells.push(
+          contactText(row),
+          tasksText(row),
+          filesCount(row) || "",
+          row.message || "",
+          row.notes || ""
+        );
       aoa.push(cells);
     }
     aoa.push([]);

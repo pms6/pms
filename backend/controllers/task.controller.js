@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import Task, { TASK_PRIORITIES, TASK_STATUSES } from "../models/Task.js";
 import OrganizationMember from "../models/OrganizationMember.js";
 import User from "../models/User.js";
+import { sendEmail } from "../utils/sendEmail.js";
+import env from "../config/env.js";
 
 // ---------------------------------------------------------------------------
 // Permissions
@@ -11,11 +13,11 @@ import User from "../models/User.js";
 //          may create, assign, reassign, reschedule, edit or delete a task.
 //          Assignment in particular is admin-only: no other role can put work
 //          on somebody.
-// Member = MANAGER / AGENT / FINANCE. They can READ every task in their own
-//          organization and COMMENT on any of them, so the team has one shared
-//          view of the work. What they cannot do is change a task: only the
-//          owner or an actual assignee may post a status update, and only the
-//          owner may assign.
+// Member = MANAGER / AGENT / FINANCE / OPERATION. They can READ every task in
+//          their own organization and COMMENT on any of them, so the team has
+//          one shared view of the work. What they cannot do is change a task:
+//          only the owner or an actual assignee may post a status update, and
+//          only the owner may assign.
 //
 // The three tiers, in one place:
 //
@@ -230,29 +232,32 @@ const resolveAssignees = async (userIds, organizationId) => {
 const isAssignedTo = (task, userId) =>
   (task.assignees || []).some((a) => String(a.userId) === String(userId));
 
-// An OPERATION assignee is what makes a task organization-wide rather than
-// private to the owner and its assignees — see the visibility note above.
-const hasOperationAssignee = (task) =>
-  (task.assignees || []).some((a) => a.role === "OPERATION");
-
 /**
  * May this caller see this task at all?
  *
- * The owner sees everything, and an assignee always sees their own task.
- * Everyone else on staff sees it only if it has an OPERATION assignee —
- * otherwise it does not exist for them, the same way another organization's
- * task does not.
+ * Yes, for anybody on the staff of the organization the task belongs to. The
+ * team shares one view of the work: a member can open a colleague's task, read
+ * its history and comment on it, whoever it is assigned to.
+ *
+ * `task` is still taken so every call site reads as a question about a specific
+ * task, and so a narrower rule can be restored here alone if the organization
+ * ever wants one. The tenant boundary is NOT this function's job — every
+ * handler queries by organizationId and runs denyNonStaff first, so a tenant
+ * account never reaches here.
+ *
+ * This used to open a task organization-wide only when it had an OPERATION
+ * assignee, which meant work assigned to, say, an agent was invisible to
+ * everyone but that agent and the admins — while the UI offered an "All team
+ * tasks" tab that promised the opposite.
  */
-const canView = (task, req) =>
-  isAdmin(req) || isAssignedTo(task, req.user._id) || hasOperationAssignee(task);
+const canView = (task, req) => isStaff(req);
 
 /**
  * May this caller post a STATUS update on this task?
  *
  * The owner can move any task; an assignee can move their own. Everybody else
- * who can see the task (an OPERATION-assigned one, org-wide) is limited to
- * comments, which is what keeps that visibility without making the task
- * editable by the whole team.
+ * is limited to comments — which is what lets the whole team read and discuss
+ * the work without being able to change the state of somebody else's task.
  */
 const canUpdateStatus = (task, req) => isAdmin(req) || isAssignedTo(task, req.user._id);
 
@@ -267,6 +272,204 @@ const applyStatusSideEffects = (task, status, userId) => {
     task.completedAt = null;
     task.completedBy = null;
   }
+};
+
+// ---------------------------------------------------------------------------
+// Task notifications
+//
+// Two moments reach a member by email, because both are things they cannot
+// discover by sitting still:
+//
+//   assignment — work has been put on them. Sent on create, and on an edit to
+//                whoever is NEW on the task.
+//   comment    — somebody wrote on a task they are on. Otherwise a question
+//                posted on a task sits unread until they happen to reopen it.
+//
+// In both cases the person who caused the event is dropped from the recipient
+// list: an admin assigning a task to themselves, or a member reading their own
+// comment back, is noise.
+// ---------------------------------------------------------------------------
+
+// Where a member finds their tasks in the app. There is no per-task page —
+// TaskDetail opens as a panel over the list — so the deepest an email can point
+// is the recipient's own tasks screen, which differs per role.
+const TASK_PATH_BY_ROLE = {
+  OWNER: "/admin/tasks",
+  ADMIN: "/admin/tasks",
+  MANAGER: "/manager/tasks",
+  AGENT: "/agent/tasks",
+  FINANCE: "/finance/tasks",
+  OPERATION: "/operation/tasks",
+};
+
+const taskUrlFor = (role) =>
+  `${env.clientUrl}${TASK_PATH_BY_ROLE[role] || "/admin/tasks"}`;
+
+// The comment body is whatever a member typed, and it is being dropped into an
+// HTML email — so escape it rather than trusting it as markup.
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+const assignmentEmailHtml = ({ task, assignedByEmail, taskUrl, isNew }) => `
+    <div style="font-family: Arial, sans-serif; max-width: 600px;">
+      <h2 style="color: #F47C3C;">📋 ${isNew ? "A task has been assigned to you" : "You have been added to a task"}</h2>
+      <p><strong>Task:</strong> ${escapeHtml(task.title)}</p>
+      <p><strong>Priority:</strong> ${escapeHtml(task.priority)}</p>
+      ${task.startDate ? `<p><strong>Starts:</strong> ${fmtUk(task.startDate)}</p>` : ""}
+      ${task.dueDate ? `<p><strong>Due:</strong> ${fmtUk(task.dueDate)}</p>` : ""}
+      <p><strong>Assigned by:</strong> ${escapeHtml(assignedByEmail || "Your administrator")}</p>
+      <div style="margin: 16px 0; padding: 12px 16px; border-left: 3px solid #F47C3C; background: #faf7f5;">
+        ${escapeHtml(task.description).replace(/\n/g, "<br>")}
+      </div>
+      ${
+        task.adminRemarks
+          ? `<p><strong>Notes from the admin:</strong><br>${escapeHtml(task.adminRemarks).replace(
+              /\n/g,
+              "<br>"
+            )}</p>`
+          : ""
+      }
+      ${
+        task.attachments?.length
+          ? `<p><strong>Attachments:</strong><br>${task.attachments
+              .map(
+                (a) =>
+                  `<a href="${escapeHtml(a.url)}" style="color:#F47C3C;">${escapeHtml(
+                    a.name || "View file"
+                  )}</a>`
+              )
+              .join("<br>")}</p>`
+          : ""
+      }
+      <p style="margin-top: 20px;">
+        <a href="${taskUrl}" style="background:#F47C3C;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;">Open the task</a>
+      </p>
+      <hr style="margin: 20px 0;">
+      <p><em>This is an automated notification from your Property Management System.</em></p>
+    </div>
+  `;
+
+/**
+ * Tell people the work is now theirs.
+ *
+ * `targets` is the set of assignee entries to mail — every assignee on create,
+ * only the newly added ones on an edit, so an admin fixing a typo does not
+ * re-announce the task to the people already working on it.
+ *
+ * Never throws, for the same reason as the comment mail: the task is already
+ * saved by the time this runs, and an SMTP failure must not report the
+ * assignment back to the admin as a failure.
+ */
+const notifyAssignees = async (task, targets, { assignedByEmail, isNew }) => {
+  const actor = String(assignedByEmail || "").trim().toLowerCase();
+
+  const recipients = new Map();
+  for (const a of targets || []) {
+    const email = String(a.email || "").trim().toLowerCase();
+    if (email && email !== actor) recipients.set(email, a.role || "");
+  }
+
+  if (!recipients.size) return;
+
+  const subject = `${isNew ? "New task assigned" : "Added to a task"}: ${task.title}`;
+
+  await Promise.allSettled(
+    [...recipients].map(([email, role]) =>
+      sendEmail({
+        email,
+        subject,
+        html: assignmentEmailHtml({
+          task,
+          assignedByEmail,
+          taskUrl: taskUrlFor(role),
+          isNew,
+        }),
+      }).catch((err) =>
+        console.error("Task assignment email failed:", email, err.message)
+      )
+    )
+  );
+};
+
+const commentEmailHtml = ({ task, entry, taskUrl }) => `
+    <div style="font-family: Arial, sans-serif; max-width: 600px;">
+      <h2 style="color: #F47C3C;">💬 New comment on a task</h2>
+      <p><strong>Task:</strong> ${escapeHtml(task.title)}</p>
+      <p><strong>Priority:</strong> ${escapeHtml(task.priority)}${
+        task.dueDate ? ` &nbsp;•&nbsp; <strong>Due:</strong> ${fmtUk(task.dueDate)}` : ""
+      }</p>
+      <p><strong>From:</strong> ${escapeHtml(entry.authorEmail || "A team member")}${
+        entry.authorRole ? ` (${escapeHtml(entry.authorRole)})` : ""
+      }</p>
+      <div style="margin: 16px 0; padding: 12px 16px; border-left: 3px solid #F47C3C; background: #faf7f5;">
+        ${entry.remark ? escapeHtml(entry.remark).replace(/\n/g, "<br>") : "<em>No message — see the attachments.</em>"}
+      </div>
+      ${
+        entry.attachments?.length
+          ? `<p><strong>Attachments:</strong><br>${entry.attachments
+              .map(
+                (a) =>
+                  `<a href="${escapeHtml(a.url)}" style="color:#F47C3C;">${escapeHtml(
+                    a.name || "View file"
+                  )}</a>`
+              )
+              .join("<br>")}</p>`
+          : ""
+      }
+      <p style="margin-top: 20px;">
+        <a href="${taskUrl}" style="background:#F47C3C;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;">Open the task</a>
+      </p>
+      <hr style="margin: 20px 0;">
+      <p><em>This is an automated notification from your Property Management System.</em></p>
+    </div>
+  `;
+
+/**
+ * Email everyone who should hear about a comment.
+ *
+ * One message per recipient rather than one with everybody in `to`, because
+ * the link depends on the recipient's role — a MANAGER and an AGENT reach
+ * their task list at different paths.
+ *
+ * Never throws: a comment is already saved by the time this runs, so an SMTP
+ * failure must not turn a successful post into an error for the member.
+ */
+const notifyCommentRecipients = async (task, entry) => {
+  const author = String(entry.authorEmail || "").trim().toLowerCase();
+
+  const recipients = new Map();
+
+  // The people the work is on.
+  for (const a of task.assignees || []) {
+    const email = String(a.email || "").trim().toLowerCase();
+    if (email && email !== author) recipients.set(email, a.role || "");
+  }
+
+  // The admin who set the task, copied in so they see the thread too.
+  const creator = String(task.createdByEmail || "").trim().toLowerCase();
+  if (creator && creator !== author && !recipients.has(creator)) {
+    recipients.set(creator, "ADMIN");
+  }
+
+  if (!recipients.size) return;
+
+  const subject = `New comment on task: ${task.title}`;
+
+  await Promise.allSettled(
+    [...recipients].map(([email, role]) =>
+      sendEmail({
+        email,
+        subject,
+        html: commentEmailHtml({ task, entry, taskUrl: taskUrlFor(role) }),
+      }).catch((err) =>
+        console.error("Task comment email failed:", email, err.message)
+      )
+    )
+  );
 };
 
 // ===========================================================================
@@ -304,14 +507,12 @@ export const getAssignableMembers = async (req, res) => {
 };
 
 // ===========================================================================
-// Every task the caller may SEE, with filters.
+// Every task in the caller's organization, with filters.
 //
-// Open to all staff, but not to the whole task table: the owner gets
-// everything, and everyone else gets their own assigned tasks plus any task
-// with an OPERATION assignee — operation work is cross-cutting, so it is
-// visible organization-wide, comment-only for everyone but the owner and the
-// operation assignee. A task assigned only to, say, an AGENT stays private to
-// the owner and that agent. See `canView`.
+// The whole team sees the whole board. What differs by role is what a member
+// may DO with a task, not whether it is listed: only an admin or an assignee
+// can move one, and only an admin can assign or edit. See `canView` and
+// `canUpdateStatus`.
 //
 // @route GET /api/v1/tasks
 // ===========================================================================
@@ -491,10 +692,9 @@ export const getTaskStats = async (req, res) => {
 // ===========================================================================
 // One task, in full, including its whole progress and comment history.
 //
-// The owner, an assignee, or — if it has an OPERATION assignee — any staff
-// member may open it; see `canView`. Everyone else gets the same 404 as a
-// task belonging to another organization: it does not exist for them, not
-// merely "no access".
+// Any staff member of the organization may open it; see `canView`. A task from
+// another organization gets a 404 rather than a 403 — it does not exist for
+// them, not merely "no access".
 //
 // @route GET /api/v1/tasks/:id
 // ===========================================================================
@@ -586,6 +786,14 @@ export const createTask = async (req, res) => {
         : {}),
     });
 
+    // Everyone it landed on hears about it. Awaited so a send is attempted
+    // before the response, but it swallows its own failures — the task exists
+    // either way.
+    await notifyAssignees(task, resolved, {
+      assignedByEmail: req.user.email || "",
+      isNew: true,
+    });
+
     return res.status(201).json({
       success: true,
       message: "Task created and assigned.",
@@ -642,6 +850,11 @@ export const updateTask = async (req, res) => {
 
     // Reassignment. Only replace the list when the client actually sent one, so
     // a partial edit cannot silently unassign everybody.
+    //
+    // Whoever is new on the task is mailed after the save. The ones already on
+    // it are not: they were told when they were assigned, and an admin fixing a
+    // due date should not re-announce the work to them.
+    let newlyAssigned = [];
     if (assignees !== undefined) {
       const resolved = await resolveAssignees(assignees, req.user.organizationId);
       if (!resolved.length) {
@@ -650,6 +863,8 @@ export const updateTask = async (req, res) => {
           message: "Assign the task to at least one active team member.",
         });
       }
+      const before = new Set((task.assignees || []).map((a) => String(a.userId)));
+      newlyAssigned = resolved.filter((a) => !before.has(String(a.userId)));
       task.assignees = resolved;
     }
 
@@ -675,6 +890,11 @@ export const updateTask = async (req, res) => {
     }
 
     await task.save();
+
+    await notifyAssignees(task, newlyAssigned, {
+      assignedByEmail: req.user.email || "",
+      isNew: false,
+    });
 
     return res.status(200).json({
       success: true,
@@ -782,9 +1002,9 @@ export const deleteTask = async (req, res) => {
 // ===========================================================================
 // Append to a task's timeline. Two kinds of entry come through here:
 //
-//   kind "comment" — anyone who can SEE the task (the owner, an assignee, or
-//                    any staff member when it has an OPERATION assignee).
-//                    Carries no status, so it cannot move the work.
+//   kind "comment" — anyone who can SEE the task, which is any staff member of
+//                    the organization. Carries no status, so it cannot move
+//                    the work.
 //   kind "update"  — the owner on any task, an assignee on their own. Moves the
 //                    task to a status and can be flagged as a formal report.
 //
@@ -851,6 +1071,11 @@ export const addTaskProgress = async (req, res) => {
     if (!isComment) applyStatusSideEffects(task, normalized, req.user._id);
 
     await task.save();
+
+    // Only after the save — a comment nobody could read is not worth emailing
+    // about. Awaited so a send is at least attempted before the response, but
+    // it swallows its own failures: the comment is stored either way.
+    if (isComment) await notifyCommentRecipients(task, entry);
 
     return res.status(201).json({
       success: true,

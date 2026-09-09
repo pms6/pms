@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Plus, Search, Download, Users, Building2, Banknote, CalendarClock, ShieldAlert,
+  Plus, Search, Download, Users, Building2, Banknote, CalendarClock,
 } from "lucide-react";
 import { PageHeader, StatCard, Badge } from "../../Shared/ui";
 import api from "../../api/api";
-import CheckInFormModal from "../_components/CheckInFormModal";
+import ClientFormModal from "../_components/ClientFormModal";
 import RecordDetail from "../_components/RecordDetail";
 import RowActions from "../_components/RowActions";
 import {
@@ -59,9 +59,9 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // The row being viewed, and the check-in being edited. `editing` holds the
-  // full check-in record rather than the flattened database row, because that
-  // is what the form edits.
+  // The row being viewed, and the client being edited. `editing` holds the full
+  // client record rather than the flattened sheet row, because that is what the
+  // form edits.
   const [viewing, setViewing] = useState(null);
   const [editing, setEditing] = useState(null);
   const [busyId, setBusyId] = useState("");
@@ -104,17 +104,18 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
   }, [load]);
 
   // -------------------------------------------------------------------------
-  // CRUD. Every row on this screen IS a check-in, so the writes go to that
-  // record — this list is a view over it, not a second copy of it.
+  // CRUD. These rows are this register's own records — writing here touches
+  // nothing else. A check-in is a separate record on a separate screen, and
+  // adding one does not put anybody in this list.
   // -------------------------------------------------------------------------
 
   // The row carries only the columns the sheet shows, so editing fetches the
-  // whole check-in first rather than opening a form over a partial record.
+  // whole client first rather than opening a form over a partial record.
   const openEdit = async (row) => {
     setBusyId(row._id);
     setError("");
     try {
-      const res = await api.get(`/check-ins/${row.checkInId}`);
+      const res = await api.get(`/client-database/${row._id}`);
       setEditing(res.data.data);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to open that client.");
@@ -124,8 +125,8 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
   };
 
   const save = async (form) => {
-    if (editing?._id) await api.put(`/check-ins/${editing._id}`, form);
-    else await api.post("/check-ins", form);
+    if (editing?._id) await api.put(`/client-database/${editing._id}`, form);
+    else await api.post("/client-database", form);
     setEditing(null);
     await load();
   };
@@ -133,8 +134,8 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
   const remove = async (row) => {
     const ok = confirm(
       `Delete ${row.tenant} from the client database?\n\n` +
-        "This deletes their check-in record, so they also leave the room status " +
-        "list and the deposit register."
+        "This removes them from this list only. Their check-in record, if they " +
+        "have one, is not touched."
     );
     if (!ok) return;
 
@@ -142,7 +143,7 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
     const snapshot = rows;
     setRows((prev) => prev.filter((r) => r._id !== row._id));
     try {
-      await api.delete(`/check-ins/${row.checkInId}`);
+      await api.delete(`/client-database/${row._id}`);
       await load();
     } catch (err) {
       setRows(snapshot);
@@ -165,8 +166,8 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
         { label: "Email", value: r.email },
         {
           label: "Status",
-          value: r.status === "CHECKED_OUT" ? "Past client" : "Current client",
-          tone: r.status === "CHECKED_OUT" ? "gray" : "green",
+          value: r.status === "PAST" ? "Past client" : "Current client",
+          tone: r.status === "PAST" ? "gray" : "green",
         },
       ],
     },
@@ -188,7 +189,6 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
     {
       title: "Contract",
       rows: [
-        { label: "Checked in", value: date(r.checkInDate) },
         { label: "Start", value: date(r.contractStart) },
         { label: "End", value: date(r.contractEnd) },
         { label: "Duration", value: duration(r.duration) },
@@ -209,23 +209,13 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
         { label: "Agent", value: r.agent },
       ],
     },
-    {
-      title: "References",
-      rows: [
-        {
-          label: "On file",
-          value: r.hasReferences ? "Yes" : "Not collected",
-          tone: r.hasReferences ? "green" : "amber",
-        },
-      ],
-    },
   ];
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Client Database"
-        subtitle="The master client list — every occupant, their room, contract, rent and agent"
+        subtitle="The master client list, kept by hand — every client, their room, contract, rent and agent"
         action={
           <div className="flex flex-wrap gap-2">
             <button
@@ -246,11 +236,10 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
       />
 
       <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 text-xs font-medium text-gray-500">
-        Every client here is a{" "}
+        This list is kept by hand and is separate from the{" "}
         <Link href={`${basePath}/check-in`} className="font-bold text-[#F47C3C] hover:underline">check-in</Link>{" "}
-        record, so editing or deleting a row changes that record — and the change shows on the{" "}
-        <Link href={`${basePath}/deposit-register`} className="font-bold text-[#F47C3C] hover:underline">deposit register</Link>{" "}
-        too. Room counts and room status come from the room records.
+        register — adding a check-in does not add a client here, and editing or deleting a client
+        here does not change any check-in. Room counts and room status come from the room records.
       </div>
 
       {error && (
@@ -283,15 +272,6 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
           </span>
         </button>
 
-        {summary.missingReferences > 0 && (
-          <Link
-            href={`${basePath}/reference-data`}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-bold border border-amber-100 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-all"
-          >
-            <ShieldAlert size={15} />
-            {summary.missingReferences} without references
-          </Link>
-        )}
       </div>
 
       {/* Filters */}
@@ -323,7 +303,7 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
 
         <select value={f.status} onChange={set("status")} className={CONTROL}>
           <option value="ACTIVE">Current clients</option>
-          <option value="CHECKED_OUT">Past clients</option>
+          <option value="PAST">Past clients</option>
           <option value="">Everyone</option>
         </select>
       </div>
@@ -400,7 +380,7 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
                     <td className="px-5 py-3">
                       <p className="font-semibold text-[#0F253B] flex items-center gap-2">
                         {r.tenant}
-                        {r.status === "CHECKED_OUT" && <Badge tone="gray">past</Badge>}
+                        {r.status === "PAST" && <Badge tone="gray">past</Badge>}
                       </p>
                       <p className="text-[11px] text-gray-400">
                         {r.room || "—"}{r.email ? ` · ${r.email}` : ""}
@@ -438,8 +418,8 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
                         onDownload={() => downloadRow(r)}
                         onEdit={() => openEdit(r)}
                         onDelete={() => remove(r)}
-                        editTitle="Edit this client's check-in"
-                        deleteTitle="Delete this client's check-in"
+                        editTitle="Edit this client"
+                        deleteTitle="Remove this client from the database"
                       />
                     </td>
                   </tr>
@@ -480,7 +460,7 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
       )}
 
       {editing !== null && (
-        <CheckInFormModal
+        <ClientFormModal
           initial={editing}
           properties={properties}
           onClose={() => setEditing(null)}

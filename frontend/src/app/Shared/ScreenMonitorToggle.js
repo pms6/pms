@@ -22,9 +22,22 @@ import uploadToCloudinary from "../utils/uploadToCloudinary";
  * ends the session too.
  * ------------------------------------------------------------------------- */
 
-// How often to ask the server whether a capture is due. Short enough that a
-// due time lands promptly, long enough to be nearly free.
-const TICK_MS = 20 * 1000;
+// How often to ask the server whether a capture is due.
+//
+// Once a minute, not three times: screenshots are 10-30 minutes apart, so a
+// tighter poll buys nothing and this is the app's most frequent request. With a
+// presence heartbeat also going out every minute, every monitored member costs
+// two requests a minute before they do any work at all — which is what put the
+// shared rate-limit budget within reach of a full office.
+const TICK_MS = 60 * 1000;
+
+// A capture can fail for reasons a retry will not fix — a blocked upload host,
+// a rejected preset, the API down. Retrying every tick then means an endless
+// loop of failing uploads nobody is told about, and an orphaned image left
+// behind each time the upload half succeeds. So failures back off, and after
+// this many in a row the shift stops and says why.
+const MAX_CAPTURE_FAILURES = 4;
+const FAILURE_BACKOFF_MS = 2 * 60 * 1000;
 
 const JPEG_QUALITY = 0.7;
 // Screenshots are evidence of activity, not design review material. Capping the
@@ -49,6 +62,9 @@ export default function ScreenMonitorToggle() {
   // Guards a capture that resolves after the member has switched off. Mirrors
   // `running`, but readable from async callbacks that closed over a stale one.
   const activeRef = useRef(false);
+  // Consecutive capture failures, and the moment it is worth trying again.
+  const failuresRef = useRef(0);
+  const retryAfterRef = useRef(0);
 
   const clearTick = () => {
     if (tickRef.current) {
@@ -60,6 +76,8 @@ export default function ScreenMonitorToggle() {
   const releaseStream = useCallback(() => {
     activeRef.current = false;
     setRunning(false);
+    failuresRef.current = 0;
+    retryAfterRef.current = 0;
     clearTick();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
@@ -137,14 +155,42 @@ export default function ScreenMonitorToggle() {
       });
 
       setState((s) => (s ? { ...s, session: { ...s.session, ...res.data.data } } : s));
+      failuresRef.current = 0;
+      retryAfterRef.current = 0;
+      setError("");
     } catch (err) {
-      // 409 means the working-hours window closed and the server ended the
-      // session — stop sharing rather than keep a dead capture loop running.
+      // 409 means the server ended the session — the working-hours window
+      // closed, or monitoring was switched off for the organisation. Stop
+      // sharing rather than keep a dead capture loop running.
       if (err.response?.status === 409) {
         releaseStream();
-        setError(err.response?.data?.message || "Working hours have ended.");
+        setError(err.response?.data?.message || "The monitored shift was closed.");
         await load();
+        return;
       }
+
+      // Anything else is a genuine failure. Silence here was the bug: the due
+      // time never advances on a failure, so the next tick tried again, and
+      // again, uploading a fresh image every time with nothing on screen to say
+      // so. Back off, and stop the shift once it is clearly not recoverable.
+      failuresRef.current += 1;
+      retryAfterRef.current = Date.now() + FAILURE_BACKOFF_MS * failuresRef.current;
+
+      if (failuresRef.current >= MAX_CAPTURE_FAILURES) {
+        releaseStream();
+        try {
+          await api.post("/screen-monitor/stop", { reason: "STOPPED" });
+        } catch { /* the shift is over locally either way */ }
+        setError(
+          "Screenshots kept failing to save, so the monitored shift was stopped. Start it again once you are back online."
+        );
+        await load();
+        return;
+      }
+
+      setError(
+        `A screenshot could not be saved (attempt ${failuresRef.current} of ${MAX_CAPTURE_FAILURES}). Trying again shortly.`
+      );
     } finally {
       setCapturing(false);
     }
@@ -156,11 +202,28 @@ export default function ScreenMonitorToggle() {
     clearTick();
     tickRef.current = setInterval(async () => {
       if (!activeRef.current) return;
+
       const fresh = await load();
       if (!fresh?.session) {
         releaseStream();
         return;
       }
+
+      // An admin switching monitoring off mid-shift has to stop the capturing,
+      // not just hide the button. The server refuses the next screenshot too,
+      // but there is no reason to take one first.
+      if (!fresh.policy?.enabled) {
+        releaseStream();
+        setError("Screen monitoring was switched off for your organisation.");
+        try {
+          await api.post("/screen-monitor/stop", { reason: "STOPPED" });
+        } catch { /* the shift is over locally either way */ }
+        await load();
+        return;
+      }
+
+      if (Date.now() < retryAfterRef.current) return;
+
       const due = fresh.session.nextCaptureAt;
       if (due && new Date(due) <= new Date()) await takeCapture();
     }, TICK_MS);
@@ -222,7 +285,12 @@ export default function ScreenMonitorToggle() {
     setBusy(false);
   };
 
-  if (!state?.policy?.enabled) return null;
+  // Hiding the whole control when the policy is off is right for everyone who
+  // is not mid-shift. It is wrong for someone whose shift is still running:
+  // taking their stop button away while the capture loop winds down leaves them
+  // being photographed with no way to end it. So the control stays until the
+  // shift is actually over.
+  if (!state?.policy?.enabled && !running && !state?.session) return null;
 
   const live = running && Boolean(state.session);
   // The server still has a session open but this page is not sharing — almost

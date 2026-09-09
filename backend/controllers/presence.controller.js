@@ -29,7 +29,11 @@ export const ONLINE_WINDOW_MS = 2 * 60 * 1000;
 // extending the old one, so the duration shown means something.
 const SESSION_GAP_MS = 10 * 60 * 1000;
 
-const PORTALS = ["admin", "manager", "agent", "finance"];
+// Every staff portal that mounts the heartbeat. A portal missing from this
+// list is not rejected loudly — it is quietly stored as "", which is how the
+// operation portal came to show a blank column on the board. MUST stay in sync
+// with the `role` each portal's layout passes to RoleShell.
+const PORTALS = ["admin", "manager", "agent", "finance", "operation"];
 
 // @desc    Record that the caller is at their desk
 // @route   POST /api/v1/presence/ping

@@ -89,13 +89,23 @@ const checkInSchema = new mongoose.Schema(
     // ============================
     // Dates
     // ============================
-    // When the room was taken off the market for this tenant. Usually earlier
-    // than the check-in itself, and the gap is what the void report reads.
-    roomRentedDate: { type: Date, default: null },
+    // When the room was taken off the market for this tenant — the date the
+    // office counts a room as rented out, and therefore the register's primary
+    // date: it is what the year/month filter, the ordering and the monthly
+    // totals all read. Usually earlier than the check-in itself, and the gap is
+    // what the void report reads.
+    //
+    // Required, because a row without it cannot be counted in the period it
+    // belongs to. Rows imported from the spreadsheets before this date was
+    // captured still have none, so every read falls back to checkInDate for
+    // them rather than dropping them — see rentedOn() in
+    // controllers/checkIn.controller.js.
+    roomRentedDate: { type: Date, required: true, index: true },
 
-    // The move-in itself. Required and indexed — the register is grouped and
-    // sorted by it.
-    checkInDate: { type: Date, required: true, index: true },
+    // The move-in itself. Recorded for the register and the tenant's own
+    // paperwork, but no longer what the sheet is counted by — a tenant can move
+    // in weeks after the room stopped being available to anybody else.
+    checkInDate: { type: Date, default: null, index: true },
 
     contractStart: { type: Date, default: null },
     contractEnd: { type: Date, default: null },
@@ -125,8 +135,9 @@ const checkInSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// The register's default view: this organization's live rows, newest first.
-checkInSchema.index({ organizationId: 1, isDeleted: 1, checkInDate: -1 });
+// The register's default view: this organization's live rows, newest first by
+// the date the room was rented.
+checkInSchema.index({ organizationId: 1, isDeleted: 1, roomRentedDate: -1 });
 // Room status list — "who is in this room now".
 checkInSchema.index({ organizationId: 1, roomId: 1, status: 1 });
 

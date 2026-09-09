@@ -4,16 +4,152 @@
 // itself reads it: one flat row per client, the property name written once and
 // then left blank down its rooms, numbered by property.
 //
-// The room status list already renders the same records grouped by property and
-// keyed on room state; this is the same data as a client roster, which is the
-// view the office actually works from. Both are read-only views over CheckIn,
-// Property and Room — nothing here is stored a second time.
+// This register is INDEPENDENT of the check-in register. It used to be a
+// read-only view over CheckIn, so every check-in appeared here automatically
+// and editing a client edited their check-in; that is no longer true. Clients
+// are entered here by hand, and nothing in the check-in flow reaches this
+// collection. See the note at the top of models/Client.js.
+//
+// The only things still read from elsewhere are the property's own facts — its
+// postcode and how many rooms it has — because those describe the building, not
+// the client, and duplicating them here would just let them go stale.
 
 import Property from "../models/Property.js";
 import Room from "../models/Room.js";
-import CheckIn from "../models/CheckIn.js";
-import ReferenceData from "../models/ReferenceData.js";
+import Client, { CLIENT_STATUSES } from "../models/Client.js";
 import { contractDuration, genderAndNationality } from "../utils/duration.js";
+
+/**
+ * Whitelist of fields a client may set. Anything else on the body — including
+ * organizationId and the soft-delete flags — is ignored, so a caller cannot
+ * file a row into another organization or resurrect a deleted one.
+ */
+const EDITABLE_KEYS = [
+  "propertyId",
+  "roomId",
+  "property",
+  "room",
+  "roomType",
+  "tenant",
+  "email",
+  "phone",
+  "gender",
+  "nationality",
+  "contractStart",
+  "contractEnd",
+  "rent",
+  "deposit",
+  "paymentDueDay",
+  "bank",
+  "agent",
+  "status",
+  "notes",
+];
+
+const NUMERIC_KEYS = ["rent", "deposit"];
+const DATE_KEYS = ["contractStart", "contractEnd"];
+const REF_KEYS = ["propertyId", "roomId"];
+
+const pickPayload = (body) => {
+  const payload = {};
+  for (const key of EDITABLE_KEYS) {
+    if (body[key] !== undefined) payload[key] = body[key];
+  }
+  return payload;
+};
+
+// Empty strings arrive from unset select/date inputs. Mongoose casts "" to
+// null for an ObjectId path but throws for a Date, so normalise both here.
+const blankToNull = (value) => (value === "" || value === undefined ? null : value);
+
+/**
+ * Validate and coerce the money, date and day fields in place. Returns an error
+ * message, or null when the payload is good.
+ */
+const normalisePayload = (payload) => {
+  for (const key of NUMERIC_KEYS) {
+    if (payload[key] === undefined) continue;
+    if (payload[key] === "" || payload[key] === null) {
+      payload[key] = 0;
+      continue;
+    }
+    const n = Number(payload[key]);
+    if (!Number.isFinite(n) || n < 0) {
+      return key + " must be a positive number.";
+    }
+    payload[key] = n;
+  }
+
+  if (payload.paymentDueDay !== undefined) {
+    if (payload.paymentDueDay === "" || payload.paymentDueDay === null) {
+      payload.paymentDueDay = null;
+    } else {
+      const day = Number(payload.paymentDueDay);
+      if (!Number.isInteger(day) || day < 1 || day > 31) {
+        return "paymentDueDay must be a day of the month (1-31).";
+      }
+      payload.paymentDueDay = day;
+    }
+  }
+
+  for (const key of DATE_KEYS) {
+    if (payload[key] !== undefined) payload[key] = blankToNull(payload[key]);
+  }
+  for (const key of REF_KEYS) {
+    if (payload[key] !== undefined) payload[key] = blankToNull(payload[key]);
+  }
+
+  if (payload.contractStart && payload.contractEnd) {
+    if (new Date(payload.contractEnd) < new Date(payload.contractStart)) {
+      return "The contract end date cannot be before the start date.";
+    }
+  }
+
+  if (payload.status !== undefined && !CLIENT_STATUSES.includes(payload.status)) {
+    delete payload.status;
+  }
+
+  return null;
+};
+
+/**
+ * Resolve the optional property/room links, and keep the denormalised names in
+ * step with them. A link to another organization's record simply does not
+ * resolve, which is what keeps a row from being filed across a tenant boundary.
+ */
+const attachLinks = async (payload, organizationId) => {
+  if (payload.propertyId) {
+    const property = await Property.findOne({
+      _id: payload.propertyId,
+      organizationId,
+      isDeleted: false,
+    })
+      .select("name")
+      .lean();
+    if (!property) return { error: "That property was not found." };
+    // The name is only filled in when the client did not type one: a row off
+    // the spreadsheet may name the property differently from the record it is
+    // being linked to, and the sheet's wording is the audit trail.
+    if (!payload.property) payload.property = property.name;
+  }
+
+  if (payload.roomId) {
+    const room = await Room.findOne({ _id: payload.roomId, organizationId })
+      .select("roomName propertyId")
+      .lean();
+    if (!room) return { error: "That room was not found." };
+    if (!payload.room) payload.room = room.roomName || "";
+    // Keep the pair consistent: a room always belongs to its own property.
+    if (!payload.propertyId) payload.propertyId = room.propertyId;
+  }
+
+  return {};
+};
+
+// Rows whose contract ends within this many days are flagged, and are what
+// ?expiring=true filters to. 60 days matches the window the available-rooms
+// screen already looks ahead by.
+const EXPIRY_DAYS = 60;
 
 // @desc    The client database — one row per client, in sheet order
 // @route   GET /api/v1/client-database
@@ -26,17 +162,17 @@ export const getClientDatabase = async (req, res) => {
 
     const { propertyId, status, agent, bank, expiring, search } = req.query;
 
-    // The sheet is the CURRENT client list, so live occupants are the default.
-    // "" asks for everyone, past tenants included.
-    const checkInFilter = { organizationId, isDeleted: false };
-    if (status === undefined) checkInFilter.status = "ACTIVE";
-    else if (status !== "") checkInFilter.status = status;
+    // The sheet is the CURRENT client list, so live clients are the default.
+    // "" asks for everyone, past clients included.
+    const filter = { organizationId, isDeleted: false };
+    if (status === undefined) filter.status = "ACTIVE";
+    else if (status !== "") filter.status = status;
 
-    if (propertyId) checkInFilter.propertyId = propertyId;
-    if (agent) checkInFilter.agent = agent;
-    if (bank) checkInFilter.bank = bank;
+    if (propertyId) filter.propertyId = propertyId;
+    if (agent) filter.agent = agent;
+    if (bank) filter.bank = bank;
 
-    const [properties, rooms, checkIns, referenced] = await Promise.all([
+    const [properties, rooms, clients] = await Promise.all([
       Property.find({ organizationId, isDeleted: false })
         .select("name address rentalType")
         .sort({ name: 1 })
@@ -44,10 +180,7 @@ export const getClientDatabase = async (req, res) => {
       // Only the room count per property is needed here — the sheet's "No of
       // Rooms" column — plus each room's status for the row it belongs to.
       Room.find({ organizationId }).select("propertyId status").lean(),
-      CheckIn.find(checkInFilter).lean(),
-      // Which clients have a reference record, so the sheet can show the gap
-      // rather than making somebody cross-check two screens.
-      ReferenceData.distinct("checkInId", { organizationId, isDeleted: false }),
+      Client.find(filter).lean(),
     ]);
 
     const roomCountByProperty = new Map();
@@ -59,66 +192,60 @@ export const getClientDatabase = async (req, res) => {
     }
 
     const propertyById = new Map(properties.map((p) => [String(p._id), p]));
-    const hasReferences = new Set(referenced.filter(Boolean).map(String));
 
-    // Rows carrying a contract that ends within this many days are flagged, and
-    // are what ?expiring=true filters to. 60 days matches the window the
-    // available-rooms screen already looks ahead by.
-    const EXPIRY_DAYS = 60;
     const now = new Date();
     const horizon = new Date(now.getTime() + EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 
-    let rows = checkIns.map((ci) => {
-      const propertyKey = ci.propertyId ? String(ci.propertyId) : "";
+    let rows = clients.map((c) => {
+      const propertyKey = c.propertyId ? String(c.propertyId) : "";
       const property = propertyKey ? propertyById.get(propertyKey) : null;
-      const end = ci.contractEnd ? new Date(ci.contractEnd) : null;
+      const end = c.contractEnd ? new Date(c.contractEnd) : null;
 
       return {
-        _id: String(ci._id),
-        checkInId: String(ci._id),
+        _id: String(c._id),
 
         // Property block — the sheet's first three columns.
         propertyId: propertyKey,
-        property: ci.property || property?.name || "",
+        property: c.property || property?.name || "",
         postcode: property?.address?.postcode || "",
         // "No of Rooms". Zero when the property has no room records, which is
         // true of anything typed straight off the spreadsheet.
         roomCount: roomCountByProperty.get(propertyKey) || 0,
         // "Room Status" — the room's own state, blank when there is no room
         // record to read it from.
-        roomStatus: ci.roomId ? roomStatusById.get(String(ci.roomId)) || "" : "",
+        roomStatus: c.roomId ? roomStatusById.get(String(c.roomId)) || "" : "",
 
         // Client block.
-        room: ci.room || "",
-        tenant: ci.tenant,
-        genderNationality: genderAndNationality(ci),
-        gender: ci.gender || "",
-        nationality: ci.nationality || "",
+        roomId: c.roomId ? String(c.roomId) : "",
+        room: c.room || "",
+        tenant: c.tenant,
+        genderNationality: genderAndNationality(c),
+        gender: c.gender || "",
+        nationality: c.nationality || "",
         // The sheet's second "Room Status" column, which is really the room
         // type ("Double Room", "GA Double Room").
-        roomType: ci.roomType || "",
-        phone: ci.phone || "",
-        email: ci.email || "",
+        roomType: c.roomType || "",
+        phone: c.phone || "",
+        email: c.email || "",
 
-        // Period of contract.
-        contractStart: ci.contractStart || null,
-        contractEnd: ci.contractEnd || null,
-        duration: contractDuration(ci.contractStart, ci.contractEnd),
+        // Period of contract — the only dates this register keeps.
+        contractStart: c.contractStart || null,
+        contractEnd: c.contractEnd || null,
+        duration: contractDuration(c.contractStart, c.contractEnd),
         // Flagged rather than filtered by default: a contract running out is
         // the thing this sheet is scanned for.
         expiringSoon: Boolean(end && end >= now && end <= horizon),
         expired: Boolean(end && end < now),
 
         // Money.
-        rent: ci.rent || 0,
-        deposit: ci.deposit || 0,
-        paymentDueDay: ci.paymentDueDay ?? null,
-        bank: ci.bank || "",
-        agent: ci.agent || "",
+        rent: c.rent || 0,
+        deposit: c.deposit || 0,
+        paymentDueDay: c.paymentDueDay ?? null,
+        bank: c.bank || "",
+        agent: c.agent || "",
 
-        checkInDate: ci.checkInDate || null,
-        status: ci.status,
-        hasReferences: hasReferences.has(String(ci._id)),
+        status: c.status,
+        notes: c.notes || "",
       };
     });
 
@@ -160,18 +287,19 @@ export const getClientDatabase = async (req, res) => {
 
     const sum = (key) => rows.reduce((total, r) => total + (r[key] || 0), 0);
 
+    // Filter options drawn from every client, not just the visible rows, so
+    // picking an agent cannot empty the dropdown you picked them from.
+    const [agents, banks] = await Promise.all([
+      Client.distinct("agent", { organizationId, isDeleted: false }),
+      Client.distinct("bank", { organizationId, isDeleted: false }),
+    ]);
+
     return res.status(200).json({
       success: true,
       total: rows.length,
       properties: properties.map((p) => ({ _id: String(p._id), name: p.name })),
-      // Filter options drawn from every check-in, not just the visible rows, so
-      // picking an agent cannot empty the dropdown you picked them from.
-      agents: (await CheckIn.distinct("agent", { organizationId, isDeleted: false }))
-        .filter(Boolean)
-        .sort(),
-      banks: (await CheckIn.distinct("bank", { organizationId, isDeleted: false }))
-        .filter(Boolean)
-        .sort(),
+      agents: agents.filter(Boolean).sort(),
+      banks: banks.filter(Boolean).sort(),
       summary: {
         clients: rows.length,
         properties: new Set(rows.map((r) => r.propertyId + "|" + r.property)).size,
@@ -179,7 +307,6 @@ export const getClientDatabase = async (req, res) => {
         deposit: sum("deposit"),
         expiringSoon: rows.filter((r) => r.expiringSoon).length,
         expired: rows.filter((r) => r.expired).length,
-        missingReferences: rows.filter((r) => !r.hasReferences).length,
         expiryDays: EXPIRY_DAYS,
       },
       data: rows,
@@ -189,5 +316,154 @@ export const getClientDatabase = async (req, res) => {
     return res
       .status(500)
       .json({ success: false, message: "Failed to build the client database." });
+  }
+};
+
+// @desc    One client in full, as the form edits them
+// @route   GET /api/v1/client-database/:id
+export const getClientById = async (req, res) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) {
+      return res.status(401).json({ success: false, message: "Organization ID required" });
+    }
+
+    const row = await Client.findOne({
+      _id: req.params.id,
+      organizationId,
+      isDeleted: false,
+    }).lean();
+
+    if (!row) {
+      return res.status(404).json({ success: false, message: "Client not found." });
+    }
+
+    return res.status(200).json({ success: true, data: row });
+  } catch (error) {
+    console.error("Get Client Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch the client." });
+  }
+};
+
+// @desc    Add a client by hand
+// @route   POST /api/v1/client-database
+export const createClient = async (req, res) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) {
+      return res.status(401).json({ success: false, message: "Organization ID required" });
+    }
+
+    const payload = pickPayload(req.body);
+
+    if (!payload.property || !String(payload.property).trim()) {
+      return res.status(400).json({ success: false, message: "A property is required." });
+    }
+    if (!payload.tenant || !String(payload.tenant).trim()) {
+      return res.status(400).json({ success: false, message: "A client name is required." });
+    }
+
+    const invalid = normalisePayload(payload);
+    if (invalid) return res.status(400).json({ success: false, message: invalid });
+
+    const { error } = await attachLinks(payload, organizationId);
+    if (error) return res.status(404).json({ success: false, message: error });
+
+    const row = await Client.create({
+      ...payload,
+      organizationId,
+      createdBy: req.user._id,
+    });
+
+    return res.status(201).json({ success: true, data: row });
+  } catch (error) {
+    console.error("Create Client Error:", error);
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: Object.values(error.errors)
+          .map((e) => e.message)
+          .join(", "),
+      });
+    }
+    return res.status(500).json({ success: false, message: "Failed to add the client." });
+  }
+};
+
+// @desc    Edit a client
+// @route   PUT /api/v1/client-database/:id
+export const updateClient = async (req, res) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) {
+      return res.status(401).json({ success: false, message: "Organization ID required" });
+    }
+
+    const payload = pickPayload(req.body);
+
+    if (payload.property !== undefined && !String(payload.property).trim()) {
+      return res.status(400).json({ success: false, message: "A property is required." });
+    }
+    if (payload.tenant !== undefined && !String(payload.tenant).trim()) {
+      return res.status(400).json({ success: false, message: "A client name is required." });
+    }
+
+    const invalid = normalisePayload(payload);
+    if (invalid) return res.status(400).json({ success: false, message: invalid });
+
+    const { error } = await attachLinks(payload, organizationId);
+    if (error) return res.status(404).json({ success: false, message: error });
+
+    const row = await Client.findOneAndUpdate(
+      { _id: req.params.id, organizationId, isDeleted: false },
+      { $set: payload },
+      { new: true, runValidators: true }
+    );
+
+    if (!row) {
+      return res.status(404).json({ success: false, message: "Client not found." });
+    }
+
+    return res.status(200).json({ success: true, data: row });
+  } catch (error) {
+    console.error("Update Client Error:", error);
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: Object.values(error.errors)
+          .map((e) => e.message)
+          .join(", "),
+      });
+    }
+    return res.status(500).json({ success: false, message: "Failed to update the client." });
+  }
+};
+
+// @desc    Soft delete a client
+// @route   DELETE /api/v1/client-database/:id
+//
+// Removes the row from this register only. No check-in, deposit or room record
+// is touched — they are separate registers now.
+export const deleteClient = async (req, res) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) {
+      return res.status(401).json({ success: false, message: "Organization ID required" });
+    }
+
+    const row = await Client.findOneAndUpdate(
+      { _id: req.params.id, organizationId, isDeleted: false },
+      { $set: { isDeleted: true, deletedAt: new Date() } },
+      { new: true }
+    );
+
+    if (!row) {
+      return res.status(404).json({ success: false, message: "Client not found." });
+    }
+
+    return res.status(200).json({ success: true, message: "Client deleted." });
+  } catch (error) {
+    console.error("Delete Client Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to delete the client." });
   }
 };

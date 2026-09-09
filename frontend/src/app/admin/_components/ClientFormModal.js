@@ -1,52 +1,49 @@
 "use client";
 
-// The check-in form — creating or editing one tenant moving in.
+// The client database form — adding or editing one client by hand.
 //
-// Lifted out of its own page so every screen that shows these records can edit
-// the record itself rather than a copy of it: the client database and the
-// deposit register both open this form, and there is one place to change the
-// fields.
+// Deliberately NOT CheckInFormModal. The client database is its own register
+// now: a client typed here never becomes a check-in, and a check-in never
+// appears here. Sharing one form would put the two back together, because the
+// form is what decides which record a screen writes to.
+//
+// The difference in the fields is the point of the split: this form has no
+// room rented date and no check-in date. The contract's start and end are the
+// only dates this register keeps — the other two are managed on the check-in.
 
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import api from "../../api/api";
-import {
-  dateInput,
-  GENDERS,
-  BANKS,
-} from "../../utils/registers";
+import { dateInput, GENDERS, BANKS } from "../../utils/registers";
 import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const FIELD =
   "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
 const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
-const CONTROL =
-  "px-3.5 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]";
 
 const emptyForm = {
   propertyId: "",
   roomId: "",
   property: "",
   room: "",
+  roomType: "",
   tenant: "",
   email: "",
   phone: "",
   gender: "",
   nationality: "",
-  roomType: "",
   rent: "",
   deposit: "",
   paymentDueDay: "",
   bank: "",
   agent: "",
-  roomRentedDate: "",
-  checkInDate: "",
   contractStart: "",
   contractEnd: "",
+  status: "ACTIVE",
   notes: "",
 };
 
-export default function CheckInFormModal({ initial, properties, onClose, onSave }) {
+export default function ClientFormModal({ initial, properties, onClose, onSave }) {
   const isEdit = Boolean(initial?._id);
 
   const [form, setForm] = useState(() => {
@@ -59,10 +56,9 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
       rent: initial.rent ?? "",
       deposit: initial.deposit ?? "",
       paymentDueDay: initial.paymentDueDay ?? "",
-      roomRentedDate: dateInput(initial.roomRentedDate),
-      checkInDate: dateInput(initial.checkInDate),
       contractStart: dateInput(initial.contractStart),
       contractEnd: dateInput(initial.contractEnd),
+      status: initial.status || "ACTIVE",
     };
   });
 
@@ -76,11 +72,8 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
   // a property that has no Room records at all, which is why the room is a
   // free-text field beside the picker rather than only a picker.
   useEffect(() => {
+    if (!form.propertyId) return;
     let active = true;
-    if (!form.propertyId) {
-      setRooms([]);
-      return;
-    }
     (async () => {
       try {
         const res = await api.get(`/rooms/property/${form.propertyId}`);
@@ -105,6 +98,9 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
       room: "",
       property: property ? property.name : f.property,
     }));
+    // And clear the list it was picked from, so the dropdown cannot offer a
+    // room belonging to the property that was just replaced.
+    if (!id) setRooms([]);
   };
 
   const pickRoom = (e) => {
@@ -125,30 +121,36 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
   const submit = async (e) => {
     e.preventDefault();
     if (!form.property.trim()) return setError("A property is required.");
-    if (!form.tenant.trim()) return setError("A tenant name is required.");
-    if (!form.roomRentedDate) return setError("A room rented date is required.");
+    if (!form.tenant.trim()) return setError("A client name is required.");
 
     setSaving(true);
     setError("");
     try {
       await onSave(form);
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to save the check-in.");
+      setError(err.response?.data?.message || "Failed to save the client.");
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={guardModalClose(onClose)}
+    >
       <div
         className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h3 className="text-xl font-bold text-[#0F253B]">{isEdit ? "Check-in" : "New Check-in"}</h3>
-            <p className="text-xs text-gray-400 font-medium">A tenant moving into a room</p>
+            <h3 className="text-xl font-bold text-[#0F253B]">
+              {isEdit ? "Client" : "New Client"}
+            </h3>
+            <p className="text-xs text-gray-400 font-medium">
+              A record in the client database — separate from the check-in register
+            </p>
           </div>
           <button onClick={onClose} className="text-gray-300 hover:text-gray-500">
             <X size={20} />
@@ -182,7 +184,12 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
           <div className="grid sm:grid-cols-3 gap-3">
             <div>
               <label className={LABEL}>Room record</label>
-              <select className={FIELD} value={form.roomId} onChange={pickRoom} disabled={!form.propertyId}>
+              <select
+                className={FIELD}
+                value={form.roomId}
+                onChange={pickRoom}
+                disabled={!form.propertyId}
+              >
                 <option value="">Not linked</option>
                 {rooms.map((r) => (
                   <option key={r._id} value={r._id}>{r.roomName || r.title}</option>
@@ -195,7 +202,12 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
             </div>
             <div>
               <label className={LABEL}>Room type</label>
-              <input className={FIELD} value={form.roomType} onChange={set("roomType")} placeholder="Double Room" />
+              <input
+                className={FIELD}
+                value={form.roomType}
+                onChange={set("roomType")}
+                placeholder="Double Room"
+              />
             </div>
           </div>
 
@@ -234,11 +246,25 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
           <div className="grid sm:grid-cols-3 gap-3">
             <div>
               <label className={LABEL}>Rent £</label>
-              <input type="number" min="0" step="1" className={FIELD} value={form.rent} onChange={set("rent")} />
+              <input
+                type="number"
+                min="0"
+                step="1"
+                className={FIELD}
+                value={form.rent}
+                onChange={set("rent")}
+              />
             </div>
             <div>
               <label className={LABEL}>Deposit £</label>
-              <input type="number" min="0" step="1" className={FIELD} value={form.deposit} onChange={set("deposit")} />
+              <input
+                type="number"
+                min="0"
+                step="1"
+                className={FIELD}
+                value={form.deposit}
+                onChange={set("deposit")}
+              />
             </div>
             <div>
               <label className={LABEL}>Rent due day</label>
@@ -257,8 +283,13 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
           <div className="grid sm:grid-cols-2 gap-3">
             <div>
               <label className={LABEL}>Bank rent is paid to</label>
-              <input className={FIELD} list="register-banks" value={form.bank} onChange={set("bank")} />
-              <datalist id="register-banks">
+              <input
+                className={FIELD}
+                list="client-banks"
+                value={form.bank}
+                onChange={set("bank")}
+              />
+              <datalist id="client-banks">
                 {BANKS.map((b) => <option key={b} value={b} />)}
               </datalist>
             </div>
@@ -268,37 +299,33 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
             </div>
           </div>
 
-          {/* When.
-              The rented date leads and carries the asterisk: the register
-              counts a room as rented out on the day it was taken off the
-              market, which can be weeks before anybody moves in. The check-in
-              date is recorded beside it but is no longer what the sheet is
-              filtered or totalled by. */}
-          <div className="grid sm:grid-cols-2 gap-3">
+          {/* Period of contract — the only dates this register keeps. The room
+              rented and check-in dates live on the check-in record. */}
+          <div className="grid sm:grid-cols-3 gap-3">
             <div>
-              <label className={LABEL}>Room rented date *</label>
+              <label className={LABEL}>Contract start</label>
               <input
                 type="date"
                 className={FIELD}
-                value={form.roomRentedDate}
-                onChange={set("roomRentedDate")}
-                required
+                value={form.contractStart}
+                onChange={set("contractStart")}
               />
             </div>
             <div>
-              <label className={LABEL}>Check-in date</label>
-              <input type="date" className={FIELD} value={form.checkInDate} onChange={set("checkInDate")} />
-            </div>
-          </div>
-
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className={LABEL}>Contract start</label>
-              <input type="date" className={FIELD} value={form.contractStart} onChange={set("contractStart")} />
-            </div>
-            <div>
               <label className={LABEL}>Contract end</label>
-              <input type="date" className={FIELD} value={form.contractEnd} onChange={set("contractEnd")} />
+              <input
+                type="date"
+                className={FIELD}
+                value={form.contractEnd}
+                onChange={set("contractEnd")}
+              />
+            </div>
+            <div>
+              <label className={LABEL}>Status</label>
+              <select className={FIELD} value={form.status} onChange={set("status")}>
+                <option value="ACTIVE">Current client</option>
+                <option value="PAST">Past client</option>
+              </select>
             </div>
           </div>
 
@@ -320,7 +347,7 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
               disabled={saving}
               className="px-5 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-60 text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
             >
-              {saving ? "Saving…" : isEdit ? "Save changes" : "Record check-in"}
+              {saving ? "Saving…" : isEdit ? "Save changes" : "Add client"}
             </button>
           </div>
         </form>
