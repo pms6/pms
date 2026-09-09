@@ -30,6 +30,8 @@ import referenceDataRoutes from "./referenceData.route.js"
 import clientDatabaseRoutes from "./clientDatabase.route.js"
 import inventoryRoutes from "./inventory.route.js"
 import cleaningScheduleRoutes from "./cleaningSchedule.route.js"
+import emptyRoomStatusRoutes from "./emptyRoomStatus.route.js"
+import companyPasswordRoutes from "./companyPassword.route.js"
 import screenMonitorRoutes from "./screenMonitor.route.js"
 import presenceRoutes from "./presence.route.js"
 
@@ -86,6 +88,12 @@ router.use("/inventory", inventoryRoutes);
 
 // Cleaning Messages Schedule — the month-by-month sheet of property cleans.
 router.use("/cleaning-schedule", cleaningScheduleRoutes);
+
+// Available Rooms Status — the make-ready sheet for rooms between tenants.
+router.use("/empty-rooms", emptyRoomStatusRoutes);
+
+// Company Passwords — company account logins and property key-safe codes.
+router.use("/company-passwords", companyPasswordRoutes);
 
 // Staff screen monitoring — consented, working-hours-only screenshot sessions.
 router.use("/screen-monitor", screenMonitorRoutes);

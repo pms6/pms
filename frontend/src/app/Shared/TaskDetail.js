@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   X, Paperclip, Send, Loader2, CalendarClock, CalendarDays, UserRound,
-  MessageSquare, FileCheck2, History, Lock, ListChecks,
+  MessageSquare, FileCheck2, History, Lock, ListChecks, Building2,
 } from "lucide-react";
 import api from "@/app/api/api";
 import { uploadFileToCloudinary } from "@/app/utils/uploadToCloudinary";
@@ -194,6 +194,9 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
               value={(task.assignees || []).map((a) => displayName(a.email)).join(", ")}
               icon={UserRound}
             />
+            {task.property && (
+              <Meta label="Property" value={task.property} icon={Building2} />
+            )}
             <Meta label="Start date (UK)" value={fmtDateTime(task.startDate)} icon={CalendarDays} />
             <Meta label="Due date (UK)" value={fmtDateTime(task.dueDate)} icon={CalendarClock} />
             <Meta label="Created" value={fmtDateTime(task.createdAt)} />

@@ -20,10 +20,12 @@ import {
 } from "../../Shared/tasks";
 import DateTimeField from "../../Shared/DateTimeField";
 
-export default function TaskForm({ members, initial, onCancel, onSave }) {
+export default function TaskForm({ members, properties = [], initial, onCancel, onSave }) {
   const [form, setForm] = useState({
     title: initial?.title || "",
     description: initial?.description || "",
+    propertyId: initial?.propertyId ? String(initial.propertyId) : "",
+    property: initial?.property || "",
     assignees: (initial?.assignees || []).map((a) => String(a.userId)),
     priority: initial?.priority || "Medium",
     status:
@@ -46,6 +48,12 @@ export default function TaskForm({ members, initial, onCancel, onSave }) {
   const [error, setError] = useState("");
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const onPropertyPick = (e) => {
+    const propertyId = e.target.value;
+    const name = properties.find((p) => String(p._id) === propertyId)?.name || "";
+    setForm((f) => ({ ...f, propertyId, property: name }));
+  };
 
   const toggleAssignee = (userId) =>
     setForm((f) => ({
@@ -124,6 +132,22 @@ export default function TaskForm({ members, initial, onCancel, onSave }) {
             onChange={set("description")}
             required
           />
+        </div>
+
+        <div>
+          <label className={LABEL}>Property</label>
+          <select className={FIELD} value={form.propertyId} onChange={onPropertyPick}>
+            <option value="">No property — not tied to one</option>
+            {/* A task can point at a property that has since been removed from
+                the portfolio — keep it selectable so an edit doesn't drop it. */}
+            {form.propertyId &&
+              !properties.some((p) => String(p._id) === form.propertyId) && (
+                <option value={form.propertyId}>{form.property || "Current property"}</option>
+              )}
+            {properties.map((p) => (
+              <option key={p._id} value={String(p._id)}>{p.name}</option>
+            ))}
+          </select>
         </div>
 
         {/* Assignment */}

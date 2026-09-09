@@ -3,21 +3,24 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Search, ListChecks, Circle, PlayCircle, CheckCircle2, AlertTriangle,
-  CalendarClock, CalendarDays, Paperclip, MessageSquare, UserRound, Users,
+  CalendarClock, CalendarDays, Paperclip, MessageSquare, UserRound, Users, Sun,
+  Building2,
 } from "lucide-react";
 import { PageHeader } from "./ui";
 import api from "@/app/api/api";
 import TaskDetail from "./TaskDetail";
 import {
   TASK_PRIORITIES, PRIORITY_TONE, STATUS_TONE, PRIORITY_DOT,
-  fmtDateTime, displayName, dueLabel,
+  fmtDateTime, displayName, dueLabel, isDueToday,
 } from "./tasks";
 
 // Keys are matched against a task's effectiveStatus, so the completed tab is
 // keyed "Done" — the value the backend actually derives. Keyed "Completed" it
-// matched nothing and the tab always read empty.
+// matched nothing and the tab always read empty. "today" is special-cased in
+// the filter below — it is not a status.
 const TABS = [
   { key: "all", label: "All", icon: ListChecks },
+  { key: "today", label: "Due today", icon: Sun },
   { key: "Not Started", label: "Not started", icon: Circle },
   { key: "In Progress", label: "In progress", icon: PlayCircle },
   { key: "Overdue", label: "Overdue", icon: AlertTriangle },
@@ -74,7 +77,11 @@ export default function MyTasks({ portalLabel = "your" }) {
 
   const needle = q.trim().toLowerCase();
   const list = tasks.filter((t) => {
-    if (tab !== "all" && t.effectiveStatus !== tab) return false;
+    if (tab === "today") {
+      if (!isDueToday(t)) return false;
+    } else if (tab !== "all" && t.effectiveStatus !== tab) {
+      return false;
+    }
     if (priority && t.priority !== priority) return false;
     if (!needle) return true;
     return (
@@ -84,7 +91,11 @@ export default function MyTasks({ portalLabel = "your" }) {
   });
 
   const detail = tasks.find((t) => t._id === detailId);
-  const counts = { ...stats, all: stats.total };
+  const counts = {
+    ...stats,
+    all: stats.total,
+    today: stats.dueToday ?? tasks.filter(isDueToday).length,
+  };
 
   return (
     <div className="space-y-5">
@@ -131,7 +142,7 @@ export default function MyTasks({ portalLabel = "your" }) {
       )}
 
       {/* Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {TABS.map((t) => {
           const active = tab === t.key;
           return (
@@ -230,6 +241,12 @@ export default function MyTasks({ portalLabel = "your" }) {
                       {(t.assignees || []).map((a) => displayName(a.email)).join(", ") ||
                         "Unassigned"}
                     </span>
+                  </p>
+                )}
+                {t.property && (
+                  <p className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500 truncate">
+                    <Building2 size={12} className="text-[#F47C3C] shrink-0" />
+                    <span className="truncate">{t.property}</span>
                   </p>
                 )}
                 {/* Members were only shown the due DATE, so a task due at

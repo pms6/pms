@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Task, { TASK_PRIORITIES, TASK_STATUSES } from "../models/Task.js";
 import OrganizationMember from "../models/OrganizationMember.js";
 import User from "../models/User.js";
+import Property from "../models/Property.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import env from "../config/env.js";
 
@@ -103,6 +104,14 @@ const daysUntilDue = (dueDate) => {
   due.setHours(0, 0, 0, 0);
   return Math.round((due - startOfToday()) / DAY_MS);
 };
+
+// A decorated task that falls due today and is still open. Used for the
+// "Due today" count and filter shown in every role's task view.
+// MUST stay in sync with isDueToday in frontend/src/app/Shared/tasks.js.
+const isDueToday = (task) =>
+  task.effectiveStatus !== "Done" &&
+  task.effectiveStatus !== "Cancelled" &&
+  task.daysUntilDue === 0;
 
 // Shape one task for the client: derived status plus a couple of conveniences
 // the dashboard and lists would otherwise recompute per row.
@@ -227,6 +236,23 @@ const resolveAssignees = async (userIds, organizationId) => {
     email: emailById.get(String(m.userId)) || "",
     role: m.role || "",
   }));
+};
+
+/**
+ * Turn a property id from the client into { propertyId, property }, keeping
+ * only a property that belongs to the caller's own organization. An empty /
+ * missing id clears the link. Same tenant-isolation idea as resolveAssignees:
+ * an id from another organization simply does not resolve.
+ */
+const resolveProperty = async (propertyId, organizationId) => {
+  if (!propertyId || !mongoose.isValidObjectId(propertyId)) {
+    return { propertyId: null, property: "" };
+  }
+  const property = await Property.findOne({ _id: propertyId, organizationId })
+    .select("name address")
+    .lean();
+  if (!property) return { propertyId: null, property: "" };
+  return { propertyId: property._id, property: property.name || property.address || "" };
 };
 
 const isAssignedTo = (task, userId) =>
@@ -520,7 +546,7 @@ export const getTasks = async (req, res) => {
   try {
     if (denyNonStaff(req, res)) return;
 
-    const { status, priority, assignee, search } = req.query;
+    const { status, priority, assignee, search, dueToday } = req.query;
     const filter = { organizationId: req.user.organizationId, isDeleted: false };
 
     if (priority && TASK_PRIORITIES.includes(priority)) filter.priority = priority;
@@ -545,16 +571,22 @@ export const getTasks = async (req, res) => {
       data = data.filter((t) => t.effectiveStatus === normalizeStatus(status));
     }
 
+    // "Due today" is derived (like Overdue) so it is applied after decorating.
+    if (dueToday === "true" || dueToday === "1") {
+      data = data.filter(isDueToday);
+    }
+
     // Counts for the tab strip, so a member view does not need the admin-only
     // stats endpoint just to label its filters.
     const stats = data.reduce(
       (acc, t) => {
         acc.total++;
         acc[t.effectiveStatus] = (acc[t.effectiveStatus] || 0) + 1;
+        if (isDueToday(t)) acc.dueToday++;
         if (t.isMine) acc.mine++;
         return acc;
       },
-      { total: 0, mine: 0 }
+      { total: 0, mine: 0, dueToday: 0 }
     );
 
     return res.status(200).json({ success: true, total: data.length, data, stats });
@@ -588,9 +620,10 @@ export const getMyTasks = async (req, res) => {
       (acc, t) => {
         acc.total++;
         acc[t.effectiveStatus] = (acc[t.effectiveStatus] || 0) + 1;
+        if (isDueToday(t)) acc.dueToday++;
         return acc;
       },
-      { total: 0 }
+      { total: 0, dueToday: 0 }
     );
 
     return res.status(200).json({ success: true, data, stats });
@@ -652,6 +685,7 @@ export const getTaskStats = async (req, res) => {
 
     const total = decorated.length;
     const completed = byStatus.Done;
+    const dueToday = decorated.filter(isDueToday).length;
 
     // Due in the next 14 days and not finished — the "what lands next" list.
     const upcoming = decorated
@@ -675,6 +709,7 @@ export const getTaskStats = async (req, res) => {
       success: true,
       stats: {
         total,
+        dueToday,
         byStatus,
         byPriority,
         byMember: [...byMember.values()].sort((a, b) => b.total - a.total),
@@ -740,6 +775,7 @@ export const createTask = async (req, res) => {
       dueDate,
       attachments,
       adminRemarks,
+      propertyId,
     } = req.body;
 
     if (!title?.trim()) {
@@ -749,6 +785,7 @@ export const createTask = async (req, res) => {
       return res.status(400).json({ success: false, message: "Task description is required." });
     }
 
+    const property = await resolveProperty(propertyId, req.user.organizationId);
     const resolved = await resolveAssignees(assignees, req.user.organizationId);
     if (!resolved.length) {
       return res.status(400).json({
@@ -774,6 +811,8 @@ export const createTask = async (req, res) => {
       createdByEmail: req.user.email || "",
       title: title.trim(),
       description: description.trim(),
+      propertyId: property.propertyId,
+      property: property.property,
       assignees: resolved,
       priority: TASK_PRIORITIES.includes(priority) ? priority : "Medium",
       status: normalized,
@@ -833,7 +872,14 @@ export const updateTask = async (req, res) => {
       dueDate,
       attachments,
       adminRemarks,
+      propertyId,
     } = req.body;
+
+    if (propertyId !== undefined) {
+      const property = await resolveProperty(propertyId, req.user.organizationId);
+      task.propertyId = property.propertyId;
+      task.property = property.property;
+    }
 
     if (title !== undefined) {
       if (!title.trim()) {

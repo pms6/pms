@@ -36,10 +36,16 @@ import { guardModalClose } from "@/app/Shared/modalGuard";
  * MUST stay in sync with backend/models/Maintenance.js.
  * ------------------------------------------------------------------ */
 
-export const STATUSES = ["pending", "open", "assigned", "in_progress", "sorted", "closed"];
+// The statuses an operator can pick. "open" and "closed" were dropped from the
+// vocabulary — "pending" covers a request not yet started and "sorted" covers
+// one that is done.
+export const STATUSES = ["pending", "assigned", "in_progress", "sorted"];
+// Still counts a legacy "closed" row as resolved so old data reads correctly.
 export const RESOLVED_STATUSES = ["sorted", "closed"];
 const PRIORITIES = ["urgent", "high", "med", "low"];
 
+// Tones cover the legacy "open" / "closed" values too, so an un-migrated row
+// still gets a coloured badge.
 const STATUS_TONE = {
   pending: "amber",
   open: "blue",
@@ -48,6 +54,12 @@ const STATUS_TONE = {
   sorted: "green",
   closed: "gray",
 };
+
+// The options for a status <select>, including the row's current value when it
+// is a legacy one no longer offered — so editing such a row still works and the
+// operator can move it onto the new vocabulary.
+const statusOptions = (current) =>
+  current && !STATUSES.includes(current) ? [current, ...STATUSES] : STATUSES;
 const PRIORITY_TONE = { urgent: "red", high: "amber", med: "blue", low: "gray" };
 
 const nice = (s) => String(s || "").replace(/_/g, " ");
@@ -363,7 +375,7 @@ function RequestModal({ initial, properties, suppliers, onClose, onSave }) {
             <div>
               <label className={LABEL}>Status</label>
               <select className={`${FIELD} capitalize`} value={form.status} onChange={set("status")}>
-                {STATUSES.map((s) => (
+                {statusOptions(form.status).map((s) => (
                   <option key={s} value={s}>{nice(s)}</option>
                 ))}
               </select>
@@ -957,7 +969,7 @@ function FragmentRow({ m, srNo, open, steps, onToggle, onStatus, onView, onEdit,
             onChange={(e) => onStatus(e.target.value)}
             className={`w-full px-2.5 py-1.5 rounded-lg text-[11px] font-bold capitalize outline-none focus:ring-2 focus:ring-[#F47C3C] border border-gray-100 bg-gray-50 text-[#0F253B]`}
           >
-            {STATUSES.map((s) => (
+            {statusOptions(m.status).map((s) => (
               <option key={s} value={s}>{nice(s)}</option>
             ))}
           </select>

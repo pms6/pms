@@ -29,6 +29,16 @@ export const SETTABLE_STATUSES = [
 /** Map legacy stored value "Completed" → "Done". */
 export const normalizeStatus = (s) => (s === "Completed" ? "Done" : s);
 
+/**
+ * A task that falls due today and is still open. `daysUntilDue` comes from the
+ * backend (0 = today). Done / Cancelled tasks are never "due today".
+ * MUST stay in sync with isDueToday in backend/controllers/task.controller.js.
+ */
+export const isDueToday = (task) => {
+  const s = normalizeStatus(task?.effectiveStatus || task?.status);
+  return s !== "Done" && s !== "Cancelled" && task?.daysUntilDue === 0;
+};
+
 export const PRIORITY_TONE = {
   Low: "bg-slate-100 text-slate-600",
   Medium: "bg-blue-100 text-blue-700",

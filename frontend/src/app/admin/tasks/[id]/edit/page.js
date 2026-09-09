@@ -14,6 +14,7 @@ export default function AdminEditTask() {
 
   const [task, setTask] = useState(null);
   const [members, setMembers] = useState([]);
+  const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -22,12 +23,14 @@ export default function AdminEditTask() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [taskRes, membersRes] = await Promise.all([
+      const [taskRes, membersRes, propsRes] = await Promise.all([
         api.get(`/tasks/${id}`),
         api.get("/tasks/assignable-members"),
+        api.get("/properties", { params: { limit: 200 } }),
       ]);
       setTask(taskRes.data?.data || null);
       setMembers(membersRes.data?.data || []);
+      setProperties(propsRes.data?.data || []);
       setError("");
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load that task.");
@@ -73,6 +76,7 @@ export default function AdminEditTask() {
       ) : task ? (
         <TaskForm
           members={members}
+          properties={properties}
           initial={task}
           onCancel={() => router.push("/admin/tasks")}
           onSave={save}

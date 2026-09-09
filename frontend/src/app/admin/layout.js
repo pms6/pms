@@ -33,6 +33,7 @@ import {
   PiggyBank,
   Database,
   Contact,
+  Lock,
 } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 import ScreenMonitorToggle from "../Shared/ScreenMonitorToggle";
@@ -59,6 +60,8 @@ const NAV = [
   { href: "/admin/deposits", label: "Deposits", icon: ShieldCheck },
   { href: "/admin/maintenance", label: "Maintenance", icon: Wrench },
   { href: "/admin/cleaning-schedule", label: "Cleaning Schedule", icon: Sparkles },
+  { href: "/admin/empty-rooms", label: "Available Rooms Status", icon: DoorOpen },
+  { href: "/admin/company-passwords", label: "Company Passwords", icon: Lock },
   { href: "/admin/suppliers", label: "Suppliers", icon: HardHat },
   { href: "/admin/internet", label: "Internet Details", icon: Wifi },
   { href: "/admin/reports", label: "Reports", icon: BarChart3 },

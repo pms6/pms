@@ -39,6 +39,20 @@ const TICK_MS = 60 * 1000;
 const MAX_CAPTURE_FAILURES = 4;
 const FAILURE_BACKOFF_MS = 2 * 60 * 1000;
 
+// A single due capture gets a few quick goes before it counts as a failure —
+// a screenshot upload that trips over a momentary network blip or a Cloudinary
+// hiccup almost always succeeds on the next try seconds later, and surfacing a
+// red "could not be saved" warning for something that self-heals is what made
+// the feature look broken on some machines.
+const CAPTURE_ATTEMPTS = 3;
+const CAPTURE_RETRY_MS = 4000;
+
+// Clear a transient capture warning on its own after a while, so a blip that
+// has since recovered does not leave the message sitting in the header.
+const ERROR_AUTOCLEAR_MS = 45 * 1000;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const JPEG_QUALITY = 0.7;
 // Screenshots are evidence of activity, not design review material. Capping the
 // long edge keeps them readable while cutting upload size by roughly an order
@@ -122,7 +136,15 @@ export default function ScreenMonitorToggle() {
   // Pull one frame off the shared display and hand it back as a JPEG blob.
   const grabFrame = useCallback(async () => {
     const video = videoRef.current;
-    if (!video || !video.videoWidth) return null;
+    if (!video) return null;
+
+    // A display change — a resolution switch, a monitor unplugged, the laptop
+    // waking from sleep — can briefly leave the element reporting 0×0. Give it a
+    // moment rather than encoding a black 0-pixel frame that then fails to save.
+    for (let i = 0; i < 10 && (!video.videoWidth || !video.videoHeight); i++) {
+      await sleep(300);
+    }
+    if (!video.videoWidth || !video.videoHeight) return null;
 
     const scale = Math.min(1, MAX_EDGE / Math.max(video.videoWidth, video.videoHeight));
     const canvas = document.createElement("canvas");
@@ -136,43 +158,73 @@ export default function ScreenMonitorToggle() {
     return blob ? { blob, width: canvas.width, height: canvas.height } : null;
   }, []);
 
+  // Grab a frame, upload it, and record it — one attempt. Throws on failure so
+  // the retry wrapper can decide whether to try again. Returns "skipped" when
+  // there is simply no frame to send (a 0-pixel display mid-change), which is
+  // not a failure.
+  const captureOnce = async () => {
+    const frame = await grabFrame();
+    if (!frame) return { skipped: true };
+
+    const file = new File([frame.blob], `screen-${Date.now()}.jpg`, { type: "image/jpeg" });
+    const up = await uploadToCloudinary(file);
+
+    const res = await api.post("/screen-monitor/capture", {
+      url: up.url,
+      publicId: up.publicId,
+      width: frame.width,
+      height: frame.height,
+      bytes: frame.blob.size,
+    });
+    return { res };
+  };
+
   const takeCapture = useCallback(async () => {
     if (!activeRef.current) return;
     setCapturing(true);
     try {
-      const frame = await grabFrame();
-      if (!frame) return;
+      // Try the due capture a few times before treating it as a real failure —
+      // most "could not be saved" errors are a one-off blip that clears on the
+      // next attempt seconds later. A 409 is never retried: it means the server
+      // deliberately closed the session.
+      let outcome = null;
+      let lastErr = null;
+      for (let attempt = 1; attempt <= CAPTURE_ATTEMPTS; attempt++) {
+        if (!activeRef.current) return;
+        try {
+          outcome = await captureOnce();
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          if (err.response?.status === 409) break;
+          if (attempt < CAPTURE_ATTEMPTS) await sleep(CAPTURE_RETRY_MS);
+        }
+      }
 
-      const file = new File([frame.blob], `screen-${Date.now()}.jpg`, { type: "image/jpeg" });
-      const up = await uploadToCloudinary(file);
+      if (!lastErr) {
+        if (outcome?.skipped) return; // nothing to send this time, not a failure
+        setState((s) =>
+          s ? { ...s, session: { ...s.session, ...outcome.res.data.data } } : s
+        );
+        failuresRef.current = 0;
+        retryAfterRef.current = 0;
+        setError("");
+        return;
+      }
 
-      const res = await api.post("/screen-monitor/capture", {
-        url: up.url,
-        publicId: up.publicId,
-        width: frame.width,
-        height: frame.height,
-        bytes: frame.blob.size,
-      });
-
-      setState((s) => (s ? { ...s, session: { ...s.session, ...res.data.data } } : s));
-      failuresRef.current = 0;
-      retryAfterRef.current = 0;
-      setError("");
-    } catch (err) {
-      // 409 means the server ended the session — the working-hours window
-      // closed, or monitoring was switched off for the organisation. Stop
-      // sharing rather than keep a dead capture loop running.
-      if (err.response?.status === 409) {
+      // 409 — the server ended the session (out of hours, or monitoring turned
+      // off). Stop sharing rather than keep a dead capture loop running.
+      if (lastErr.response?.status === 409) {
         releaseStream();
-        setError(err.response?.data?.message || "The monitored shift was closed.");
+        setError(lastErr.response?.data?.message || "The monitored shift was closed.");
         await load();
         return;
       }
 
-      // Anything else is a genuine failure. Silence here was the bug: the due
-      // time never advances on a failure, so the next tick tried again, and
-      // again, uploading a fresh image every time with nothing on screen to say
-      // so. Back off, and stop the shift once it is clearly not recoverable.
+      // A genuine run of failures. The due time never advances on a failure, so
+      // without this the next tick just tries again forever. Back off, and stop
+      // the shift once it is clearly not recoverable.
       failuresRef.current += 1;
       retryAfterRef.current = Date.now() + FAILURE_BACKOFF_MS * failuresRef.current;
 
@@ -188,12 +240,19 @@ export default function ScreenMonitorToggle() {
         return;
       }
 
-      setError(
-        `A screenshot could not be saved (attempt ${failuresRef.current} of ${MAX_CAPTURE_FAILURES}). Trying again shortly.`
-      );
+      // The first failed capture is left silent — the backoff already handles
+      // it and it usually recovers on its own. Only speak up once it is a
+      // pattern, and clear the message by itself if things settle.
+      if (failuresRef.current >= 2) {
+        const msg = `A screenshot could not be saved (${failuresRef.current} of ${MAX_CAPTURE_FAILURES}). Retrying automatically.`;
+        setError(msg);
+        setTimeout(() => setError((e) => (e === msg ? "" : e)), ERROR_AUTOCLEAR_MS);
+      }
     } finally {
       setCapturing(false);
     }
+    // captureOnce closes over grabFrame; the rest is covered.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grabFrame, releaseStream, load]);
 
   // Poll for "is a capture due yet". The server owns the schedule, so the

@@ -5,9 +5,10 @@ import mongoose from "mongoose";
 // frontend/src/app/admin/maintenance/page.js.
 export const MAINTENANCE_PRIORITIES = ["urgent", "high", "med", "low"];
 
-// "pending" and "sorted" mirror the Maintenance Booklet sheet; the other three
-// are the finer-grained lifecycle the app already recorded, kept so existing
-// rows keep validating.
+// The picker offers "pending", "assigned", "in_progress" and "sorted" (see
+// STATUSES in frontend/src/app/Shared/MaintenanceBooklet.js). "open" and
+// "closed" were retired from the vocabulary but stay in the enum so rows saved
+// under the old scheme keep validating on edit.
 export const MAINTENANCE_STATUSES = [
   "pending",
   "open",
@@ -17,7 +18,8 @@ export const MAINTENANCE_STATUSES = [
   "closed",
 ];
 
-// Anything not in this list still counts as outstanding work.
+// Anything not in this list still counts as outstanding work. "closed" stays
+// here so a legacy row still reads as resolved.
 export const MAINTENANCE_RESOLVED_STATUSES = ["sorted", "closed"];
 
 // One numbered step of the "Solution" column, e.g.

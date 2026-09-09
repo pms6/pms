@@ -12,15 +12,20 @@ export default function AdminNewTask() {
   const router = useRouter();
 
   const [members, setMembers] = useState([]);
+  const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   // The form cannot be submitted without at least one assignee, so the member
-  // list is loaded before it renders rather than alongside it.
+  // list (and the property options) are loaded before it renders.
   const load = useCallback(async () => {
     try {
-      const res = await api.get("/tasks/assignable-members");
-      setMembers(res.data?.data || []);
+      const [membersRes, propsRes] = await Promise.all([
+        api.get("/tasks/assignable-members"),
+        api.get("/properties", { params: { limit: 200 } }),
+      ]);
+      setMembers(membersRes.data?.data || []);
+      setProperties(propsRes.data?.data || []);
       setError("");
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load the team.");
@@ -67,6 +72,7 @@ export default function AdminNewTask() {
       ) : (
         <TaskForm
           members={members}
+          properties={properties}
           onCancel={() => router.push("/admin/tasks")}
           onSave={save}
         />

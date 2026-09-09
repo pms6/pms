@@ -12,7 +12,6 @@ import {
   Download,
   Sparkles,
   CalendarDays,
-  Building2,
   CheckCircle2,
   Circle,
   Refrigerator,
@@ -34,7 +33,7 @@ import { guardModalClose } from "@/app/Shared/modalGuard";
 
 /* ------------------------------------------------------------------ *
  * The Cleaning Messages Schedule — the office's month-by-month sheet:
- *   Property | Date | Day | Status
+ *   # | Property | Day | Date | Status
  * Day and the month band are derived from the date, never stored, so the
  * sheet's usual failure (a weekday that no longer matches its date) can't
  * happen. MUST stay in sync with backend/models/CleaningSchedule.js.
@@ -682,10 +681,11 @@ export default function CleaningScheduleBoard({
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
+                <th className="px-4 py-3 w-10">#</th>
                 <th className="px-4 py-3">Property</th>
                 <th className="px-4 py-3 w-36">Category</th>
-                <th className="px-4 py-3 w-32">Date</th>
                 <th className="px-4 py-3 w-32">Day</th>
+                <th className="px-4 py-3 w-32">Date</th>
                 <th className="px-4 py-3 w-28">Status</th>
                 <th className="px-4 py-3 w-24">Call</th>
                 <th className="px-4 py-3 w-28">Message</th>
@@ -694,10 +694,10 @@ export default function CleaningScheduleBoard({
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="px-5 py-10 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin inline text-[#F47C3C]" /></td></tr>
+                <tr><td colSpan={9} className="px-5 py-10 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin inline text-[#F47C3C]" /></td></tr>
               ) : visible.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-14">
+                  <td colSpan={9} className="px-5 py-14">
                     <div className="flex flex-col items-center text-center">
                       <div className="w-12 h-12 rounded-2xl bg-gray-50 text-[#F47C3C] flex items-center justify-center mb-3">
                         <CalendarDays size={22} />
@@ -772,7 +772,7 @@ function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
   return (
     <>
       <tr className="bg-[#0F253B]/[0.03] border-y border-gray-100">
-        <td colSpan={8} className="px-4 py-2">
+        <td colSpan={9} className="px-4 py-2">
           <p className="text-xs font-bold uppercase tracking-widest text-[#0F253B]">
             {group.label || "Undated"}
             <span className="ml-2 font-medium normal-case tracking-normal text-gray-400">
@@ -781,13 +781,11 @@ function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
           </p>
         </td>
       </tr>
-      {group.rows.map((r) => (
+      {group.rows.map((r, i) => (
         <tr key={r._id} className="border-b border-gray-50 hover:bg-gray-50/50">
+          <td className="px-4 py-3 text-gray-400 font-medium">{i + 1}</td>
           <td className="px-4 py-3">
-            <p className="font-semibold text-[#0F253B] flex items-center gap-1.5">
-              <Building2 size={13} className="text-gray-300 shrink-0" />
-              {r.property}
-            </p>
+            <p className="font-semibold text-[#0F253B]">{r.property}</p>
             {r.notes && <p className="text-[11px] font-medium text-gray-400 truncate max-w-md">{r.notes}</p>}
           </td>
           <td className="px-4 py-3">
@@ -795,8 +793,8 @@ function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
               {CATEGORY_SHORT[categoryOf(r)] || categoryOf(r)}
             </Badge>
           </td>
-          <td className="px-4 py-3 text-gray-500 font-medium whitespace-nowrap">{fmtDate(r.date)}</td>
           <td className="px-4 py-3 text-gray-500 font-medium">{dayName(r.date)}</td>
+          <td className="px-4 py-3 text-gray-500 font-medium whitespace-nowrap">{fmtDate(r.date)}</td>
           <td className="px-4 py-3">
             <button
               onClick={() => onToggle(r)}

@@ -42,6 +42,64 @@ const formatDate = (value) => {
     : date.toLocaleDateString("en-GB", { timeZone: "UTC" });
 };
 
+const DAY_MS = 86400000;
+
+// A date value → the UTC midnight that starts its day, as a millisecond marker.
+// Void dates are whole days, so everything below works in day units.
+const dayStartMs = (value) => {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime())
+    ? NaN
+    : Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+};
+
+// Whole days shared by the void [vStart..vEnd] and the window [wStart..wEnd].
+// All four are day-start markers and both ends are inclusive — a void from the
+// 9th to the 9th is one day, and a void that only clips the last day of a
+// window contributes one day, not its whole length.
+const overlapDays = (vStart, vEnd, wStart, wEnd) => {
+  const s = Math.max(vStart, wStart);
+  const e = Math.min(vEnd, wEnd);
+  return e < s ? 0 : Math.round((e - s) / DAY_MS) + 1;
+};
+
+// The [start, end] day-marker window for a period-filter choice, or null for
+// "all" / an incomplete "specific month". Windows are UTC and inclusive.
+const periodWindow = (periodType, selectedMonth, now = new Date()) => {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const d = now.getUTCDate();
+  const monthEnd = (yy, mm) => Date.UTC(yy, mm + 1, 0);
+
+  switch (periodType) {
+    case "all":
+      return null;
+    case "today":
+      return [Date.UTC(y, m, d), Date.UTC(y, m, d)];
+    case "week": {
+      const dow = (now.getUTCDay() + 6) % 7; // Monday = 0
+      const weekS = Date.UTC(y, m, d - dow);
+      return [weekS, weekS + 6 * DAY_MS];
+    }
+    case "thisMonth":
+      return [Date.UTC(y, m, 1), monthEnd(y, m)];
+    case "thisYear":
+      return [Date.UTC(y, 0, 1), Date.UTC(y, 11, 31)];
+    case "6months":
+      return [Date.UTC(y, m - 5, 1), monthEnd(y, m)];
+    case "12months":
+      return [Date.UTC(y, m - 11, 1), monthEnd(y, m)];
+    case "month": {
+      if (!selectedMonth) return null;
+      const [yy, mm] = selectedMonth.split("-").map(Number);
+      if (!yy || !mm) return null;
+      return [Date.UTC(yy, mm - 1, 1), monthEnd(yy, mm - 1)];
+    }
+    default:
+      return null;
+  }
+};
+
 const calculateVoidMetrics = (room, startDate, endDate) => {
   const rent = Number(room?.monthlyRent || 0);
   const start = new Date(startDate);
@@ -205,62 +263,86 @@ export default function AdminVoidPage() {
     return calculateVoidMetrics(selectedRoom, form.startDate, form.endDate);
   }, [selectedRoom, form.startDate, form.endDate]);
 
-  // Helper: does this void belong to the currently selected period?
+  // The window the period filter is currently pointing at, or null for "all"
+  // time (and for "specific month" before a month is picked).
+  const activeWindow = useMemo(
+    () => periodWindow(periodType, selectedMonth),
+    [periodType, selectedMonth]
+  );
+  // "Specific month" chosen but no month set yet → the table shows nothing.
+  const periodPending = periodType === "month" && !selectedMonth;
+
+  // A void belongs to the selected period when its OWN date range overlaps that
+  // window — not merely when it started inside it. A void that ran from last
+  // month into this week still counts as "this week".
   const isInSelectedPeriod = (period) => {
-    if (periodType === "all") return true;
+    if (!activeWindow) return !periodPending;
+    const s = dayStartMs(period.startDate);
+    const e = dayStartMs(period.endDate);
+    if (Number.isNaN(s) || Number.isNaN(e)) return false;
+    return s <= activeWindow[1] && e >= activeWindow[0];
+  };
 
-    // Specific month selected but no month chosen yet → show nothing
-    if (periodType === "month" && !selectedMonth) return false;
+  // Everything EXCEPT the period dropdown: property, search, length and the
+  // exact-days filter. This is the scope the summary cards read from — the
+  // day / week / month / year cards each carry their own window, so the period
+  // dropdown must not narrow them; it only narrows the table below.
+  const matchesNonPeriod = (item) => {
+    if (dayFilter && Number(item.voidDays || 0) !== Number(dayFilter)) return false;
 
-    const start = new Date(period.startDate);
-    if (Number.isNaN(start.getTime())) return false;
-
-    const now = new Date();
-
-    if (periodType === "month" && selectedMonth) {
-      const [year, month] = selectedMonth.split("-").map(Number);
-      return (
-        start.getUTCFullYear() === year &&
-        start.getUTCMonth() + 1 === month
-      );
+    if (lengthBucket) {
+      const d = Number(item.voidDays || 0);
+      if (lengthBucket === "daily" && d > 1) return false;
+      if (lengthBucket === "weekly" && (d < 2 || d > 7)) return false;
+      if (lengthBucket === "monthly" && d < 8) return false;
     }
 
-    if (periodType === "week") {
-      // Monday-based start of the current week (UTC)
-      const dow = (now.getUTCDay() + 6) % 7;
-      const weekStart = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dow)
-      );
-      return start >= weekStart;
+    if (propertyFilter) {
+      const pid =
+        item.propertyId && typeof item.propertyId === "object"
+          ? item.propertyId._id
+          : item.propertyId;
+      if (String(pid) !== String(propertyFilter)) return false;
     }
 
-    if (periodType === "thisMonth") {
-      return (
-        start.getUTCFullYear() === now.getUTCFullYear() &&
-        start.getUTCMonth() === now.getUTCMonth()
-      );
-    }
-
-    if (periodType === "thisYear") {
-      return start.getUTCFullYear() === now.getUTCFullYear();
-    }
-
-    if (periodType === "6months") {
-      const sixMonthsAgo = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1)
-      );
-      return start >= sixMonthsAgo;
-    }
-
-    if (periodType === "12months") {
-      const twelveMonthsAgo = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)
-      );
-      return start >= twelveMonthsAgo;
+    const needle = search.trim().toLowerCase();
+    if (needle) {
+      const room = item.roomId && typeof item.roomId === "object" ? item.roomId : null;
+      const haystack = [
+        item.tenantName,
+        item.roomCode,
+        item.notes,
+        room?.roomName,
+        room?.roomNumber,
+        item.propertyId?.name,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(needle)) return false;
     }
 
     return true;
   };
+
+  const scopedPeriods = useMemo(
+    () => voidPeriods.filter(matchesNonPeriod),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [voidPeriods, dayFilter, lengthBucket, propertyFilter, search]
+  );
+
+  // The table also honours the period dropdown.
+  const visiblePeriods = useMemo(
+    () => scopedPeriods.filter(isInSelectedPeriod),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scopedPeriods, periodType, selectedMonth]
+  );
+
+  // Active only (removed voids are history — they no longer bleed).
+  const scopedActive = useMemo(
+    () => scopedPeriods.filter((item) => !item.isDeleted),
+    [scopedPeriods]
+  );
 
   const dayOptions = useMemo(
     () =>
@@ -272,92 +354,86 @@ export default function AdminVoidPage() {
     [voidPeriods]
   );
 
-  const visiblePeriods = useMemo(() => {
-    const needle = search.trim().toLowerCase();
+  // Void loss inside a window [wStart, wEnd] over `rows`: for each void, only
+  // the days its OWN date range overlaps the window × that room's daily rate.
+  // So "this week" counts just the void days that land in this week, "today"
+  // counts only rooms empty today, and a void spanning a window edge is clipped
+  // rather than counted in full.
+  const windowLoss = (rows, wStart, wEnd) =>
+    rows.reduce((sum, item) => {
+      const vS = dayStartMs(item.startDate);
+      const vE = dayStartMs(item.endDate);
+      if (Number.isNaN(vS) || Number.isNaN(vE)) return sum;
+      const room = item.roomId && typeof item.roomId === "object" ? item.roomId : null;
+      const rentAmount = Number(item.rentAmount || room?.monthlyRent || 0);
+      const daily = Number(item.dailyRent) || rentAmount / 30;
+      const days = overlapDays(vS, vE, wStart, wEnd);
+      return sum + days * (Number.isFinite(daily) ? daily : 0);
+    }, 0);
 
-    return voidPeriods.filter((item) => {
-      if (!isInSelectedPeriod(item)) return false;
+  // The four summary windows — today, this ISO week, this calendar month, this
+  // calendar year — each measured against every void in scope. Independent of
+  // the period dropdown.
+  const { voidPerDay, voidPerWeek, voidPerMonth, voidPerYear } = useMemo(() => {
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = now.getUTCMonth();
+    const d = now.getUTCDate();
 
-      if (dayFilter && Number(item.voidDays || 0) !== Number(dayFilter)) return false;
+    const todayS = Date.UTC(y, m, d);
+    const dow = (now.getUTCDay() + 6) % 7; // Monday = 0
+    const weekS = Date.UTC(y, m, d - dow);
+    const monthS = Date.UTC(y, m, 1);
+    const monthE = Date.UTC(y, m + 1, 0);
+    const yearS = Date.UTC(y, 0, 1);
+    const yearE = Date.UTC(y, 11, 31);
 
-      if (lengthBucket) {
-        const d = Number(item.voidDays || 0);
-        if (lengthBucket === "daily" && d > 1) return false;
-        if (lengthBucket === "weekly" && (d < 2 || d > 7)) return false;
-        if (lengthBucket === "monthly" && d < 8) return false;
-      }
+    return {
+      voidPerDay: windowLoss(scopedActive, todayS, todayS),
+      voidPerWeek: windowLoss(scopedActive, weekS, weekS + 6 * DAY_MS),
+      voidPerMonth: windowLoss(scopedActive, monthS, monthE),
+      voidPerYear: windowLoss(scopedActive, yearS, yearE),
+    };
+  }, [scopedActive]);
 
-      if (propertyFilter) {
-        const pid =
-          item.propertyId && typeof item.propertyId === "object"
-            ? item.propertyId._id
-            : item.propertyId;
-        if (String(pid) !== String(propertyFilter)) return false;
-      }
-
-      if (needle) {
-        const room = item.roomId && typeof item.roomId === "object" ? item.roomId : null;
-        const haystack = [
-          item.tenantName,
-          item.roomCode,
-          item.notes,
-          room?.roomName,
-          room?.roomNumber,
-          item.propertyId?.name,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        if (!haystack.includes(needle)) return false;
-      }
-
-      return true;
-    });
-  }, [voidPeriods, dayFilter, lengthBucket, propertyFilter, search, periodType, selectedMonth]);
-
-  // Active only (for the “Void Periods” count)
-  const countedPeriods = useMemo(
-    () => visiblePeriods.filter((item) => !item.isDeleted),
-    [visiblePeriods]
-  );
-
-  // MONEY + DAYS – include removed voids (history) because the loss still happened
+  // Card totals — the whole picture for the rooms in scope, unaffected by the
+  // period dropdown. The money total keeps removed voids (the loss happened).
   const totalVoid = useMemo(
     () =>
-      visiblePeriods.reduce(
+      scopedPeriods.reduce(
         (sum, item) => sum + Number(item.totalVoid || item.total || 0),
         0
       ),
-    [visiblePeriods]
+    [scopedPeriods]
   );
-
   const totalDays = useMemo(
-    () =>
-      visiblePeriods.reduce(
-        (sum, item) => sum + Number(item.voidDays || 0),
-        0
-      ),
-    [visiblePeriods]
+    () => scopedPeriods.reduce((sum, item) => sum + Number(item.voidDays || 0), 0),
+    [scopedPeriods]
   );
 
-  // Average void loss per void day across the selected period, plus the
-  // week / month / year run-rate projected from it (30-day month, same as
-  // the daily-rent model used throughout this page).
-  const voidPerDay = useMemo(
-    () => (totalDays > 0 ? totalVoid / totalDays : 0),
-    [totalVoid, totalDays]
-  );
-  const voidPerWeek = voidPerDay * 7;
-  const voidPerMonth = voidPerDay * 30;
-  const voidPerYear = voidPerDay * 365;
+  // Period-scoped figures for the table banner: when a window is active the
+  // loss is CLIPPED to it, so "August" shows August's days of a void that ran
+  // from July, not the void's whole total.
+  const periodStats = useMemo(() => {
+    const active = visiblePeriods.filter((p) => !p.isDeleted);
+    const removed = visiblePeriods.length - active.length;
+    const days = visiblePeriods.reduce((s, p) => s + Number(p.voidDays || 0), 0);
+    const loss = activeWindow
+      ? windowLoss(visiblePeriods, activeWindow[0], activeWindow[1])
+      : visiblePeriods.reduce(
+          (s, p) => s + Number(p.totalVoid || p.total || 0),
+          0
+        );
+    return { activeCount: active.length, removed, days, loss };
+  }, [visiblePeriods, activeWindow]);
 
   const stats = [
-    { label: "Total Void", value: money(totalVoid), icon: CalendarRange, tone: "navy" },
-    { label: "Void / Week", value: money(voidPerWeek), icon: CalendarRange, tone: "light" },
-    { label: "Void / Month", value: money(voidPerMonth), icon: CalendarRange, tone: "light" },
-    { label: "Void / Year", value: money(voidPerYear), icon: CalendarRange, tone: "light" },
-    { label: "Void / Day", value: rate(voidPerDay), icon: CalendarRange, tone: "light" },
-    { label: "Void Periods", value: countedPeriods.length, icon: DoorOpen, tone: "light" },
+    { label: "Total Void", value: money(totalVoid), icon: CalendarRange, tone: "navy", sub: "all voids for these rooms" },
+    { label: "Void / Day", value: rate(voidPerDay), icon: CalendarRange, tone: "light", sub: "rooms empty today" },
+    { label: "Void / Week", value: money(voidPerWeek), icon: CalendarRange, tone: "light", sub: "void loss this week" },
+    { label: "Void / Month", value: money(voidPerMonth), icon: CalendarRange, tone: "light", sub: "void loss this month" },
+    { label: "Void / Year", value: money(voidPerYear), icon: CalendarRange, tone: "light", sub: "void loss this year" },
+    { label: "Void Periods", value: scopedActive.length, icon: DoorOpen, tone: "light" },
     { label: "Void Days", value: totalDays, icon: CalendarRange, tone: "light" },
   ];
 
@@ -570,6 +646,7 @@ export default function AdminVoidPage() {
         timeZone: "UTC",
       });
     }
+    if (periodType === "today") return "Today";
     if (periodType === "week") return "This week";
     if (periodType === "thisMonth") return "This month";
     if (periodType === "thisYear") return "This year";
@@ -626,6 +703,7 @@ export default function AdminVoidPage() {
             key={item.label}
             label={item.label}
             value={item.value}
+            sub={item.sub}
             icon={item.icon}
             tone={item.tone}
           />
@@ -875,6 +953,7 @@ export default function AdminVoidPage() {
               className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-medium outline-none focus:border-[#F47C3C] focus:bg-white"
             >
               <option value="all">All time</option>
+              <option value="today">Today</option>
               <option value="week">This week</option>
               <option value="thisMonth">This month</option>
               <option value="thisYear">This year</option>
@@ -1032,18 +1111,17 @@ export default function AdminVoidPage() {
                   )}
               </p>
               <p className="text-xs text-blue-600 mt-0.5">
-                {countedPeriods.length} active ·{" "}
-                {visiblePeriods.filter((p) => p.isDeleted).length} removed ·{" "}
-                {totalDays} days · {rate(voidPerDay)} / day
+                {periodStats.activeCount} active · {periodStats.removed} removed ·{" "}
+                {periodStats.days} void days
               </p>
             </div>
             <div className="text-right">
               <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500">
-                Total void loss
+                Void loss · {periodLabel}
               </p>
-              <p className="text-xl font-bold text-blue-900">{money(totalVoid)}</p>
+              <p className="text-xl font-bold text-blue-900">{money(periodStats.loss)}</p>
               <p className="text-[11px] font-medium text-blue-600">
-                {rate(voidPerDay)} per void day
+                {activeWindow ? "days within this window only" : "full total"}
               </p>
             </div>
           </div>

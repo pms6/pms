@@ -112,6 +112,17 @@ const taskSchema = new mongoose.Schema(
     title: { type: String, required: true, trim: true },
     description: { type: String, required: true, trim: true },
 
+    // Optional link to the property this task is about. `propertyId` is the
+    // reference; `property` is the name kept alongside it so the list and the
+    // history render without a populate per row (same pattern as `assignees`).
+    propertyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Property",
+      default: null,
+      index: true,
+    },
+    property: { type: String, trim: true, default: "" },
+
     // One or more team members. An empty array is rejected by the controller —
     // an unassigned task has nobody to do it.
     assignees: { type: [assigneeSchema], default: [] },

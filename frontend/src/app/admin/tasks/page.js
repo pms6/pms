@@ -18,6 +18,7 @@ import {
   Users,
   History,
   Ban,
+  Sun,
 } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "../../Shared/ui";
@@ -33,6 +34,7 @@ import {
   fmtDateTime,
   displayName,
   dueLabel,
+  isDueToday,
   FIELD,
   LABEL,
 } from "../../Shared/tasks";
@@ -171,6 +173,7 @@ export default function AdminTasks() {
   const [statusFilter, setStatusFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [memberFilter, setMemberFilter] = useState("");
+  const [dueTodayOnly, setDueTodayOnly] = useState(false);
   const [q, setQ] = useState("");
 
   const [reschedule, setReschedule] = useState({ open: false, task: null });
@@ -224,6 +227,10 @@ export default function AdminTasks() {
   };
 
   const stats = dash?.stats;
+  // "Due today" is a client-side view over the already-loaded list, so it
+  // stacks with the status / priority / member filters rather than replacing
+  // that request.
+  const shown = dueTodayOnly ? tasks.filter(isDueToday) : tasks;
   const detail = tasks.find((t) => t._id === detailId);
 
   return (
@@ -248,8 +255,26 @@ export default function AdminTasks() {
       )}
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
         <Kpi icon={ListChecks} label="Total tasks" value={loading ? "—" : stats?.total ?? 0} tone="navy" />
+        <button
+          type="button"
+          onClick={() => setDueTodayOnly((v) => !v)}
+          className={`rounded-2xl p-5 shadow-sm text-left transition-all ${
+            dueTodayOnly
+              ? "bg-gradient-to-br from-[#F47C3C] to-[#e0651f] text-white ring-2 ring-[#F47C3C]"
+              : "bg-white border border-gray-100 text-[#0F253B] hover:border-[#F47C3C]/40"
+          }`}
+          title={dueTodayOnly ? "Showing tasks due today — click to clear" : "Show only tasks due today"}
+        >
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${dueTodayOnly ? "bg-white/15 text-white" : "bg-orange-50 text-[#F47C3C]"}`}>
+            <Sun size={22} />
+          </div>
+          <p className="text-2xl font-bold mt-4">{loading ? "—" : stats?.dueToday ?? 0}</p>
+          <p className={`text-[11px] font-bold uppercase tracking-widest mt-1 ${dueTodayOnly ? "text-white/70" : "text-gray-400"}`}>
+            Due today
+          </p>
+        </button>
         <Kpi icon={Circle} label="Not started" value={loading ? "—" : stats?.byStatus?.["Not Started"] ?? 0} />
         <Kpi icon={PlayCircle} label="In progress" value={loading ? "—" : stats?.byStatus?.["In Progress"] ?? 0} />
         <Kpi icon={CheckCircle2} label="Done" value={loading ? "—" : stats?.byStatus?.Done ?? 0} />
@@ -401,7 +426,7 @@ export default function AdminTasks() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col sm:flex-row gap-3">
+      <div className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col sm:flex-row sm:flex-wrap gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
           <input
@@ -411,6 +436,18 @@ export default function AdminTasks() {
             className="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]"
           />
         </div>
+        <button
+          type="button"
+          onClick={() => setDueTodayOnly((v) => !v)}
+          className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold border transition-all ${
+            dueTodayOnly
+              ? "bg-[#F47C3C] text-white border-[#F47C3C]"
+              : "bg-gray-50 text-[#0F253B] border-gray-100 hover:bg-gray-100"
+          }`}
+        >
+          <Sun size={14} className={dueTodayOnly ? "text-white" : "text-[#F47C3C]"} />
+          Due today{typeof stats?.dueToday === "number" ? ` (${stats.dueToday})` : ""}
+        </button>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
@@ -453,11 +490,17 @@ export default function AdminTasks() {
       <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
         {loading ? (
           <div className="p-10 text-center text-gray-400 font-medium">Loading tasks…</div>
-        ) : tasks.length === 0 ? (
+        ) : shown.length === 0 ? (
           <div className="p-10 text-center">
-            <p className="text-gray-500 font-medium">No tasks match this view</p>
+            <p className="text-gray-500 font-medium">
+              {dueTodayOnly ? "Nothing due today in this view" : "No tasks match this view"}
+            </p>
             <p className="text-sm text-gray-400 mt-1">
-              {stats?.total ? "Try another filter." : "Create your first task to start assigning work."}
+              {dueTodayOnly
+                ? "Clear the “Due today” card to see the rest."
+                : stats?.total
+                ? "Try another filter."
+                : "Create your first task to start assigning work."}
             </p>
           </div>
         ) : (
@@ -475,7 +518,7 @@ export default function AdminTasks() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-sm font-medium text-[#0F253B]">
-                {tasks.map((t) => (
+                {shown.map((t) => (
                   <tr
                     key={t._id}
                     onClick={() => setDetailId(t._id)}
@@ -489,6 +532,11 @@ export default function AdminTasks() {
                           <p className="text-[11px] text-gray-400 font-normal truncate max-w-xs">
                             {t.description}
                           </p>
+                          {t.property && (
+                            <p className="text-[11px] font-bold text-[#F47C3C] truncate max-w-xs mt-0.5">
+                              {t.property}
+                            </p>
+                          )}
                         </div>
                       </div>
                     </td>
