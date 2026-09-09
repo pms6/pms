@@ -12,7 +12,7 @@
 export const SHEET_COLUMNS = ["Property", "Category", "Date", "Day", "Status"];
 
 // Roughly the proportions of the original — Property is the wide one.
-const COLUMN_WIDTHS = [38, 22, 14, 14, 12, 20, 34, 10, 46, 40];
+const COLUMN_WIDTHS = [38, 22, 14, 14, 12, 20, 10, 46, 40];
 
 // The sheet writes 20/05/2026.
 export const fmtDate = (value) => {
@@ -74,7 +74,7 @@ export const groupByMonth = (rows = []) => {
  * order it shows it — the search box and the month / status filters are part of
  * the export.
  *
- * `extended` adds the Contact, Tasks, Message and Notes columns the app records
+ * `extended` adds the Contact, Message and Notes columns the app records
  * but the handwritten sheet had nowhere to put.
  */
 const contactText = (row) =>
@@ -84,11 +84,6 @@ const contactText = (row) =>
   ]
     .filter(Boolean)
     .join(" / ");
-
-const tasksText = (row) =>
-  (Array.isArray(row.tasks) ? row.tasks : [])
-    .map((t) => `${t.done ? "✓" : "✗"} ${t.name}`)
-    .join(", ");
 
 // Rows written before categories existed read as the schema's default, so the
 // export never leaves the column blank.
@@ -102,7 +97,7 @@ export const exportCleaningSheet = async (rows = [], { extended = true } = {}) =
   const XLSX = await import("xlsx");
 
   const columns = extended
-    ? [...SHEET_COLUMNS, "Contact", "Tasks", "Files", "Message", "Notes"]
+    ? [...SHEET_COLUMNS, "Contact", "Files", "Message", "Notes"]
     : SHEET_COLUMNS;
   const aoa = [["Cleaning Messages Schedule"], []];
 
@@ -120,7 +115,6 @@ export const exportCleaningSheet = async (rows = [], { extended = true } = {}) =
       if (extended)
         cells.push(
           contactText(row),
-          tasksText(row),
           filesCount(row) || "",
           row.message || "",
           row.notes || ""

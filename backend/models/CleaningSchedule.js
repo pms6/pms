@@ -28,10 +28,6 @@ export const CLEANING_CATEGORIES = [
 // on the field below.
 export const DEFAULT_CLEANING_CATEGORY = "Fridge Cleaning";
 
-// Every new visit starts with these on its checklist; the office ticks them
-// off as they are done and can add its own.
-export const DEFAULT_CLEANING_TASKS = ["Fridge Cleaning", "Machine Descaling"];
-
 // One piece of evidence for a visit: a photo of the cleaned fridge, a clip of
 // the machine running its descale cycle, a signed inspection sheet.
 //
@@ -56,15 +52,6 @@ const cleaningFileSchema = new mongoose.Schema(
     bytes: { type: Number, default: 0, min: 0 },
     uploadedAt: { type: Date, default: Date.now },
     uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
-  },
-  { _id: false }
-);
-
-// One line of a visit's task checklist, e.g. { name: "Fridge Cleaning", done: true }.
-const cleaningTaskSchema = new mongoose.Schema(
-  {
-    name: { type: String, trim: true, required: true },
-    done: { type: Boolean, default: false },
   },
   { _id: false }
 );
@@ -121,14 +108,6 @@ const cleaningScheduleSchema = new mongoose.Schema(
     callMade: { type: Boolean, default: false },
     contactEmail: { type: String, trim: true, default: "" },
     contactPhone: { type: String, trim: true, default: "" },
-
-    // The visit's task checklist — Fridge Cleaning, Machine Descaling and
-    // anything else the office adds for that property. Every new visit starts
-    // with the defaults; an explicit list from the client replaces them.
-    tasks: {
-      type: [cleaningTaskSchema],
-      default: () => DEFAULT_CLEANING_TASKS.map((name) => ({ name, done: false })),
-    },
 
     // What goes out to the cleaner, and anything the office needs to remember.
     // `message` is the cleaning message for this visit — the sheet is named

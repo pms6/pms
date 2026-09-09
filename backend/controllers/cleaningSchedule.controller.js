@@ -14,7 +14,6 @@ const EDITABLE_KEYS = [
   "callMade",
   "contactEmail",
   "contactPhone",
-  "tasks",
   "cleaner",
   "message",
   "notes",
@@ -24,15 +23,6 @@ const EDITABLE_KEYS = [
 // Cloudinary's classification of an upload, narrowed to what the viewer knows
 // how to render. Anything else is a file you download rather than preview.
 const FILE_TYPES = ["image", "video", "pdf", "file"];
-
-// [{ name, done }] straight from the board's checklist editor. Drop blank rows
-// and coerce the flag so a stray string can't slip into the schema.
-const cleanTasks = (tasks) => {
-  if (!Array.isArray(tasks)) return [];
-  return tasks
-    .map((t) => ({ name: String(t?.name ?? "").trim(), done: Boolean(t?.done) }))
-    .filter((t) => t.name);
-};
 
 // The evidence attached to a visit, straight from the board's uploader. A URL
 // is the only thing that makes an attachment worth keeping, so entries without
@@ -68,7 +58,6 @@ const pickPayload = (body) => {
   // A channel that wasn't used carries no detail.
   if (payload.emailSent === false) payload.contactEmail = "";
   if (payload.callMade === false) payload.contactPhone = "";
-  if (payload.tasks !== undefined) payload.tasks = cleanTasks(payload.tasks);
   if (payload.files !== undefined) payload.files = cleanFiles(payload.files);
   if (payload.propertyId === "") payload.propertyId = null;
   if (payload.status !== undefined && !CLEANING_STATUSES.includes(payload.status)) {
