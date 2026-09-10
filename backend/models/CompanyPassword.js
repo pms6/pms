@@ -13,6 +13,23 @@ import mongoose from "mongoose";
 // frontend/src/app/Shared/CompanyPasswordsBoard.js.
 export const PASSWORD_TYPES = ["ACCOUNT", "KEYSAFE"];
 
+// A photo or clip of the key-safe itself — where the box is on the wall, which
+// way the dial turns, what the door looks like. Uploaded straight to Cloudinary
+// by the browser, so only the delivery URL reaches us.
+// Same shape as the maintenance booklet's media, so the shared uploader and
+// viewer on the frontend work here without reshaping.
+const mediaSchema = new mongoose.Schema(
+  {
+    url: { type: String, trim: true, required: true },
+    publicId: { type: String, trim: true, default: "" },
+    name: { type: String, trim: true, default: "" },
+    type: { type: String, enum: ["image", "video", "pdf"], default: "image" },
+    format: { type: String, trim: true, default: "" },
+    bytes: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const companyPasswordSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -54,6 +71,8 @@ const companyPasswordSchema = new mongoose.Schema(
     keysCode: { type: String, default: "" }, // key-safe combination
     digitalLockCode: { type: String, default: "" },
     lockLocation: { type: String, trim: true, default: "" },
+    // Photos / videos of the key-safe and its location.
+    media: { type: [mediaSchema], default: [] },
 
     // ---- shared -------------------------------------------------------
     password: { type: String, default: "" }, // the ACCOUNT password

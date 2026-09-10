@@ -12,6 +12,7 @@ import {
   forgotPassword,
   verifyResetOtp,
   resetPassword,
+  changePassword,
 } from "../controllers/auth.controller.js";
 import { protect } from "../middleware/auth.js";
 
@@ -38,6 +39,10 @@ router.post("/logout", logout);
 router.post("/forgot-password", otpLimiter, forgotPassword);
 router.post("/verify-reset-otp", verifyResetOtp);
 router.post("/reset-password", resetPassword);
+
+// Signed-in password change — the session is the proof of identity, so this
+// asks only for the new password and its confirmation.
+router.patch("/change-password", protect, changePassword);
 
 // Protected route to fetch current active profile details
 router.get("/me", protect, getMe);

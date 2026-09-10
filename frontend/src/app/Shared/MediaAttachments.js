@@ -148,6 +148,10 @@ export function MediaUploader({
   onUploadingChange,
   label = "Attachments",
   hint = "Drop files here, or click to choose — photos, video, PDFs, any file type",
+  // Narrows what the file picker offers, e.g. "image/*,video/*". Left open by
+  // default; a caller that only wants media passes its own. It is a hint to the
+  // picker, not a guard — a dropped file of another type still uploads.
+  accept,
 }) {
   const [uploading, setUploading] = useState([]);
   const [error, setError] = useState("");
@@ -252,7 +256,7 @@ export function MediaUploader({
       >
         <UploadCloud size={18} />
         <span className="text-xs font-bold text-center">{hint}</span>
-        <input type="file" multiple className="hidden" onChange={onPick} />
+        <input type="file" multiple accept={accept} className="hidden" onChange={onPick} />
       </label>
     </div>
   );

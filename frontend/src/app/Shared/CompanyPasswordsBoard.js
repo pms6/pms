@@ -15,10 +15,17 @@ import {
   KeyRound,
   Lock,
   Globe,
+  Film,
+  Image as ImageIcon,
 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import api from "@/app/api/api";
 import { guardModalClose } from "@/app/Shared/modalGuard";
+import {
+  MediaUploader,
+  MediaViewerModal,
+  previewKind,
+} from "@/app/Shared/MediaAttachments";
 
 /* ------------------------------------------------------------------ *
  * Company Passwords — one section, two sheets:
@@ -230,12 +237,21 @@ function KeysafeModal({ initial, properties, onClose, onSave }) {
     keysCode: initial?.keysCode || "",
     digitalLockCode: initial?.digitalLockCode || "",
     lockLocation: initial?.lockLocation || "",
+    media: Array.isArray(initial?.media) ? initial.media : [],
     notes: initial?.notes || "",
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Saving mid-upload would store the row without the file still going up, so
+  // the submit button waits for the batch to land.
+  const [uploading, setUploading] = useState(0);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // MediaUploader hands back an updater so files landing at the same time each
+  // append to the latest list rather than to the one captured when it started.
+  const setMedia = (updater) =>
+    setForm((f) => ({ ...f, media: typeof updater === "function" ? updater(f.media) : updater }));
 
   const onPropertyPick = (e) => {
     const propertyId = e.target.value;
@@ -246,6 +262,7 @@ function KeysafeModal({ initial, properties, onClose, onSave }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!form.property.trim()) { setError("Property is required"); return; }
+    if (uploading > 0) { setError("Wait for the uploads to finish"); return; }
     setSaving(true);
     setError("");
     try {
@@ -256,6 +273,7 @@ function KeysafeModal({ initial, properties, onClose, onSave }) {
         keysCode: form.keysCode,
         digitalLockCode: form.digitalLockCode,
         lockLocation: form.lockLocation.trim(),
+        media: form.media,
         notes: form.notes.trim(),
       });
     } catch (err) {
@@ -287,11 +305,25 @@ function KeysafeModal({ initial, properties, onClose, onSave }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className={LABEL}>Keys code</label>
-            <SecretInput value={form.keysCode} onChange={set("keysCode")} placeholder="Key-safe combination" />
+            <input
+              type="text"
+              className={`${FIELD} font-mono`}
+              value={form.keysCode}
+              onChange={set("keysCode")}
+              placeholder="Key-safe combination"
+              autoComplete="off"
+            />
           </div>
           <div>
             <label className={LABEL}>Digital lock code</label>
-            <SecretInput value={form.digitalLockCode} onChange={set("digitalLockCode")} placeholder="Door keypad code" />
+            <input
+              type="text"
+              className={`${FIELD} font-mono`}
+              value={form.digitalLockCode}
+              onChange={set("digitalLockCode")}
+              placeholder="Door keypad code"
+              autoComplete="off"
+            />
           </div>
         </div>
         <div>
@@ -299,10 +331,20 @@ function KeysafeModal({ initial, properties, onClose, onSave }) {
           <input className={FIELD} value={form.lockLocation} onChange={set("lockLocation")} placeholder="e.g. Left of front door, black box" />
         </div>
         <div>
+          <MediaUploader
+            files={form.media}
+            onChange={setMedia}
+            onUploadingChange={setUploading}
+            accept="image/*,video/*"
+            label="Photos & Videos"
+            hint="Drop photos or videos here, or click to choose — the key-safe, where it sits, how it opens"
+          />
+        </div>
+        <div>
           <label className={LABEL}>Notes</label>
           <textarea rows={2} className={FIELD} value={form.notes} onChange={set("notes")} placeholder="Anything to flag…" />
         </div>
-        <SubmitButton saving={saving} isEdit={isEdit} />
+        <SubmitButton saving={saving} uploading={uploading > 0} isEdit={isEdit} />
       </form>
     </ModalShell>
   );
@@ -325,14 +367,16 @@ function ModalShell({ title, subtitle, onClose, children }) {
   );
 }
 
-function SubmitButton({ saving, isEdit }) {
+// `uploading` blocks the save without claiming to be saving — a row stored
+// mid-upload would be missing the file that is still going up.
+function SubmitButton({ saving, isEdit, uploading = false }) {
   return (
     <button
       type="submit"
-      disabled={saving}
+      disabled={saving || uploading}
       className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all active:scale-[0.98]"
     >
-      {saving ? "Saving…" : isEdit ? "Save Changes" : "Add Entry"}
+      {saving ? "Saving…" : uploading ? "Uploading…" : isEdit ? "Save Changes" : "Add Entry"}
     </button>
   );
 }
@@ -351,6 +395,8 @@ export default function CompanyPasswordsBoard({
   const [tab, setTab] = useState("ACCOUNT");
   const [q, setQ] = useState("");
   const [modal, setModal] = useState(null); // {} = create, row = edit
+  // The keysafe row whose photos and videos are open in the viewer.
+  const [viewing, setViewing] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -483,7 +529,7 @@ export default function CompanyPasswordsBoard({
           {tab === "ACCOUNT" ? (
             <AccountTable rows={visible} loading={loading} onEdit={setModal} onDelete={remove} />
           ) : (
-            <KeysafeTable rows={visible} loading={loading} onEdit={setModal} onDelete={remove} />
+            <KeysafeTable rows={visible} loading={loading} onEdit={setModal} onDelete={remove} onView={setViewing} />
           )}
         </div>
       </div>
@@ -501,6 +547,18 @@ export default function CompanyPasswordsBoard({
           properties={properties}
           onClose={() => setModal(null)}
           onSave={save}
+        />
+      )}
+
+      {viewing && (
+        // Keyed on the row so opening a different property mounts a fresh
+        // viewer at its first file rather than at whatever index was left over.
+        <MediaViewerModal
+          key={viewing._id}
+          title={viewing.property}
+          subtitle="Key-safe photos and videos"
+          files={viewing.media || []}
+          onClose={() => setViewing(null)}
         />
       )}
     </div>
@@ -596,7 +654,49 @@ function AccountTable({ rows, loading, onEdit, onDelete }) {
   );
 }
 
-function KeysafeTable({ rows, loading, onEdit, onDelete }) {
+/**
+ * The attachments on a keysafe row, as a strip of thumbnails that opens the
+ * shared viewer. Photos of where the box sits are only useful if they can be
+ * looked at from the table — the edit form is the wrong place to go browsing.
+ */
+function MediaCell({ row, onView }) {
+  const media = Array.isArray(row.media) ? row.media : [];
+  if (media.length === 0) return <span className="text-gray-300 font-medium">—</span>;
+
+  const shown = media.slice(0, 3);
+  const rest = media.length - shown.length;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onView(row)}
+      title={`View ${media.length} ${media.length === 1 ? "attachment" : "attachments"}`}
+      className="inline-flex items-center gap-1.5 group"
+    >
+      {shown.map((item, i) => (
+        <span
+          key={(item.url || "") + i}
+          className="relative w-8 h-8 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 shrink-0 flex items-center justify-center"
+        >
+          {previewKind(item) === "image" ? (
+            <img src={item.url} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <Film size={13} className="text-gray-400" />
+          )}
+        </span>
+      ))}
+      {rest > 0 && (
+        <span className="text-[11px] font-bold text-gray-400">+{rest}</span>
+      )}
+      <ImageIcon
+        size={13}
+        className="text-gray-300 group-hover:text-[#F47C3C] transition-colors"
+      />
+    </button>
+  );
+}
+
+function KeysafeTable({ rows, loading, onEdit, onDelete, onView }) {
   return (
     <table className="w-full text-sm">
       <thead>
@@ -606,12 +706,13 @@ function KeysafeTable({ rows, loading, onEdit, onDelete }) {
           <th className="px-4 py-3">Keys Code</th>
           <th className="px-4 py-3">Digital Lock Code</th>
           <th className="px-4 py-3">Lock Location</th>
+          <th className="px-4 py-3">Media</th>
           <th className="px-4 py-3 w-24 text-right">Actions</th>
         </tr>
       </thead>
       <tbody>
         {loading || rows.length === 0 ? (
-          <Empty colSpan={6} loading={loading} has={rows.length === 0} />
+          <Empty colSpan={7} loading={loading} has={rows.length === 0} />
         ) : (
           rows.map((r, i) => (
             <tr key={r._id} className="border-b border-gray-50 hover:bg-gray-50/50 align-top">
@@ -623,6 +724,7 @@ function KeysafeTable({ rows, loading, onEdit, onDelete }) {
               <td className="px-4 py-3"><Secret value={r.keysCode} /></td>
               <td className="px-4 py-3"><Secret value={r.digitalLockCode} /></td>
               <td className="px-4 py-3 text-gray-600 font-medium">{r.lockLocation || "—"}</td>
+              <td className="px-4 py-3"><MediaCell row={r} onView={onView} /></td>
               <td className="px-4 py-3"><RowActions row={r} onEdit={onEdit} onDelete={onDelete} /></td>
             </tr>
           ))

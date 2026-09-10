@@ -356,13 +356,13 @@ export const updateRoom = async (req, res) => {
       });
     }
 
-    // Prevent updates to occupied rooms
-    if (room.status === "OCCUPIED" && req.body.status && req.body.status !== "OCCUPIED") {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot update status of occupied room.",
-      });
-    }
+    // NOTE: an OCCUPIED room's status used to be frozen here — the edit form
+    // came back with "Cannot update status of occupied room." and there was no
+    // way to free a room from Properties once it was let. That made the normal
+    // end of a tenancy unrecordable, and it was never a real rule anyway: both
+    // PATCH /rooms/:id/status and the nested property room update let the same
+    // change through untouched. The status the office sets is the answer, and
+    // Available Rooms now reads it directly (see getAvailableRooms).
 
     const {
       title,
@@ -888,12 +888,23 @@ export const getAvailableRooms = async (req, res) => {
       // room form: it always wins and keeps the room in Available Now.
       const hasFutureFreeDate = leaveDate && leaveDate > now;
 
+      // The room's own status is the office's direct answer to "can this be
+      // let today?", and it outranks everything inferred here. A room marked
+      // OCCUPIED or RESERVED in Properties is not free now — not when no
+      // Tenancy row happens to exist for it (rooms are routinely marked
+      // occupied without one being created), not when an old `availableFrom`
+      // has already passed, and not when `availableImmediately` was ticked
+      // before the room was let. It can still reach Coming Soon below if it
+      // has a free-from date inside the window.
+      const statusBlocksNow = room.status === "OCCUPIED" || room.status === "RESERVED";
+
       const isAvailableNow =
-        room.availableImmediately === true ||
-        (!hasFutureFreeDate &&
-          (room.status === "AVAILABLE" ||
-            !tenancy ||
-            (leaveDate && leaveDate <= now)));
+        !statusBlocksNow &&
+        (room.availableImmediately === true ||
+          (!hasFutureFreeDate &&
+            (room.status === "AVAILABLE" ||
+              !tenancy ||
+              (leaveDate && leaveDate <= now))));
 
       const isComingSoon =
         !isAvailableNow && hasFutureFreeDate && leaveDate <= futureLimit;

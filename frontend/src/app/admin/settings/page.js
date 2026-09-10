@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Save, Check, Loader2, Upload, X } from "lucide-react";
+import { Save, Check, Loader2, Upload, X, KeyRound, Eye, EyeOff } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
 import api from "@/app/api/api";
 import { useAuth } from "@/app/Context/AuthContext";
@@ -331,6 +331,134 @@ export default function AdminSettings() {
           {loading ? "Saving Changes..." : "Save Changes"}
         </button>
       </form>
+
+      <ChangePasswordCard inputClass={inputClass} labelClass={labelClass} />
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Change password
+ *
+ * The signed-in equivalent of the emailed reset flow: the session cookie is
+ * already proof of who is asking, so the form asks for the new password and a
+ * confirmation of it, and nothing else.
+ * ------------------------------------------------------------------ */
+function ChangePasswordCard({ inputClass, labelClass }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [shown, setShown] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+
+  // Checked as the user types so the mismatch is caught before the round trip;
+  // the server enforces both rules again.
+  const tooShort = newPassword.length > 0 && newPassword.length < 8;
+  const mismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setDone(false);
+
+    if (newPassword.length < 8) {
+      return setError("Password must be at least 8 characters");
+    }
+    if (newPassword !== confirmPassword) {
+      return setError("The two passwords do not match.");
+    }
+
+    setSaving(true);
+    try {
+      await api.patch("/auth/change-password", { newPassword, confirmPassword });
+      setNewPassword("");
+      setConfirmPassword("");
+      setDone(true);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to update password.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={submit}
+      className="bg-white border border-gray-100 rounded-2xl p-6 space-y-5"
+    >
+      <div className="flex items-center gap-2">
+        <KeyRound size={18} className="text-[#F47C3C]" />
+        <h2 className="text-base font-bold text-[#0F253B]">Change Password</h2>
+      </div>
+      <p className="text-xs font-medium text-gray-400 -mt-3">
+        Choose a new password for your sign-in. At least 8 characters.
+      </p>
+
+      {done && (
+        <div className="p-3 bg-emerald-50 border-l-4 border-emerald-500 text-emerald-700 text-xs font-bold rounded flex items-center gap-2">
+          <Check size={18} /> Password updated
+        </div>
+      )}
+
+      {error && (
+        <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">
+          {error}
+        </div>
+      )}
+
+      <div>
+        <label className={labelClass}>New Password</label>
+        <div className="relative">
+          <input
+            type={shown ? "text" : "password"}
+            className={`${inputClass} pr-11`}
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="At least 8 characters"
+            autoComplete="new-password"
+          />
+          <button
+            type="button"
+            onClick={() => setShown((v) => !v)}
+            title={shown ? "Hide" : "Show"}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0F253B]"
+          >
+            {shown ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
+        {tooShort && (
+          <p className="mt-1 text-[11px] font-bold text-red-500">
+            Password must be at least 8 characters
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label className={labelClass}>Confirm New Password</label>
+        <input
+          type={shown ? "text" : "password"}
+          className={inputClass}
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          placeholder="Type it again"
+          autoComplete="new-password"
+        />
+        {mismatch && (
+          <p className="mt-1 text-[11px] font-bold text-red-500">
+            The two passwords do not match.
+          </p>
+        )}
+      </div>
+
+      <button
+        type="submit"
+        disabled={saving || !newPassword || !confirmPassword || tooShort || mismatch}
+        className="flex items-center justify-center gap-2 px-6 py-3 bg-[#F47C3C] hover:bg-[#e06d30] disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98] w-full md:w-auto"
+      >
+        {saving ? <Loader2 size={18} className="animate-spin" /> : <KeyRound size={18} />}
+        {saving ? "Updating..." : "Update Password"}
+      </button>
+    </form>
   );
 }

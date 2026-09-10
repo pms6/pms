@@ -378,7 +378,18 @@ export default function AdminTasks() {
                 >
                   <span className={`w-2 h-2 rounded-full shrink-0 ${PRIORITY_DOT[t.priority]}`} />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-xs font-bold text-[#0F253B] truncate">{t.title}</span>
+                    {t.property && (
+                      <span className="block text-xs font-bold text-[#F47C3C] truncate">
+                        {t.property}
+                      </span>
+                    )}
+                    <span
+                      className={`block text-xs truncate ${
+                        t.property ? "font-semibold text-gray-600" : "font-bold text-[#0F253B]"
+                      }`}
+                    >
+                      {t.title}
+                    </span>
                     <span className="block text-[10px] font-medium text-gray-400 truncate">
                       {(t.assignees || []).map((a) => displayName(a.email)).join(", ")}
                     </span>
@@ -408,7 +419,18 @@ export default function AdminTasks() {
                   className="w-full flex items-center gap-3 text-left px-2 py-2 rounded-lg hover:bg-gray-50 transition-all"
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block text-xs font-bold text-[#0F253B] truncate">{t.title}</span>
+                    {t.property && (
+                      <span className="block text-xs font-bold text-[#F47C3C] truncate">
+                        {t.property}
+                      </span>
+                    )}
+                    <span
+                      className={`block text-xs truncate ${
+                        t.property ? "font-semibold text-gray-600" : "font-bold text-[#0F253B]"
+                      }`}
+                    >
+                      {t.title}
+                    </span>
                     <span className="block text-[10px] font-medium text-gray-400 truncate">
                       {t.lastUpdate?.remark || "No updates yet"}
                     </span>
@@ -527,16 +549,24 @@ export default function AdminTasks() {
                     <td className="p-4">
                       <div className="flex items-start gap-2">
                         <span className={`w-2 h-2 rounded-full shrink-0 mt-1.5 ${PRIORITY_DOT[t.priority]}`} />
+                        {/* The property leads: the list is read to find the
+                            work at an address, and the task name is what that
+                            work is. A task with no property keeps its title as
+                            the headline. */}
                         <div className="min-w-0">
-                          <p className="text-xs font-bold truncate max-w-xs">{t.title}</p>
+                          {t.property && (
+                            <p className="text-xs font-bold text-[#F47C3C] truncate max-w-xs">{t.property}</p>
+                          )}
+                          <p
+                            className={`text-xs truncate max-w-xs ${
+                              t.property ? "font-semibold text-gray-600" : "font-bold"
+                            }`}
+                          >
+                            {t.title}
+                          </p>
                           <p className="text-[11px] text-gray-400 font-normal truncate max-w-xs">
                             {t.description}
                           </p>
-                          {t.property && (
-                            <p className="text-[11px] font-bold text-[#F47C3C] truncate max-w-xs mt-0.5">
-                              {t.property}
-                            </p>
-                          )}
                         </div>
                       </div>
                     </td>

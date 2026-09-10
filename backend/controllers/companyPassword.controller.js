@@ -11,8 +11,28 @@ const FIELDS_BY_TYPE = {
     "keysCode",
     "digitalLockCode",
     "lockLocation",
+    "media",
     "notes",
   ],
+};
+
+const MEDIA_TYPES = new Set(["image", "video", "pdf"]);
+
+// Attachments are uploaded to Cloudinary by the browser, so what arrives is a
+// list of descriptors rather than files. Only the fields the schema stores are
+// kept, and an entry without a URL is nothing to show — drop it.
+const cleanMedia = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item) => item && typeof item.url === "string" && item.url.trim())
+    .map((item) => ({
+      url: String(item.url).trim(),
+      publicId: String(item.publicId || "").trim(),
+      name: String(item.name || "").trim(),
+      type: MEDIA_TYPES.has(item.type) ? item.type : "image",
+      format: String(item.format || "").trim(),
+      bytes: Number(item.bytes) || 0,
+    }));
 };
 
 const TRIMMED = new Set([
@@ -30,7 +50,8 @@ const pickPayload = (type, body) => {
   for (const key of FIELDS_BY_TYPE[type] || []) {
     if (body[key] === undefined) continue;
     let value = body[key];
-    if (TRIMMED.has(key)) value = String(value ?? "").trim();
+    if (key === "media") value = cleanMedia(value);
+    else if (TRIMMED.has(key)) value = String(value ?? "").trim();
     payload[key] = value;
   }
 

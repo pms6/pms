@@ -449,6 +449,53 @@ export const resetPassword = async (req, res) => {
   }
 };
 
+// @desc    Set a new password for the signed-in user
+// @route   PATCH /api/v1/auth/change-password
+// @access  Private
+//
+// The reset flow above is for someone locked out — it proves who they are with
+// an emailed code. This is the in-app equivalent for someone already signed in,
+// where the session cookie is the proof, so it asks only for the new password
+// and its confirmation.
+export const changePassword = async (req, res) => {
+  try {
+    const { newPassword, confirmPassword } = req.body;
+
+    if (!newPassword || !confirmPassword) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Please enter the new password twice." });
+    }
+
+    if (String(newPassword).length < 8) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Password must be at least 8 characters" });
+    }
+
+    if (String(newPassword) !== String(confirmPassword)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "The two passwords do not match." });
+    }
+
+    // `protect` strips the password field, so the document is re-read here.
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const salt = await bcrypt.genSalt(env.bcryptSaltRounds);
+    user.password = await bcrypt.hash(newPassword, salt);
+    await user.save();
+
+    return res.status(200).json({ success: true, message: "Password updated." });
+  } catch (error) {
+    console.error("Change Password Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update password." });
+  }
+};
+
 // Shared validation for the two reset endpoints. Returns { error, status } on
 // failure and an empty object when the code is good. Wrong guesses are counted
 // so a 6-digit code can't be walked through at leisure.

@@ -230,7 +230,25 @@ export default function MyTasks({ portalLabel = "your" }) {
                 )}
               </div>
 
-              <h3 className="font-bold text-[#0F253B] mt-3 line-clamp-2">{t.title}</h3>
+              {/* The property leads the card — a member reads this list to
+                  find the address they are going to, and the task name is
+                  what they will do there. A task with no property keeps its
+                  title as the heading. */}
+              {t.property && (
+                <h3 className="flex items-center gap-1.5 font-bold text-[#0F253B] mt-3 line-clamp-2">
+                  <Building2 size={13} className="text-[#F47C3C] shrink-0" />
+                  <span className="truncate">{t.property}</span>
+                </h3>
+              )}
+              <h3
+                className={
+                  t.property
+                    ? "text-sm font-semibold text-gray-600 mt-0.5 line-clamp-2"
+                    : "font-bold text-[#0F253B] mt-3 line-clamp-2"
+                }
+              >
+                {t.title}
+              </h3>
               <p className="text-xs text-gray-500 font-medium mt-1 line-clamp-3 flex-1">{t.description}</p>
 
               <div className="mt-4 pt-3 border-t border-gray-50 space-y-1.5">
@@ -241,12 +259,6 @@ export default function MyTasks({ portalLabel = "your" }) {
                       {(t.assignees || []).map((a) => displayName(a.email)).join(", ") ||
                         "Unassigned"}
                     </span>
-                  </p>
-                )}
-                {t.property && (
-                  <p className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500 truncate">
-                    <Building2 size={12} className="text-[#F47C3C] shrink-0" />
-                    <span className="truncate">{t.property}</span>
                   </p>
                 )}
                 {/* Members were only shown the due DATE, so a task due at
