@@ -15,12 +15,18 @@ const sendTokenResponse = async (user, statusCode, res) => {
       }
     );
 
+    // Keep the cookie lifetime in step with the JWT itself (env.jwt.accessExpires,
+    // 30 days by default) so the browser stops sending a cookie at the same
+    // moment the token inside it stops verifying — otherwise the cookie lingers
+    // for days after the session is already dead.
+    const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+
     const cookieOptions = {
-      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      expires: new Date(Date.now() + SESSION_MS),
       httpOnly: true,
       secure: env.isProd,                    // false on localhost (HTTP)
       sameSite: env.isProd ? "None" : "Lax", // "None" only works with Secure + HTTPS
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: SESSION_MS,
     };
 
     // Get organization data if user is Organization

@@ -118,24 +118,49 @@ export const AuthProvider = ({ children }) => {
   };
 
   // A session can be revoked server-side while the user is sitting on a page —
-  // suspending a team member does exactly that, and the cookie itself stays
-  // valid for 7 days. `protect` answers 401 from then on, so treat any 401 on a
-  // signed-in session as "you have been signed out" and clear local state;
-  // RoleShell sees `user` go null and sends them home.
+  // suspending a team member does exactly that, and the cookie stays valid for
+  // weeks. `protect` answers 401 from then on.
+  //
+  // But a single 401 is NOT proof the session is gone: one slow, flaky or
+  // half-broken endpoint answers 401 too, and treating every one as "you have
+  // been signed out" is what had the team logging back in all day. So confirm
+  // with /auth/me before clearing anything — only if that also 401s is the
+  // session actually over. Concurrent failures share the one check.
   //
   // Auth endpoints are exempt: a 401 from /auth/login is a wrong password, not
   // an expired session, and must leave the login form alone.
   useEffect(() => {
+    let sessionCheck = null;
+
+    const clearSession = () => {
+      persistToken(null);
+      setUser(null);
+      setProfile(null);
+    };
+
     const interceptor = api.interceptors.response.use(
       (response) => response,
-      (error) => {
+      async (error) => {
         const url = error.config?.url || "";
         const isAuthCall = url.includes("/auth/login") || url.includes("/auth/register");
+        const isMeCall = url.includes("/auth/me");
 
         if (error.response?.status === 401 && !isAuthCall) {
-          persistToken(null);
-          setUser(null);
-          setProfile(null);
+          if (isMeCall) {
+            // The confirming call itself failed — the session really is gone.
+            clearSession();
+          } else {
+            if (!sessionCheck) {
+              sessionCheck = api
+                .get("/auth/me")
+                .then(() => false)
+                .catch((err) => err.response?.status === 401)
+                .finally(() => {
+                  sessionCheck = null;
+                });
+            }
+            if (await sessionCheck) clearSession();
+          }
         }
 
         return Promise.reject(error);

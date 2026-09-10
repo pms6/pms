@@ -536,6 +536,7 @@ export default function AdminVoidPage() {
   const exportCsv = () => {
     const rows = [
       [
+        "Sr #",
         "Property",
         "Room",
         "Client",
@@ -548,9 +549,10 @@ export default function AdminVoidPage() {
         "Notes",
         "Status",
       ],
-      ...visiblePeriods.map((p) => {
+      ...visiblePeriods.map((p, index) => {
         const room = p.roomId && typeof p.roomId === "object" ? p.roomId : null;
         return [
+          index + 1,
           getPropertyName(p.propertyId),
           p.roomCode || room?.roomNumber || room?.roomName || "",
           p.tenantName || "",
@@ -756,7 +758,6 @@ export default function AdminVoidPage() {
                   properties.map((property) => (
                     <option key={property._id} value={property._id}>
                       {property.name}
-                      {property.propertyCode ? ` · ${property.propertyCode}` : ""}
                     </option>
                   ))
                 )}
@@ -1131,6 +1132,7 @@ export default function AdminVoidPage() {
           <table className="min-w-full text-left text-sm">
             <thead className="bg-gray-50 text-[10px] font-bold uppercase tracking-widest text-gray-400">
               <tr>
+                <th className="px-4 py-3">Sr #</th>
                 <th className="px-4 py-3">Property</th>
                 <th className="px-4 py-3">Room</th>
                 <th className="px-4 py-3">Client</th>
@@ -1145,7 +1147,7 @@ export default function AdminVoidPage() {
             <tbody>
               {visiblePeriods.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-gray-400">
+                  <td colSpan={10} className="px-4 py-6 text-center text-gray-400">
                     {voidPeriods.length === 0
                       ? "No void periods saved yet."
                       : periodType === "month" && !selectedMonth
@@ -1158,7 +1160,7 @@ export default function AdminVoidPage() {
                   </td>
                 </tr>
               ) : (
-                visiblePeriods.map((period) => {
+                visiblePeriods.map((period, index) => {
                   const room =
                     period.roomId && typeof period.roomId === "object"
                       ? period.roomId
@@ -1176,6 +1178,9 @@ export default function AdminVoidPage() {
                         period.isDeleted ? "bg-gray-50/70 text-gray-400" : ""
                       }`}
                     >
+                      <td className="px-4 py-3 font-bold text-gray-400">
+                        {index + 1}
+                      </td>
                       <td className="px-4 py-3 font-medium text-[#0F253B]">
                         {getPropertyName(period.propertyId)}
                         {period.isDeleted && (

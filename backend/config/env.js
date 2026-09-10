@@ -50,8 +50,12 @@ const env = {
       "JWT_REFRESH_SECRET",
       "dev-refresh-secret"
     ),
-    accessExpires: process.env.JWT_ACCESS_EXPIRES || "1d",
-    refreshExpires: process.env.JWT_REFRESH_EXPIRES || "7d",
+    // A working day of PMS use fires dozens of requests; a 1-day token meant
+    // the team was signed out and back in constantly. 30 days keeps a normal
+    // week of work on one login. Override via JWT_ACCESS_EXPIRES if a shorter
+    // window is wanted.
+    accessExpires: process.env.JWT_ACCESS_EXPIRES || "30d",
+    refreshExpires: process.env.JWT_REFRESH_EXPIRES || "30d",
   },
 
   bcryptSaltRounds: Number(
