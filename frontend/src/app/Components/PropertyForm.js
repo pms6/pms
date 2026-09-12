@@ -1246,7 +1246,7 @@ export default function PropertyForm({ basePath = "/admin/properties" }) {
             <input
               ref={docInputRef}
               type="file"
-              accept="application/pdf,image/*"
+              accept=".doc,.docx,.pdf,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               multiple
               className="hidden"
               onChange={(e) => { handleDocuments(e.target.files); e.target.value = ""; }}

@@ -294,7 +294,10 @@ export const updateProperty = async (req, res) => {
     if (amenities !== undefined) property.amenities = amenities;
     if (contract) property.contract = { ...property.contract, ...contract };
     if (inventory !== undefined) property.inventory = inventory;
-    if (documents !== undefined) property.documents = documents;
+    // Replaced wholesale, so only an actual array may do it — a stray null or
+    // object from a partial client payload would otherwise wipe every
+    // attachment on the property, the signed contract included.
+    if (Array.isArray(documents)) property.documents = documents;
     if (coverImage !== undefined) property.coverImage = coverImage;
     if (gallery) property.gallery = gallery;
     if (status) property.status = status;

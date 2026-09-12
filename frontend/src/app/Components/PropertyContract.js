@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Pencil, ClipboardCheck, X } from "lucide-react";
+import { Plus, Pencil, ClipboardCheck, X, Trash2, FileText } from "lucide-react";
 import { money } from "../admin/_data/dummy";
 import { uploadFileToCloudinary } from "../utils/uploadToCloudinary";
 import { guardModalClose } from "@/app/Shared/modalGuard";
@@ -12,7 +12,7 @@ import { guardModalClose } from "@/app/Shared/modalGuard";
 /* Terms live on property.contract; the signed file lives in           */
 /* property.documents with type "CONTRACT". The Compliance page reads  */
 /* both, so anything saved here shows up there too.                    */
-/* ------------------------------------------------------------------ */
+/* -------------------------a----------------------------------------- */
 
 const AGREEMENT_TYPES = [
   ["AST", "Assured Shorthold Tenancy"],
@@ -209,8 +209,22 @@ export function ContractModal({ property, onClose, onSave }) {
     reminderDaysBefore: c.reminderDaysBefore ?? 30,
   });
   const [file, setFile] = useState(null);
+  // The whole documents array, not just the contract ones: a save replaces the
+  // field outright on the server, so anything dropped here would be dropped
+  // from the property. Only the CONTRACT entries are shown and removable.
+  const [documents, setDocuments] = useState(existingDocs);
+  // Documents are only sent when they actually changed — an untouched save must
+  // leave the field out of the payload entirely so the server keeps what it has.
+  const [docsDirty, setDocsDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const attached = documents.filter((d) => d.type === "CONTRACT");
+
+  const removeDoc = (doc) => {
+    setDocuments((list) => list.filter((d) => d !== doc));
+    setDocsDirty(true);
+  };
 
   const set = (k) => (e) => {
     const v = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -227,14 +241,14 @@ export function ContractModal({ property, onClose, onSave }) {
     setSaving(true);
     setError("");
     try {
-      let documents;
+      let nextDocuments = documents;
 
       if (file) {
         const uploaded = await uploadFileToCloudinary(file);
         // Append rather than replace — a property can hold more than one
         // contract document, and other document types must survive.
-        documents = [
-          ...existingDocs,
+        nextDocuments = [
+          ...documents,
           {
             name: uploaded.name || file.name,
             url: uploaded.url,
@@ -263,7 +277,9 @@ export function ContractModal({ property, onClose, onSave }) {
             form.reminderDaysBefore === "" ? 30 : Number(form.reminderDaysBefore),
         },
       };
-      if (documents) payload.documents = documents;
+      // Omitted unless a file was added or one removed, so editing the terms
+      // alone can never touch the attachments.
+      if (file || docsDirty) payload.documents = nextDocuments;
 
       await onSave(payload);
     } catch (err) {
@@ -444,7 +460,47 @@ export function ContractModal({ property, onClose, onSave }) {
           </div>
 
           <div>
-            <label className={LABEL}>Contract Document (.docx, .doc, .pdf or image)</label>
+            <label className={LABEL}>Contract Documents ({attached.length})</label>
+
+            {/* Listed here so it is obvious the files survive a terms-only save —
+                without them on screen the modal read as though there were none,
+                and the same agreement got uploaded a second time. */}
+            {attached.length > 0 ? (
+              <div className="space-y-2 mb-3">
+                {attached.map((d, i) => (
+                  <div
+                    key={d.url || i}
+                    className="flex items-center gap-3 bg-gray-50 border border-gray-100 rounded-xl p-3"
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-white text-[#F47C3C] flex items-center justify-center shrink-0">
+                      <FileText size={16} />
+                    </div>
+                    <a
+                      href={d.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={d.name}
+                      className="flex-1 min-w-0 text-sm font-bold text-[#0F253B] truncate hover:text-[#F47C3C]"
+                    >
+                      {d.name || "Contract"}
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => removeDoc(d)}
+                      title="Remove on save"
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg shrink-0"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mb-3 text-sm text-gray-400 font-medium">
+                No contract file uploaded yet.
+              </p>
+            )}
+
             <input
               type="file"
               accept=".doc,.docx,.pdf,image/*,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -452,8 +508,15 @@ export function ContractModal({ property, onClose, onSave }) {
               className="w-full text-sm font-medium text-gray-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-[#0F253B] file:text-white file:font-bold file:text-xs hover:file:bg-[#1b3a58] file:cursor-pointer"
             />
             <p className="mt-1.5 text-[11px] text-gray-400 font-medium">
-              {file ? `Selected: ${file.name}` : "Optional — existing documents are kept."}
+              {file
+                ? `Selected: ${file.name} — it will be added to the list above.`
+                : "Optional (.docx, .doc, .pdf or image) — the files above are kept unless you remove them."}
             </p>
+            {docsDirty && (
+              <p className="mt-1.5 text-[11px] font-bold text-amber-600">
+                Removed documents are only deleted when you save.
+              </p>
+            )}
           </div>
 
           <div className="flex gap-3 pt-1">
