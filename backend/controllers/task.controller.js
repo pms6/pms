@@ -4,6 +4,7 @@ import Task, { TASK_PRIORITIES, TASK_STATUSES } from "../models/Task.js";
 import OrganizationMember from "../models/OrganizationMember.js";
 import User from "../models/User.js";
 import Property from "../models/Property.js";
+import Notification from "../models/Notification.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import env from "../config/env.js";
 
@@ -331,6 +332,38 @@ const TASK_PATH_BY_ROLE = {
 const taskUrlFor = (role) =>
   `${env.clientUrl}${TASK_PATH_BY_ROLE[role] || "/admin/tasks"}`;
 
+/**
+ * The in-app half of the alerts below — a Notification row per recipient, so
+ * the bell in every role's portal has something to show even when a person
+ * never opens the email (or their inbox is a week behind). `recipients` is
+ * always the same list email already went to, built by the caller with the
+ * actor already filtered out.
+ *
+ * Never throws: the task/comment/update this is called after is already
+ * saved, so a write failure here must not turn a successful action into an
+ * error response.
+ */
+const writeTaskNotifications = async (task, recipients, { type, title, message, actorEmail }) => {
+  const docs = (recipients || [])
+    .filter((r) => r.userId)
+    .map((r) => ({
+      organizationId: task.organizationId,
+      userId: r.userId,
+      type,
+      title,
+      message: message || "",
+      relatedType: "Task",
+      relatedId: task._id,
+      actorEmail: actorEmail || "",
+    }));
+  if (!docs.length) return;
+  try {
+    await Notification.insertMany(docs, { ordered: false });
+  } catch (err) {
+    console.error("Task notification write failed:", err.message);
+  }
+};
+
 // The comment body is whatever a member typed, and it is being dropped into an
 // HTML email — so escape it rather than trusting it as markup.
 const escapeHtml = (value) =>
@@ -393,10 +426,14 @@ const assignmentEmailHtml = ({ task, assignedByEmail, taskUrl, isNew }) => `
 const notifyAssignees = async (task, targets, { assignedByEmail, isNew }) => {
   const actor = String(assignedByEmail || "").trim().toLowerCase();
 
+  // Keyed by userId (falling back to email for anything without one) so the
+  // in-app write below and the email loop share exactly one recipient list.
   const recipients = new Map();
   for (const a of targets || []) {
     const email = String(a.email || "").trim().toLowerCase();
-    if (email && email !== actor) recipients.set(email, a.role || "");
+    if (!email || email === actor) continue;
+    const key = a.userId ? String(a.userId) : email;
+    recipients.set(key, { userId: a.userId || null, email, role: a.role || "" });
   }
 
   if (!recipients.size) return;
@@ -404,7 +441,7 @@ const notifyAssignees = async (task, targets, { assignedByEmail, isNew }) => {
   const subject = `${isNew ? "New task assigned" : "Added to a task"}: ${task.title}`;
 
   await Promise.allSettled(
-    [...recipients].map(([email, role]) =>
+    [...recipients.values()].map(({ email, role }) =>
       sendEmail({
         email,
         subject,
@@ -419,6 +456,13 @@ const notifyAssignees = async (task, targets, { assignedByEmail, isNew }) => {
       )
     )
   );
+
+  await writeTaskNotifications(task, [...recipients.values()], {
+    type: "task_assigned",
+    title: isNew ? "New task assigned to you" : "You were added to a task",
+    message: task.title,
+    actorEmail: assignedByEmail,
+  });
 };
 
 const commentEmailHtml = ({ task, entry, taskUrl }) => `
@@ -472,13 +516,18 @@ const notifyCommentRecipients = async (task, entry) => {
   // The people the work is on.
   for (const a of task.assignees || []) {
     const email = String(a.email || "").trim().toLowerCase();
-    if (email && email !== author) recipients.set(email, a.role || "");
+    if (!email || email === author) continue;
+    const key = a.userId ? String(a.userId) : email;
+    recipients.set(key, { userId: a.userId || null, email, role: a.role || "" });
   }
 
   // The admin who set the task, copied in so they see the thread too.
-  const creator = String(task.createdByEmail || "").trim().toLowerCase();
-  if (creator && creator !== author && !recipients.has(creator)) {
-    recipients.set(creator, "ADMIN");
+  const creatorEmail = String(task.createdByEmail || "").trim().toLowerCase();
+  if (creatorEmail && creatorEmail !== author) {
+    const key = task.createdBy ? String(task.createdBy) : creatorEmail;
+    if (!recipients.has(key)) {
+      recipients.set(key, { userId: task.createdBy || null, email: creatorEmail, role: "ADMIN" });
+    }
   }
 
   if (!recipients.size) return;
@@ -486,7 +535,7 @@ const notifyCommentRecipients = async (task, entry) => {
   const subject = `New comment on task: ${task.title}`;
 
   await Promise.allSettled(
-    [...recipients].map(([email, role]) =>
+    [...recipients.values()].map(({ email, role }) =>
       sendEmail({
         email,
         subject,
@@ -496,6 +545,50 @@ const notifyCommentRecipients = async (task, entry) => {
       )
     )
   );
+
+  await writeTaskNotifications(task, [...recipients.values()], {
+    type: "task_comment",
+    title: "New comment on a task",
+    message: `${task.title}${entry.remark ? ` — ${entry.remark}` : ""}`,
+    actorEmail: entry.authorEmail,
+  });
+};
+
+/**
+ * In-app only. A status update has never been emailed — see the note at the
+ * top of this section — but that left it silent everywhere: nobody found out
+ * a task was moved to Done, or reopened, unless they happened to check back.
+ * This fills that gap without changing the email behaviour anyone already
+ * relies on.
+ */
+const notifyProgressUpdate = async (task, entry) => {
+  const actor = String(entry.authorEmail || "").trim().toLowerCase();
+
+  const recipients = new Map();
+  for (const a of task.assignees || []) {
+    const email = String(a.email || "").trim().toLowerCase();
+    if (!email || email === actor) continue;
+    const key = a.userId ? String(a.userId) : email;
+    recipients.set(key, { userId: a.userId || null, email, role: a.role || "" });
+  }
+
+  const creatorEmail = String(task.createdByEmail || "").trim().toLowerCase();
+  if (creatorEmail && creatorEmail !== actor) {
+    const key = task.createdBy ? String(task.createdBy) : creatorEmail;
+    if (!recipients.has(key)) {
+      recipients.set(key, { userId: task.createdBy || null, email: creatorEmail, role: "ADMIN" });
+    }
+  }
+
+  if (!recipients.size) return;
+
+  const who = entry.authorEmail || "Someone";
+  await writeTaskNotifications(task, [...recipients.values()], {
+    type: "task_update",
+    title: `Task moved to ${entry.status}`,
+    message: `${who} updated "${task.title}"${entry.remark ? `: ${entry.remark}` : ""}`,
+    actorEmail: entry.authorEmail,
+  });
 };
 
 // ===========================================================================
@@ -781,9 +874,6 @@ export const createTask = async (req, res) => {
     if (!title?.trim()) {
       return res.status(400).json({ success: false, message: "Task title is required." });
     }
-    if (!description?.trim()) {
-      return res.status(400).json({ success: false, message: "Task description is required." });
-    }
 
     const property = await resolveProperty(propertyId, req.user.organizationId);
     const resolved = await resolveAssignees(assignees, req.user.organizationId);
@@ -810,7 +900,7 @@ export const createTask = async (req, res) => {
       createdBy: req.user._id,
       createdByEmail: req.user.email || "",
       title: title.trim(),
-      description: description.trim(),
+      description: description?.trim() || "",
       propertyId: property.propertyId,
       property: property.property,
       assignees: resolved,
@@ -888,10 +978,7 @@ export const updateTask = async (req, res) => {
       task.title = title.trim();
     }
     if (description !== undefined) {
-      if (!description.trim()) {
-        return res.status(400).json({ success: false, message: "Task description is required." });
-      }
-      task.description = description.trim();
+      task.description = description?.trim() || "";
     }
 
     // Reassignment. Only replace the list when the client actually sent one, so
@@ -1122,6 +1209,7 @@ export const addTaskProgress = async (req, res) => {
     // about. Awaited so a send is at least attempted before the response, but
     // it swallows its own failures: the comment is stored either way.
     if (isComment) await notifyCommentRecipients(task, entry);
+    else await notifyProgressUpdate(task, entry);
 
     return res.status(201).json({
       success: true,

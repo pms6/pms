@@ -21,6 +21,19 @@ import mongoose from "mongoose";
 
 export const CLIENT_STATUSES = ["ACTIVE", "PAST"];
 
+// The client's signed contract, as a single file — one PDF (or scanned
+// image/Word doc) per client, kept beside the row it belongs to rather than
+// in an email folder somewhere. `null` when nothing has been uploaded yet.
+const contractFileSchema = new mongoose.Schema(
+  {
+    name: { type: String, trim: true, default: "" },
+    url: { type: String, trim: true, required: true },
+    publicId: { type: String, trim: true, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const clientSchema = new mongoose.Schema(
   {
     // ============================
@@ -109,6 +122,11 @@ const clientSchema = new mongoose.Schema(
     },
 
     notes: { type: String, trim: true, default: "" },
+
+    // The client's signed contract as a PDF (or scanned doc/image) — optional,
+    // and separate from contractStart/contractEnd, which just record the
+    // dates the sheet already keeps.
+    contract: { type: contractFileSchema, default: null },
 
     // ============================
     // Soft delete

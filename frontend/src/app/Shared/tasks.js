@@ -182,6 +182,22 @@ export const fmtDateTimeLong = (d) => {
   return `${day} at ${fmtTime(date)}`;
 };
 
+/**
+ * "5 Sep 2026 · 3:00 pm – 5:00 pm" when start and due land on the same UK day
+ * — the common case, a task done within one day's window. Falls back to a
+ * start → due readout when they land on different days, and to whichever one
+ * date is actually set.
+ */
+export const fmtSchedule = (task) => {
+  const { startDate, dueDate } = task || {};
+  if (!startDate && !dueDate) return "No date set";
+  if (startDate && dueDate && toInputDate(startDate) === toInputDate(dueDate)) {
+    return `${fmtDate(startDate)} · ${fmtTime(startDate)} – ${fmtTime(dueDate)}`;
+  }
+  if (startDate && dueDate) return `${fmtDateTime(startDate)} → ${fmtDateTime(dueDate)}`;
+  return fmtDateTime(dueDate || startDate);
+};
+
 // "YYYY-MM-DD" for <input type="date">, on a UK clock.
 export const toInputDate = (d) => {
   const date = asDate(d);

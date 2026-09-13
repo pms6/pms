@@ -15,10 +15,19 @@ import {
   TASK_PRIORITIES,
   SETTABLE_STATUSES,
   displayName,
+  toUkPickerParts,
   FIELD,
   LABEL,
 } from "../../Shared/tasks";
 import DateTimeField from "../../Shared/DateTimeField";
+import DateTimeRangeField from "../../Shared/DateTimeRangeField";
+
+// True when both instants fall on the same UK calendar day, or when there is
+// nothing yet to conflict with — the default a new task starts in.
+const sameUkDay = (a, b) => {
+  if (!a || !b) return true;
+  return toUkPickerParts(a).date === toUkPickerParts(b).date;
+};
 
 export default function TaskForm({ members, properties = [], initial, onCancel, onSave }) {
   const [form, setForm] = useState({
@@ -46,6 +55,11 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  // Most tasks happen inside one day's window (paint the flat, 3–5pm), so that
+  // is the default. A task already spanning two different days — set before
+  // this option existed — opens in the "different days" mode instead, so
+  // re-saving it does not silently collapse its due date onto the start day.
+  const [sameDay, setSameDay] = useState(() => sameUkDay(form.startDate, form.dueDate));
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -65,8 +79,7 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.title.trim()) return setError("Task title is required.");
-    if (!form.description.trim()) return setError("Task description is required.");
+    if (!form.title.trim()) return setError("Task is required.");
     if (form.assignees.length === 0) return setError("Assign the task to at least one team member.");
     // Both are ISO instants now, so compare the instants rather than the
     // strings — string order only held while these were "YYYY-MM-DDTHH:mm".
@@ -111,30 +124,6 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
 
       <form onSubmit={submit} className="space-y-4">
         <div>
-          <label className={LABEL}>Task title</label>
-          <input
-            type="text"
-            className={FIELD}
-            placeholder="e.g. Fix Property Search Bug"
-            value={form.title}
-            onChange={set("title")}
-            required
-          />
-        </div>
-
-        <div>
-          <label className={LABEL}>Detailed description</label>
-          <textarea
-            rows={4}
-            className={FIELD}
-            placeholder="What needs doing, and what does done look like?"
-            value={form.description}
-            onChange={set("description")}
-            required
-          />
-        </div>
-
-        <div>
           <label className={LABEL}>Property</label>
           <select className={FIELD} value={form.propertyId} onChange={onPropertyPick}>
             <option value="">No property — not tied to one</option>
@@ -148,6 +137,31 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
               <option key={p._id} value={String(p._id)}>{p.name}</option>
             ))}
           </select>
+        </div>
+
+        <div>
+          <label className={LABEL}>Task</label>
+          <input
+            type="text"
+            className={FIELD}
+            placeholder="e.g. Fix Property Search Bug"
+            value={form.title}
+            onChange={set("title")}
+            required
+          />
+        </div>
+
+        <div>
+          <label className={LABEL}>
+            Details <span className="text-gray-300 normal-case tracking-normal">(optional)</span>
+          </label>
+          <textarea
+            rows={4}
+            className={FIELD}
+            placeholder="What needs doing, and what does done look like?"
+            value={form.description}
+            onChange={set("description")}
+          />
         </div>
 
         {/* Assignment */}
@@ -220,20 +234,52 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
         {/* Dates get a row of their own — a date, a 12-hour clock and a
             read-back line need the width, and they are the fields members ask
             about most. */}
-        <div className="grid grid-cols-1 gap-4 rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
-          <DateTimeField
-            label="Start date & time"
-            value={form.startDate}
-            onChange={(iso) => setForm((f) => ({ ...f, startDate: iso }))}
-            hint="When the assignee should begin"
-          />
-          <DateTimeField
-            label="Due date & time"
-            value={form.dueDate}
-            min={form.startDate || undefined}
-            onChange={(iso) => setForm((f) => ({ ...f, dueDate: iso }))}
-            hint="The deadline shown to everyone assigned"
-          />
+        <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <label className={LABEL}>When</label>
+            <div className="flex items-center gap-1 bg-white border border-gray-100 rounded-xl p-1">
+              {[
+                { key: true, label: "Same day" },
+                { key: false, label: "Different days" },
+              ].map((opt) => (
+                <button
+                  key={String(opt.key)}
+                  type="button"
+                  onClick={() => setSameDay(opt.key)}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                    sameDay === opt.key ? "bg-[#0F253B] text-white" : "text-gray-400 hover:text-[#0F253B]"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {sameDay ? (
+            <DateTimeRangeField
+              startDate={form.startDate}
+              dueDate={form.dueDate}
+              onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
+              hint="When the task is scheduled"
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              <DateTimeField
+                label="Start date & time"
+                value={form.startDate}
+                onChange={(iso) => setForm((f) => ({ ...f, startDate: iso }))}
+                hint="When the assignee should begin"
+              />
+              <DateTimeField
+                label="Due date & time"
+                value={form.dueDate}
+                min={form.startDate || undefined}
+                onChange={(iso) => setForm((f) => ({ ...f, dueDate: iso }))}
+                hint="The deadline shown to everyone assigned"
+              />
+            </div>
+          )}
         </div>
 
         <div>

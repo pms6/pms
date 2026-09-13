@@ -44,7 +44,16 @@ const EDITABLE_KEYS = [
   "agent",
   "status",
   "notes",
+  "contract",
 ];
+
+// A regex-safe literal match — used to filter agent/bank/property by their
+// exact text without a stray regex metacharacter in someone's typed value
+// (e.g. "Smith & Co." or "Barclays (Main)") breaking the query.
+const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// Case-insensitive, whole-value match — the register is typed by hand, so
+// "Barclays" and "barclays " should be treated as the same bank/agent.
+const exactCi = (value) => new RegExp(`^${escapeRegExp(String(value).trim())}$`, "i");
 
 const NUMERIC_KEYS = ["rent", "deposit"];
 const DATE_KEYS = ["contractStart", "contractEnd"];
@@ -109,6 +118,13 @@ const normalisePayload = (payload) => {
     delete payload.status;
   }
 
+  // "" (the file was removed in the form, or never set) means "no contract",
+  // not an empty subdocument.
+  if (payload.contract === "") payload.contract = null;
+  if (payload.contract && !payload.contract.url) {
+    return "A contract file must have a URL.";
+  }
+
   return null;
 };
 
@@ -168,11 +184,11 @@ export const getClientDatabase = async (req, res) => {
     if (status === undefined) filter.status = "ACTIVE";
     else if (status !== "") filter.status = status;
 
-    if (propertyId) filter.propertyId = propertyId;
-    if (agent) filter.agent = agent;
-    if (bank) filter.bank = bank;
-
-    const [properties, rooms, clients] = await Promise.all([
+    // Properties (and rooms, for the room-count column) are fetched before the
+    // client query is built — the property filter needs the picked property's
+    // NAME to match rows that were typed by hand and never linked to a
+    // Property record (see the comment on Client.propertyId).
+    const [properties, rooms] = await Promise.all([
       Property.find({ organizationId, isDeleted: false })
         .select("name address rentalType")
         .sort({ name: 1 })
@@ -180,8 +196,24 @@ export const getClientDatabase = async (req, res) => {
       // Only the room count per property is needed here — the sheet's "No of
       // Rooms" column — plus each room's status for the row it belongs to.
       Room.find({ organizationId }).select("propertyId status").lean(),
-      Client.find(filter).lean(),
     ]);
+
+    if (propertyId) {
+      const picked = properties.find((p) => String(p._id) === String(propertyId));
+      // A client row is filed EITHER by a linked Property record OR by the
+      // property's name typed straight off the spreadsheet — most rows in
+      // this hand-kept register are the latter, with propertyId left null.
+      // Matching only propertyId (the old behaviour) silently excluded every
+      // row that had never been linked, which is why picking a property from
+      // this filter used to come back near-empty.
+      filter.$or = picked
+        ? [{ propertyId }, { propertyId: null, property: exactCi(picked.name) }]
+        : [{ propertyId }];
+    }
+    if (agent) filter.agent = exactCi(agent);
+    if (bank) filter.bank = exactCi(bank);
+
+    const clients = await Client.find(filter).lean();
 
     const roomCountByProperty = new Map();
     const roomStatusById = new Map();
@@ -246,6 +278,7 @@ export const getClientDatabase = async (req, res) => {
 
         status: c.status,
         notes: c.notes || "",
+        contract: c.contract || null,
       };
     });
 

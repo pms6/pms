@@ -9,9 +9,10 @@ import api from "@/app/api/api";
 import { uploadFileToCloudinary } from "@/app/utils/uploadToCloudinary";
 import {
   PRIORITY_TONE, STATUS_TONE, SETTABLE_STATUSES,
-  fmtDate, fmtDateTime, displayName, dueLabel, FIELD, LABEL,
+  fmtDate, fmtDateTime, fmtSchedule, displayName, dueLabel, FIELD, LABEL,
 } from "./tasks";
 import { guardModalClose } from "@/app/Shared/modalGuard";
+import AttachmentLightbox from "./AttachmentLightbox";
 
 function Meta({ label, value, icon: Icon }) {
   return (
@@ -32,21 +33,20 @@ function Meta({ label, value, icon: Icon }) {
   );
 }
 
-function AttachmentList({ items }) {
+function AttachmentList({ items, onOpen }) {
   if (!items?.length) return null;
   return (
     <div className="flex flex-wrap gap-2">
-      {items.map((a) => (
-        <a
+      {items.map((a, i) => (
+        <button
+          type="button"
           key={a._id || a.url}
-          href={a.url}
-          target="_blank"
-          rel="noopener noreferrer"
+          onClick={() => onOpen(items, i)}
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-200 hover:bg-gray-50 rounded-lg text-[11px] font-bold text-[#0F253B] transition-all max-w-full"
         >
           <Paperclip size={12} className="text-[#F47C3C] shrink-0" />
           <span className="truncate">{a.name || "Attachment"}</span>
-        </a>
+        </button>
       ))}
     </div>
   );
@@ -85,6 +85,11 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  // The attachment lightbox is scoped to whichever list it was opened from
+  // (the task's own files, or one history entry's) — arrows page through
+  // that list, not every attachment on the task.
+  const [lightbox, setLightbox] = useState(null); // { items, index } | null
+  const openLightbox = (items, index) => setLightbox({ items, index });
 
   const commenting = mode === "comment" || !mayUpdate;
 
@@ -162,6 +167,23 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
                 )}
               </div>
               <h2 className="text-xl font-bold text-[#0F253B] mt-3 break-words">{task.title}</h2>
+              {(task.property || task.startDate || task.dueDate) && (
+                <p className="mt-1 text-xs font-bold text-gray-500 flex items-center gap-1.5 flex-wrap">
+                  {task.property && (
+                    <span className="flex items-center gap-1 text-[#F47C3C]">
+                      <Building2 size={12} /> {task.property}
+                    </span>
+                  )}
+                  {task.property && (task.startDate || task.dueDate) && (
+                    <span className="text-gray-300">·</span>
+                  )}
+                  {(task.startDate || task.dueDate) && (
+                    <span className="flex items-center gap-1">
+                      <CalendarClock size={12} className="text-gray-400" /> {fmtSchedule(task)}
+                    </span>
+                  )}
+                </p>
+              )}
             </div>
             <button onClick={onClose} className="text-gray-300 hover:text-gray-500 shrink-0" title="Close">
               <X size={20} />
@@ -211,7 +233,7 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
               <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C] mb-2">
                 Task attachments
               </p>
-              <AttachmentList items={task.attachments} />
+              <AttachmentList items={task.attachments} onOpen={openLightbox} />
             </div>
           )}
 
@@ -381,7 +403,7 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
                     )}
                     {entry.attachments?.length > 0 && (
                       <div className="mt-2">
-                        <AttachmentList items={entry.attachments} />
+                        <AttachmentList items={entry.attachments} onOpen={openLightbox} />
                       </div>
                     )}
                     <p className="text-[11px] font-medium text-gray-400 mt-1">
@@ -398,6 +420,15 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
           </div>
         </div>
       </div>
+
+      {lightbox && (
+        <AttachmentLightbox
+          items={lightbox.items}
+          index={lightbox.index}
+          onClose={() => setLightbox(null)}
+          onNavigate={(index) => setLightbox((lb) => ({ ...lb, index }))}
+        />
+      )}
     </div>
   );
 }

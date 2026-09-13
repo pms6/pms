@@ -741,7 +741,7 @@ export const getAvailableRooms = async (req, res) => {
     })
       .populate({
         path: "propertyId",
-        select: "name propertyCode address rentalType status isDeleted",
+        select: "name address zone bank exTenant rentalType status isDeleted",
         match: { isDeleted: { $ne: true }, status: { $ne: "ARCHIVED" } },
       })
       .populate({
@@ -833,6 +833,10 @@ export const getAvailableRooms = async (req, res) => {
           "—";
       } else if (tenancy?.tenant) {
         exTenantName = tenancy.tenant;
+      } else if (property.exTenant) {
+        // No tenancy record for this room — fall back to the last tenant the
+        // office typed on the property itself.
+        exTenantName = property.exTenant;
       }
 
       // Pricing
@@ -851,9 +855,8 @@ export const getAvailableRooms = async (req, res) => {
         propertyId: property._id,
         roomId: room._id,
         propertyName: property.name || property.address?.line1 || "—",
-        code: property.propertyCode || property.address?.postcode || "—",
         area: property.address?.area || property.address?.city || "—",
-        zone: null, // add to Property schema later if needed
+        zone: property.zone || null,
         price: priceStr,
         deposit: depositStr,
         monthlyRent: rent,
@@ -863,7 +866,7 @@ export const getAvailableRooms = async (req, res) => {
           room.occupancy === "DOUBLE" || room.occupancy === "TWIN"
             ? "Single/Double"
             : "Single",
-        bank: null, // add to schema later if needed
+        bank: property.bank || null,
         roomType: room.roomType,
         bathroomType: room.bathroomType,
         status: null, // set below

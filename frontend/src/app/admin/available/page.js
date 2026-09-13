@@ -73,7 +73,6 @@ export default function AvailableRoomsPage() {
     return rows.filter(
       (r) =>
         r.propertyName?.toLowerCase().includes(q) ||
-        r.code?.toLowerCase().includes(q) ||
         r.area?.toLowerCase().includes(q) ||
         r.exTenant?.toLowerCase().includes(q) ||
         r.status?.toLowerCase().includes(q)
@@ -90,7 +89,6 @@ export default function AvailableRoomsPage() {
           <tr className="border-b border-gray-100 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
             <th className="px-5 py-3.5">#</th>
             <th className="px-5 py-3.5">Property</th>
-            <th className="px-5 py-3.5">Code</th>
             <th className="px-5 py-3.5">Area</th>
             <th className="px-5 py-3.5">Zone</th>
             <th className="px-5 py-3.5">Price</th>
@@ -105,7 +103,7 @@ export default function AvailableRoomsPage() {
           {rows.length === 0 ? (
             <tr>
               <td
-                colSpan={11}
+                colSpan={10}
                 className="px-5 py-16 text-center text-sm text-gray-400"
               >
                 {emptyMessage}
@@ -121,7 +119,6 @@ export default function AvailableRoomsPage() {
                 <td className="px-5 py-4 font-medium text-gray-900">
                   {row.propertyName}
                 </td>
-                <td className="px-5 py-4 text-gray-600">{row.code}</td>
                 <td className="px-5 py-4 text-gray-600">{row.area}</td>
                 <td className="px-5 py-4 text-gray-600">{row.zone || "—"}</td>
                 <td className="px-5 py-4 font-medium text-gray-900">
@@ -264,7 +261,7 @@ export default function AvailableRoomsPage() {
         <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
         <input
           type="text"
-          placeholder="Search property, code, area or tenant..."
+          placeholder="Search property, area or tenant..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="h-10 w-full rounded-lg border border-gray-200 bg-white pl-10 pr-4 text-sm text-gray-700 shadow-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500/30"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Plus,
   X,
@@ -32,6 +32,7 @@ import {
   STATUS_TONE,
   PRIORITY_DOT,
   fmtDateTime,
+  fmtSchedule,
   displayName,
   dueLabel,
   isDueToday,
@@ -178,6 +179,7 @@ export default function AdminTasks() {
 
   const [reschedule, setReschedule] = useState({ open: false, task: null });
   const [detailId, setDetailId] = useState(null);
+  const openedFromNotification = useRef(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -208,6 +210,29 @@ export default function AdminTasks() {
       await loadData();
     })();
   }, [loadData]);
+
+  // Clicking a task notification (see Shared/NotificationBell.js) lands here
+  // with ?open=<taskId> — there is no per-task page for it to point at
+  // instead, since the detail is a panel over this list, not a route. Read it
+  // once, straight off the URL rather than next/navigation's useSearchParams,
+  // so this stays a plain effect with no Suspense-boundary requirement.
+  useEffect(() => {
+    if (openedFromNotification.current || loading) return;
+    const params = new URLSearchParams(window.location.search);
+    const openId = params.get("open");
+    if (!openId) return;
+    openedFromNotification.current = true;
+    (async () => {
+      if (tasks.some((t) => t._id === openId)) setDetailId(openId);
+    })();
+    params.delete("open");
+    const qs = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+    );
+  }, [loading, tasks]);
 
   const saveReschedule = async (payload) => {
     await api.patch(`/tasks/${reschedule.task._id}/reschedule`, payload);
@@ -396,7 +421,7 @@ export default function AdminTasks() {
                   </span>
                   <span className="text-[10px] font-bold text-[#F47C3C] shrink-0 text-right">
                     <span className="block">{dueLabel(t)}</span>
-                    <span className="block font-medium text-gray-400">{fmtDateTime(t.dueDate)}</span>
+                    <span className="block font-medium text-gray-400">{fmtSchedule(t)}</span>
                   </span>
                 </button>
               ))}
@@ -534,7 +559,7 @@ export default function AdminTasks() {
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Assigned to</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Priority</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Status</th>
-                  <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Due</th>
+                  <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Schedule</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Updates</th>
                   <th className="p-4" />
                 </tr>
@@ -591,7 +616,7 @@ export default function AdminTasks() {
                           t.effectiveStatus === "Overdue" ? "text-red-600 font-bold" : "text-gray-500"
                         }
                       >
-                        {fmtDateTime(t.dueDate)}
+                        {fmtSchedule(t)}
                       </span>
                       <span className="block text-[10px] text-gray-400">{dueLabel(t)}</span>
                     </td>

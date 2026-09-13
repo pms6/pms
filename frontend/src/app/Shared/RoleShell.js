@@ -7,6 +7,7 @@ import { LogOut, Building2, X, Menu } from "lucide-react";
 import { useAuth } from "../Context/AuthContext";
 import { getEffectiveRole, dashboardPathFor } from "../utils/roles";
 import PresenceHeartbeat from "./PresenceHeartbeat";
+import NotificationBell from "./NotificationBell";
 import api from "../api/api";
 
 export default function RoleShell({
@@ -161,7 +162,13 @@ export default function RoleShell({
 
           {headerExtra && <div className="mr-3">{headerExtra}</div>}
 
-          <div className="flex items-center gap-3">
+          {/* Task Management — the only thing feeding this bell today — is a
+              staff-only feature, and its API is staff-only too. A tenant
+              never has anything to fetch here, so skip it rather than poll a
+              route that would only ever 403 for them. */}
+          {role !== "tenant" && <NotificationBell />}
+
+          <div className="flex items-center gap-3 ml-3">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-bold text-[#0F253B] leading-tight">
                 {user.name}

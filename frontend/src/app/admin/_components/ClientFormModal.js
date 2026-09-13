@@ -12,10 +12,11 @@
 // only dates this register keeps — the other two are managed on the check-in.
 
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { X, Paperclip, Loader2 } from "lucide-react";
 import api from "../../api/api";
 import { dateInput, GENDERS, BANKS } from "../../utils/registers";
 import { guardModalClose } from "@/app/Shared/modalGuard";
+import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
 
 const FIELD =
   "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
@@ -41,6 +42,7 @@ const emptyForm = {
   contractEnd: "",
   status: "ACTIVE",
   notes: "",
+  contract: null,
 };
 
 export default function ClientFormModal({ initial, properties, onClose, onSave }) {
@@ -65,8 +67,32 @@ export default function ClientFormModal({ initial, properties, onClose, onSave }
   const [rooms, setRooms] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [uploadingContract, setUploadingContract] = useState(false);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const pickContract = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same file be re-picked later
+    if (!file) return;
+    if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name || "")) {
+      setError("The contract must be a PDF file.");
+      return;
+    }
+    setUploadingContract(true);
+    setError("");
+    try {
+      const up = await uploadFileToCloudinary(file);
+      setForm((f) => ({
+        ...f,
+        contract: { name: up.name || file.name, url: up.url, publicId: up.publicId || "" },
+      }));
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || "Failed to upload the contract.");
+    } finally {
+      setUploadingContract(false);
+    }
+  };
 
   // Rooms follow the chosen property. A row typed off the spreadsheet may name
   // a property that has no Room records at all, which is why the room is a
@@ -122,6 +148,7 @@ export default function ClientFormModal({ initial, properties, onClose, onSave }
     e.preventDefault();
     if (!form.property.trim()) return setError("A property is required.");
     if (!form.tenant.trim()) return setError("A client name is required.");
+    if (uploadingContract) return setError("Wait for the contract to finish uploading.");
 
     setSaving(true);
     setError("");
@@ -334,6 +361,50 @@ export default function ClientFormModal({ initial, properties, onClose, onSave }
             <textarea rows={2} className={FIELD} value={form.notes} onChange={set("notes")} />
           </div>
 
+          {/* Contract — a single PDF kept beside the row it belongs to, so a
+              client's signed contract does not live only in an email folder. */}
+          <div>
+            <label className={LABEL}>
+              Contract (PDF){" "}
+              <span className="text-gray-300 normal-case tracking-normal">(optional)</span>
+            </label>
+            {form.contract?.url ? (
+              <div className="flex items-center gap-2 px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-xl">
+                <Paperclip size={14} className="text-[#F47C3C] shrink-0" />
+                <a
+                  href={form.contract.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-bold text-[#0F253B] hover:text-[#F47C3C] truncate flex-1"
+                >
+                  {form.contract.name || "Contract.pdf"}
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, contract: null }))}
+                  className="text-gray-300 hover:text-red-500 shrink-0"
+                  title="Remove"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ) : (
+              <div className="relative border border-dashed border-gray-200 bg-gray-50 rounded-xl p-3 text-center text-xs font-bold text-gray-400 hover:bg-gray-100 transition-colors cursor-pointer">
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                  onChange={pickContract}
+                  disabled={uploadingContract}
+                />
+                <span className="flex items-center justify-center gap-2">
+                  {uploadingContract && <Loader2 size={13} className="animate-spin" />}
+                  {uploadingContract ? "Uploading…" : "Choose a PDF contract…"}
+                </span>
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
@@ -344,7 +415,7 @@ export default function ClientFormModal({ initial, properties, onClose, onSave }
             </button>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || uploadingContract}
               className="px-5 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-60 text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
             >
               {saving ? "Saving…" : isEdit ? "Save changes" : "Add client"}

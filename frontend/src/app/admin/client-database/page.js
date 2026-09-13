@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Plus, Search, Download, Users, Building2, Banknote, CalendarClock,
+  Plus, Search, Download, Users, Building2, Banknote, CalendarClock, Paperclip,
 } from "lucide-react";
 import { PageHeader, StatCard, Badge } from "../../Shared/ui";
 import api from "../../api/api";
 import ClientFormModal from "../_components/ClientFormModal";
 import RecordDetail from "../_components/RecordDetail";
 import RowActions from "../_components/RowActions";
+import { downloadUrlFor } from "../../utils/uploadToCloudinary";
 import {
   money,
   date,
@@ -197,6 +198,19 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
           value: r.expired ? "Expired" : r.expiringSoon ? "Ending soon" : "",
           tone: r.expired ? "red" : "amber",
         },
+        {
+          label: "Contract file",
+          value: r.contract?.url ? (
+            <a
+              href={downloadUrlFor(r.contract.url, r.contract.name)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[#F47C3C] hover:underline"
+            >
+              {r.contract.name || "View PDF"}
+            </a>
+          ) : "",
+        },
       ],
     },
     {
@@ -381,6 +395,18 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
                       <p className="font-semibold text-[#0F253B] flex items-center gap-2">
                         {r.tenant}
                         {r.status === "PAST" && <Badge tone="gray">past</Badge>}
+                        {r.contract?.url && (
+                          <a
+                            href={downloadUrlFor(r.contract.url, r.contract.name)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-gray-300 hover:text-[#F47C3C]"
+                            title={`Contract: ${r.contract.name || "PDF"}`}
+                          >
+                            <Paperclip size={12} />
+                          </a>
+                        )}
                       </p>
                       <p className="text-[11px] text-gray-400">
                         {r.room || "—"}{r.email ? ` · ${r.email}` : ""}

@@ -34,6 +34,7 @@ import emptyRoomStatusRoutes from "./emptyRoomStatus.route.js"
 import companyPasswordRoutes from "./companyPassword.route.js"
 import screenMonitorRoutes from "./screenMonitor.route.js"
 import presenceRoutes from "./presence.route.js"
+import notificationRoutes from "./notification.route.js"
 
 const router = express.Router();
 
@@ -100,5 +101,9 @@ router.use("/screen-monitor", screenMonitorRoutes);
 
 // Who on the team is at their desk right now.
 router.use("/presence", presenceRoutes);
+
+// In-app alerts — the bell every role's portal reads, mostly fed today by
+// Task Management (assignment, comments, progress updates).
+router.use("/notifications", notificationRoutes);
 
 export default router;

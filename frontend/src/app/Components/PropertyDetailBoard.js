@@ -270,6 +270,9 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
         area: propertyData.address?.city || "",
         city: propertyData.address?.city || "",
         postcode: propertyData.address?.postcode || "",
+        zone: propertyData.zone || "",
+        bank: propertyData.bank || "",
+        exTenant: propertyData.exTenant || "",
         image: propertyData.coverImage || `https://via.placeholder.com/400x300?text=${encodeURIComponent(propertyData.name)}`,
         status: propertyData.status,
         description: propertyData.description,
@@ -560,6 +563,19 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
           </div>
         ))}
       </div>
+
+      {/* The three Available Rooms columns, edited on the property form. Shown
+          whenever any of them is filled in — an empty card would be noise. */}
+      {(property.zone || property.bank || property.exTenant) && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-6">
+          <h2 className="text-lg font-bold text-[#0F253B] mb-4">Available Rooms Details</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <Info label="Zone" value={property.zone} />
+            <Info label="Bank" value={property.bank} />
+            <Info label="Ex-Tenant" value={property.exTenant} />
+          </div>
+        </div>
+      )}
 
       {/* HMO → rooms manager */}
       {isHMO ? (

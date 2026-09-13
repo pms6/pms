@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Search, ListChecks, Circle, PlayCircle, CheckCircle2, AlertTriangle,
-  CalendarClock, CalendarDays, Paperclip, MessageSquare, UserRound, Users, Sun,
+  CalendarClock, Paperclip, MessageSquare, UserRound, Users, Sun,
   Building2,
 } from "lucide-react";
 import { PageHeader } from "./ui";
@@ -11,7 +11,7 @@ import api from "@/app/api/api";
 import TaskDetail from "./TaskDetail";
 import {
   TASK_PRIORITIES, PRIORITY_TONE, STATUS_TONE, PRIORITY_DOT,
-  fmtDateTime, displayName, dueLabel, isDueToday,
+  fmtDateTime, fmtSchedule, displayName, dueLabel, isDueToday,
 } from "./tasks";
 
 // Keys are matched against a task's effectiveStatus, so the completed tab is
@@ -50,6 +50,7 @@ export default function MyTasks({ portalLabel = "your" }) {
   const [detailId, setDetailId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const openedFromNotification = useRef(false);
 
   const team = scope === "team";
 
@@ -74,6 +75,28 @@ export default function MyTasks({ portalLabel = "your" }) {
     setLoading(true);
     (async () => { await loadData(); })();
   }, [loadData]);
+
+  // Clicking a task notification (Shared/NotificationBell.js) lands here with
+  // ?open=<taskId> — read straight off the URL rather than through
+  // next/navigation's useSearchParams, which this codebase has never used and
+  // which would need a Suspense boundary this page doesn't have.
+  useEffect(() => {
+    if (openedFromNotification.current || loading) return;
+    const params = new URLSearchParams(window.location.search);
+    const openId = params.get("open");
+    if (!openId) return;
+    openedFromNotification.current = true;
+    (async () => {
+      if (tasks.some((t) => t._id === openId)) setDetailId(openId);
+    })();
+    params.delete("open");
+    const qs = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+    );
+  }, [loading, tasks]);
 
   const needle = q.trim().toLowerCase();
   const list = tasks.filter((t) => {
@@ -262,17 +285,11 @@ export default function MyTasks({ portalLabel = "your" }) {
                   </p>
                 )}
                 {/* Members were only shown the due DATE, so a task due at
-                    9am and one due at 5pm read identically. Both dates now
-                    carry their time, on the same UK clock the admin set. */}
-                {t.startDate && (
-                  <p className="flex items-center gap-1.5 text-[11px] font-medium text-gray-400">
-                    <CalendarDays size={12} className="text-gray-300 shrink-0" />
-                    Starts {fmtDateTime(t.startDate)}
-                  </p>
-                )}
+                    9am and one due at 5pm read identically. The schedule now
+                    carries its time range, on the same UK clock the admin set. */}
                 <p className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500">
                   <CalendarClock size={12} className={t.effectiveStatus === "Overdue" ? "text-red-500" : "text-[#F47C3C]"} />
-                  {t.dueDate ? `Due ${fmtDateTime(t.dueDate)}` : "No due date"}
+                  {fmtSchedule(t)}
                 </p>
                 <p className={`text-[11px] font-bold pl-[18px] ${t.effectiveStatus === "Overdue" ? "text-red-600" : "text-gray-400"}`}>
                   {dueLabel(t)}

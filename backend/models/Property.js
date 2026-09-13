@@ -75,6 +75,34 @@ const propertySchema = new mongoose.Schema(
         lng:Number
     },
 
+    // ============================
+    // Available Rooms details
+    //
+    // The three columns the office's Available Rooms list carries alongside the
+    // address. Zone and Bank have no other source in the app, so the Property
+    // form is where they are entered. exTenant is a fallback only: the list
+    // names the last tenant from the room's own tenancy whenever there is one,
+    // and reads this instead for rooms that never had a tenancy record.
+    // ============================
+
+    zone:{
+        type:String,
+        trim:true,
+        default:""
+    },
+
+    bank:{
+        type:String,
+        trim:true,
+        default:""
+    },
+
+    exTenant:{
+        type:String,
+        trim:true,
+        default:""
+    },
+
     description:String,
 
     // ============================

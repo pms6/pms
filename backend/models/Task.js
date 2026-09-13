@@ -110,7 +110,9 @@ const taskSchema = new mongoose.Schema(
     // Task detail
     // ============================
     title: { type: String, required: true, trim: true },
-    description: { type: String, required: true, trim: true },
+    // Optional — a task assigned by property + name is often self-explanatory,
+    // and admins should not have to retype the same detail on every task.
+    description: { type: String, trim: true, default: "" },
 
     // Optional link to the property this task is about. `propertyId` is the
     // reference; `property` is the name kept alongside it so the list and the

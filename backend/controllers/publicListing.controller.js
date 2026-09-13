@@ -278,6 +278,12 @@ const cleanPropertyInput = (body = {}) => {
         country: str(property.address?.country, 80) || "United Kingdom",
       },
 
+      // The three Available Rooms columns. `bank` here is the property's own
+      // rent account, not the owner's payout account above.
+      zone: str(property.zone, 60),
+      bank: str(property.bank, 120),
+      exTenant: str(property.exTenant, 120),
+
       // Only keep a coordinate pair when both halves are real numbers.
       ...(num(property.location?.lat, null) !== null &&
       num(property.location?.lng, null) !== null
