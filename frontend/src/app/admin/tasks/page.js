@@ -31,6 +31,8 @@ import {
   PRIORITY_TONE,
   STATUS_TONE,
   PRIORITY_DOT,
+  fmtDate,
+  fmtTime,
   fmtDateTime,
   fmtSchedule,
   displayName,
@@ -40,6 +42,11 @@ import {
   LABEL,
 } from "../../Shared/tasks";
 import { guardModalClose } from "@/app/Shared/modalGuard";
+import TaskNotificationBadge, {
+  NOTIFICATIONS_ARRIVED,
+  markTaskNotificationsRead,
+  clearUnread,
+} from "@/app/Shared/TaskNotificationBadge";
 
 const STATUS_META = {
   "Not Started": { icon: Circle, tone: "text-slate-500 bg-slate-100" },
@@ -168,12 +175,14 @@ export default function AdminTasks() {
   const [tasks, setTasks] = useState([]);
   const [dash, setDash] = useState(null);
   const [members, setMembers] = useState([]);
+  const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const [statusFilter, setStatusFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [memberFilter, setMemberFilter] = useState("");
+  const [propertyFilter, setPropertyFilter] = useState("");
   const [dueTodayOnly, setDueTodayOnly] = useState(false);
   const [q, setQ] = useState("");
 
@@ -187,23 +196,28 @@ export default function AdminTasks() {
       if (statusFilter) params.status = statusFilter;
       if (priorityFilter) params.priority = priorityFilter;
       if (memberFilter) params.assignee = memberFilter;
+      if (propertyFilter) params.property = propertyFilter;
       if (q.trim()) params.search = q.trim();
 
-      const [listRes, statsRes, membersRes] = await Promise.all([
+      const [listRes, statsRes, membersRes, propsRes] = await Promise.all([
         api.get("/tasks", { params }),
         api.get("/tasks/stats"),
         api.get("/tasks/assignable-members"),
+        // `/properties` paginates at 10 by default, so ask for enough to fill
+        // the filter dropdown.
+        api.get("/properties", { params: { limit: 200 } }),
       ]);
       setTasks(listRes.data?.data || []);
       setDash(statsRes.data || null);
       setMembers(membersRes.data?.data || []);
+      setProperties(propsRes.data?.data || []);
       setError("");
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load tasks.");
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, priorityFilter, memberFilter, q]);
+  }, [statusFilter, priorityFilter, memberFilter, propertyFilter, q]);
 
   useEffect(() => {
     (async () => {
@@ -233,6 +247,38 @@ export default function AdminTasks() {
       qs ? `${window.location.pathname}?${qs}` : window.location.pathname
     );
   }, [loading, tasks]);
+
+  // New notifications for this admin (seen by the bell) mean some task's
+  // badge is out of date — reload so it shows.
+  useEffect(() => {
+    const onArrived = () => loadData();
+    window.addEventListener(NOTIFICATIONS_ARRIVED, onArrived);
+    return () => window.removeEventListener(NOTIFICATIONS_ARRIVED, onArrived);
+  }, [loadData]);
+
+  // Opening a task reads its news: clear its badge here and its rows in the
+  // bell, whichever way the panel was opened (row, upcoming, recent, ?open=).
+  useEffect(() => {
+    if (!detailId) return;
+    const t =
+      tasks.find((x) => x._id === detailId) ||
+      dash?.upcoming?.find((x) => x._id === detailId) ||
+      dash?.recent?.find((x) => x._id === detailId);
+    if (!t?.unreadNotifications) return;
+    (async () => {
+      if (!(await markTaskNotificationsRead(t))) return;
+      setTasks((list) => clearUnread(list, detailId));
+      setDash((d) =>
+        d
+          ? {
+              ...d,
+              upcoming: clearUnread(d.upcoming || [], detailId),
+              recent: clearUnread(d.recent || [], detailId),
+            }
+          : d
+      );
+    })();
+  }, [detailId, tasks, dash]);
 
   const saveReschedule = async (payload) => {
     await api.patch(`/tasks/${reschedule.task._id}/reschedule`, payload);
@@ -415,6 +461,11 @@ export default function AdminTasks() {
                     >
                       {t.title}
                     </span>
+                    {t.unreadNotifications > 0 && (
+                      <span className="block mt-0.5">
+                        <TaskNotificationBadge task={t} />
+                      </span>
+                    )}
                     <span className="block text-[10px] font-medium text-gray-400 truncate">
                       {(t.assignees || []).map((a) => displayName(a.email)).join(", ")}
                     </span>
@@ -456,6 +507,11 @@ export default function AdminTasks() {
                     >
                       {t.title}
                     </span>
+                    {t.unreadNotifications > 0 && (
+                      <span className="block mt-0.5">
+                        <TaskNotificationBadge task={t} />
+                      </span>
+                    )}
                     <span className="block text-[10px] font-medium text-gray-400 truncate">
                       {t.lastUpdate?.remark || "No updates yet"}
                     </span>
@@ -531,6 +587,18 @@ export default function AdminTasks() {
             </option>
           ))}
         </select>
+        <select
+          value={propertyFilter}
+          onChange={(e) => setPropertyFilter(e.target.value)}
+          className="px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-xl text-xs font-bold text-[#0F253B] outline-none focus:ring-2 focus:ring-[#F47C3C]"
+        >
+          <option value="">All properties</option>
+          {properties.map((p) => (
+            <option key={String(p._id)} value={String(p._id)}>
+              {p.name || p.address || "Unnamed property"}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Task table */}
@@ -560,6 +628,7 @@ export default function AdminTasks() {
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Priority</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Status</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Schedule</th>
+                  <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Due date</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Updates</th>
                   <th className="p-4" />
                 </tr>
@@ -569,7 +638,11 @@ export default function AdminTasks() {
                   <tr
                     key={t._id}
                     onClick={() => setDetailId(t._id)}
-                    className="hover:bg-gray-50/70 transition-colors cursor-pointer"
+                    className={`transition-colors cursor-pointer ${
+                      t.unreadNotifications
+                        ? "bg-orange-50/50 hover:bg-orange-50"
+                        : "hover:bg-gray-50/70"
+                    }`}
                   >
                     <td className="p-4">
                       <div className="flex items-start gap-2">
@@ -582,13 +655,16 @@ export default function AdminTasks() {
                           {t.property && (
                             <p className="text-xs font-bold text-[#F47C3C] truncate max-w-xs">{t.property}</p>
                           )}
-                          <p
-                            className={`text-xs truncate max-w-xs ${
-                              t.property ? "font-semibold text-gray-600" : "font-bold"
-                            }`}
-                          >
-                            {t.title}
-                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <p
+                              className={`text-xs truncate max-w-xs ${
+                                t.property ? "font-semibold text-gray-600" : "font-bold"
+                              }`}
+                            >
+                              {t.title}
+                            </p>
+                            <TaskNotificationBadge task={t} />
+                          </div>
                           <p className="text-[11px] text-gray-400 font-normal truncate max-w-xs">
                             {t.description}
                           </p>
@@ -618,7 +694,27 @@ export default function AdminTasks() {
                       >
                         {fmtSchedule(t)}
                       </span>
-                      <span className="block text-[10px] text-gray-400">{dueLabel(t)}</span>
+                    </td>
+                    <td className="p-4 text-xs whitespace-nowrap">
+                      {/* The end time is optional, so a task with only a start
+                          falls due on its start date — the same rule the
+                          backend uses for Overdue and Due today. */}
+                      {t.dueDate || t.startDate ? (
+                        <>
+                          <span
+                            className={`block font-bold ${
+                              t.effectiveStatus === "Overdue" ? "text-red-600" : "text-[#0F253B]"
+                            }`}
+                          >
+                            {fmtDate(t.dueDate || t.startDate)}
+                          </span>
+                          <span className="block text-[10px] text-gray-400">
+                            {t.dueDate ? fmtTime(t.dueDate) : "No end time"} · {dueLabel(t)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </td>
                     <td className="p-4 text-xs text-gray-500">
                       {/* Updates move the task; comments are the team talking

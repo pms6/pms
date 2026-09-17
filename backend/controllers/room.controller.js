@@ -10,6 +10,29 @@ import { generateRoomCode } from "../utils/codes.js";
 /**
  * Create Room
  */
+/**
+ * Normalise the ex-tenant list sent by the room form. Every field is optional,
+ * so a row is kept as long as it carries anything at all; bad dates become
+ * null rather than failing the whole save.
+ */
+const toDateOrNull = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const cleanExTenants = (list) => {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((t) => ({
+      name: String(t?.name || "").trim().slice(0, 120),
+      email: String(t?.email || "").trim().toLowerCase().slice(0, 254),
+      joinDate: toDateOrNull(t?.joinDate),
+      endDate: toDateOrNull(t?.endDate),
+    }))
+    .filter((t) => t.name || t.email || t.joinDate || t.endDate);
+};
+
 export const createRoom = async (req, res) => {
   try {
     const organizationId = req.user.organizationId;
@@ -52,6 +75,7 @@ export const createRoom = async (req, res) => {
       isPublished,
       slug,
       notes,
+      exTenants,
     } = req.body;
 
     // Validate required fields
@@ -125,6 +149,7 @@ export const createRoom = async (req, res) => {
       isPublished: isPublished !== undefined ? isPublished : true,
       slug: uniqueSlug,
       notes,
+      exTenants: cleanExTenants(exTenants),
     };
 
     // Create with a retry loop: if two rooms race and generate the same
@@ -399,6 +424,7 @@ export const updateRoom = async (req, res) => {
       featured,
       isPublished,
       notes,
+      exTenants,
     } = req.body;
 
     // Update fields
@@ -436,6 +462,7 @@ export const updateRoom = async (req, res) => {
     if (featured !== undefined) room.featured = featured;
     if (isPublished !== undefined) room.isPublished = isPublished;
     if (notes !== undefined) room.notes = notes;
+    if (exTenants !== undefined) room.exTenants = cleanExTenants(exTenants);
 
     await room.save();
 
@@ -741,7 +768,7 @@ export const getAvailableRooms = async (req, res) => {
     })
       .populate({
         path: "propertyId",
-        select: "name address zone bank exTenant rentalType status isDeleted",
+        select: "name address zone bank rentalType status isDeleted",
         match: { isDeleted: { $ne: true }, status: { $ne: "ARCHIVED" } },
       })
       .populate({
@@ -820,8 +847,18 @@ export const getAvailableRooms = async (req, res) => {
         leaveDate = new Date(tenancy.fixedTermEnd);
       }
 
-      // Ex-tenant name
+      // Ex-tenant name, plus the full room.exTenants history (name, email,
+      // joinDate, endDate) when the room itself carries any — sorted newest
+      // first so the UI can show the latest one and list the rest.
       let exTenantName = "—";
+      let exTenantDetail = null;
+      const exTenantsHistory = room.exTenants?.length
+        ? [...room.exTenants].sort(
+            (a, b) =>
+              new Date(b.endDate || b.joinDate || 0) - new Date(a.endDate || a.joinDate || 0)
+          )
+        : [];
+
       if (tenancy?.tenantId) {
         exTenantName =
           `${tenancy.tenantId.firstName || ""} ${tenancy.tenantId.lastName || ""}`.trim() ||
@@ -833,10 +870,17 @@ export const getAvailableRooms = async (req, res) => {
           "—";
       } else if (tenancy?.tenant) {
         exTenantName = tenancy.tenant;
-      } else if (property.exTenant) {
-        // No tenancy record for this room — fall back to the last tenant the
-        // office typed on the property itself.
-        exTenantName = property.exTenant;
+      } else if (exTenantsHistory.length) {
+        // No tenancy record — use the most recent ex-tenant entered on the
+        // room itself (latest end date; undated entries count as oldest).
+        const latest = exTenantsHistory[0];
+        exTenantName = latest.name || latest.email || "—";
+        exTenantDetail = {
+          name: latest.name || "",
+          email: latest.email || "",
+          joinDate: latest.joinDate || null,
+          endDate: latest.endDate || null,
+        };
       }
 
       // Pricing
@@ -862,6 +906,13 @@ export const getAvailableRooms = async (req, res) => {
         monthlyRent: rent,
         securityDeposit: deposit,
         exTenant: exTenantName,
+        exTenantDetail,
+        exTenants: exTenantsHistory.map((t) => ({
+          name: t.name || "",
+          email: t.email || "",
+          joinDate: t.joinDate || null,
+          endDate: t.endDate || null,
+        })),
         occupancy:
           room.occupancy === "DOUBLE" || room.occupancy === "TWIN"
             ? "Single/Double"

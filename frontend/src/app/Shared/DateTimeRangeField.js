@@ -10,6 +10,11 @@ import { LABEL, fmtDate, fmtTime, toUkPickerParts, ukPickerPartsToISO } from "./
  *
  * Emits ISO instants for startDate/dueDate, both pinned to the one date
  * picked here, on the same UK-clock reading DateTimeField uses.
+ *
+ * The end time is optional: most tasks only need a day and a start time, so
+ * it stays off until the admin ticks "Set an end time". With it off, dueDate
+ * is emitted as "". Whether it is on is read straight from dueDate, so the
+ * field holds no state of its own.
  * ------------------------------------------------------------------------- */
 
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
@@ -68,13 +73,17 @@ export default function DateTimeRangeField({
   const startParts = toUkPickerParts(startDate);
   const endParts = toUkPickerParts(dueDate);
   const date = startParts.date || endParts.date;
+  const hasEnd = Boolean(endParts.date);
 
-  const emit = (nextDate, nextStart, nextEnd) => {
+  const emit = (nextDate, nextStart, nextEnd, withEnd = hasEnd) => {
     if (!nextDate) return onChange({ startDate: "", dueDate: "" });
     const sp = { ...nextStart, date: nextDate };
-    const ep = { ...nextEnd, date: nextDate };
     if (!sp.hour) sp.hour = "9";
     if (!sp.minute) sp.minute = "00";
+    if (!withEnd) {
+      return onChange({ startDate: ukPickerPartsToISO(sp), dueDate: "" });
+    }
+    const ep = { ...nextEnd, date: nextDate };
     if (!ep.hour) ep.hour = "5";
     if (!ep.minute) ep.minute = "00";
     if (!ep.meridiem) ep.meridiem = "pm";
@@ -131,16 +140,26 @@ export default function DateTimeRangeField({
           />
         </div>
         <div>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">
-            End time
-          </p>
-          <TimeSelect
-            label="End time"
-            parts={endParts}
-            disabled={!date}
-            defaultHour="5"
-            onChange={(patch) => emit(date, startParts, { ...endParts, ...patch })}
-          />
+          <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              className="accent-[#F47C3C]"
+              checked={hasEnd}
+              disabled={!date}
+              onChange={(e) => emit(date, startParts, {}, e.target.checked)}
+            />
+            Set an end time{" "}
+            <span className="text-gray-300 normal-case tracking-normal">(optional)</span>
+          </label>
+          {hasEnd && (
+            <TimeSelect
+              label="End time"
+              parts={endParts}
+              disabled={!date}
+              defaultHour="5"
+              onChange={(patch) => emit(date, startParts, { ...endParts, ...patch })}
+            />
+          )}
         </div>
       </div>
 
@@ -148,7 +167,8 @@ export default function DateTimeRangeField({
         {date ? (
           <>
             <span className="text-[#0F253B] font-bold">
-              {fmtDate(startIso)} · {fmtTime(startIso)} – {fmtTime(endIso)}
+              {fmtDate(startIso)} · {fmtTime(startIso)}
+              {hasEnd ? ` – ${fmtTime(endIso)}` : ""}
             </span>{" "}
             · UK time
           </>

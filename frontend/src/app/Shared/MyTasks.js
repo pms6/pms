@@ -9,6 +9,11 @@ import {
 import { PageHeader } from "./ui";
 import api from "@/app/api/api";
 import TaskDetail from "./TaskDetail";
+import TaskNotificationBadge, {
+  NOTIFICATIONS_ARRIVED,
+  markTaskNotificationsRead,
+  clearUnread,
+} from "./TaskNotificationBadge";
 import {
   TASK_PRIORITIES, PRIORITY_TONE, STATUS_TONE, PRIORITY_DOT,
   fmtDateTime, fmtSchedule, displayName, dueLabel, isDueToday,
@@ -72,7 +77,6 @@ export default function MyTasks({ portalLabel = "your" }) {
   }, [scope]);
 
   useEffect(() => {
-    setLoading(true);
     (async () => { await loadData(); })();
   }, [loadData]);
 
@@ -97,6 +101,23 @@ export default function MyTasks({ portalLabel = "your" }) {
       qs ? `${window.location.pathname}?${qs}` : window.location.pathname
     );
   }, [loading, tasks]);
+
+  // The bell saw new notifications — reload so the right task gets a badge.
+  useEffect(() => {
+    const onArrived = () => loadData();
+    window.addEventListener(NOTIFICATIONS_ARRIVED, onArrived);
+    return () => window.removeEventListener(NOTIFICATIONS_ARRIVED, onArrived);
+  }, [loadData]);
+
+  // Opening a task reads its news: clear its badge and its rows in the bell.
+  useEffect(() => {
+    if (!detailId) return;
+    const t = tasks.find((x) => x._id === detailId);
+    if (!t?.unreadNotifications) return;
+    (async () => {
+      if (await markTaskNotificationsRead(t)) setTasks((list) => clearUnread(list, detailId));
+    })();
+  }, [detailId, tasks]);
 
   const needle = q.trim().toLowerCase();
   const list = tasks.filter((t) => {
@@ -143,6 +164,10 @@ export default function MyTasks({ portalLabel = "your" }) {
             <button
               key={s.key}
               onClick={() => {
+                // Show the loading state from the click itself, not from the
+                // effect that reloads — setState inside an effect body causes a
+                // cascading render (react-hooks/set-state-in-effect).
+                if (s.key !== scope) setLoading(true);
                 setScope(s.key);
                 setTab("all");
                 setDetailId(null);
@@ -237,7 +262,9 @@ export default function MyTasks({ portalLabel = "your" }) {
             <button
               key={t._id}
               onClick={() => setDetailId(t._id)}
-              className="bg-white border border-gray-100 rounded-2xl p-5 text-left hover:shadow-md hover:-translate-y-0.5 transition-all flex flex-col"
+              className={`bg-white border rounded-2xl p-5 text-left hover:shadow-md hover:-translate-y-0.5 transition-all flex flex-col ${
+                t.unreadNotifications ? "border-[#F47C3C] ring-1 ring-orange-100" : "border-gray-100"
+              }`}
             >
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${PRIORITY_TONE[t.priority]}`}>
@@ -251,6 +278,7 @@ export default function MyTasks({ portalLabel = "your" }) {
                     Mine
                   </span>
                 )}
+                <TaskNotificationBadge task={t} />
               </div>
 
               {/* The property leads the card — a member reads this list to

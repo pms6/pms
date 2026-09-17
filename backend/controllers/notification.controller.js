@@ -73,3 +73,24 @@ export const markAllNotificationsRead = async (req, res) => {
     return res.status(500).json({ success: false, message: "Failed to update notifications." });
   }
 };
+
+// @desc    Mark every one of mine about one task read — opening a task in a
+//          list is reading its news, so its badge and the bell clear together
+// @route   PATCH /api/v1/notifications/task/:taskId/read
+export const markTaskNotificationsRead = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.taskId)) {
+      return res.status(400).json({ success: false, message: "Invalid task id." });
+    }
+
+    const result = await Notification.updateMany(
+      { userId: req.user._id, relatedType: "Task", relatedId: req.params.taskId, read: false },
+      { $set: { read: true, readAt: new Date() } }
+    );
+
+    return res.status(200).json({ success: true, updated: result.modifiedCount || 0 });
+  } catch (error) {
+    console.error("Mark Task Notifications Read Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update notifications." });
+  }
+};

@@ -144,7 +144,6 @@ const EMPTY = {
   postcode: "",
   zone: "",
   bank: "",
-  exTenant: "",
   ownerName: "",
   description: "",
   rentalType: "HMO",
@@ -200,7 +199,6 @@ const fromApi = (property) => ({
   postcode: property.address?.postcode || "",
   zone: property.zone || "",
   bank: property.bank || "",
-  exTenant: property.exTenant || "",
   ownerName: property.ownerName || "",
   description: property.description || "",
   rentalType: rentalTypeLabel(property.rentalType),
@@ -609,7 +607,6 @@ export default function PropertyForm({ basePath = "/admin/properties" }) {
         // one in the form actually clears it on the property.
         zone: form.zone.trim(),
         bank: form.bank.trim(),
-        exTenant: form.exTenant.trim(),
         // The Property schema stores location as plain { lat, lng }.
         ...(form.coordinates ? { location: form.coordinates } : {}),
         description: form.description.trim(),
@@ -805,7 +802,7 @@ export default function PropertyForm({ basePath = "/admin/properties" }) {
           </div>
 
           <div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <TextField
                 label="Zone"
                 value={form.zone}
@@ -818,17 +815,10 @@ export default function PropertyForm({ basePath = "/admin/properties" }) {
                 onChange={(e) => setField("bank", e.target.value)}
                 placeholder="e.g., Barclays — Melrose"
               />
-              <TextField
-                label="Ex-Tenant"
-                value={form.exTenant}
-                onChange={(e) => setField("exTenant", e.target.value)}
-                placeholder="e.g., J. Smith"
-              />
             </div>
             <p className="text-[11px] font-medium text-gray-500 mt-1.5 leading-5">
-              These three show in the Available Rooms list. Ex-Tenant is only
-              used for rooms with no tenancy on record — where there is one, the
-              list names that tenant instead.
+              Both show in the Available Rooms list. Ex-tenants are now added
+              on each room, not on the property.
             </p>
           </div>
 

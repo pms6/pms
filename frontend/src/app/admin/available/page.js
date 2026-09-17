@@ -75,6 +75,7 @@ export default function AvailableRoomsPage() {
         r.propertyName?.toLowerCase().includes(q) ||
         r.area?.toLowerCase().includes(q) ||
         r.exTenant?.toLowerCase().includes(q) ||
+        r.exTenants?.some((t) => t.name?.toLowerCase().includes(q) || t.email?.toLowerCase().includes(q)) ||
         r.status?.toLowerCase().includes(q)
     );
   };
@@ -125,7 +126,17 @@ export default function AvailableRoomsPage() {
                   {row.price}
                 </td>
                 <td className="px-5 py-4 text-gray-600">{row.deposit}</td>
-                <td className="px-5 py-4 text-gray-600">{row.exTenant}</td>
+                <td className="px-5 py-4 text-gray-600">
+                  <p>{row.exTenant}</p>
+                  {row.exTenants?.length > 1 && (
+                    <p className="mt-0.5 text-[11px] text-gray-400">
+                      Also: {row.exTenants
+                        .filter((t) => (t.name || t.email) && (t.name || t.email) !== row.exTenant)
+                        .map((t) => t.name || t.email)
+                        .join(", ")}
+                    </p>
+                  )}
+                </td>
                 <td className="px-5 py-4 text-gray-600">{row.occupancy}</td>
                 <td className="px-5 py-4 text-gray-600">{row.bank || "—"}</td>
                 <td className="px-5 py-4">

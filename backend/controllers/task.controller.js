@@ -88,10 +88,15 @@ const normalizeStatus = (status) => (status === "Completed" ? "Done" : status);
  * so a task that runs past its deadline while nobody touches it still reports
  * correctly. Done and Cancelled are terminal and never overdue.
  */
+// The end time is optional, so a task scheduled with only a date and a start
+// time falls due on that start date.
+const dueAt = (task) => task.dueDate || task.startDate || null;
+
 export const effectiveStatus = (task) => {
   const s = normalizeStatus(task.status);
   if (s === "Done" || s === "Cancelled") return s;
-  if (task.dueDate && new Date(task.dueDate) < startOfToday()) return "Overdue";
+  const deadline = dueAt(task);
+  if (deadline && new Date(deadline) < startOfToday()) return "Overdue";
   // A stored "Overdue" with no due date in the past has nothing backing it.
   return s === "Overdue" ? "In Progress" : s;
 };
@@ -131,7 +136,7 @@ const decorate = (task, req) => {
     ...task,
     status: normalizeStatus(task.status),
     effectiveStatus: effectiveStatus(task),
-    daysUntilDue: daysUntilDue(task.dueDate),
+    daysUntilDue: daysUntilDue(dueAt(task)),
     progressCount: updates.length,
     commentCount: comments.length,
     lastUpdate: updates.length ? updates[updates.length - 1] : null,
@@ -639,11 +644,12 @@ export const getTasks = async (req, res) => {
   try {
     if (denyNonStaff(req, res)) return;
 
-    const { status, priority, assignee, search, dueToday } = req.query;
+    const { status, priority, assignee, property, search, dueToday } = req.query;
     const filter = { organizationId: req.user.organizationId, isDeleted: false };
 
     if (priority && TASK_PRIORITIES.includes(priority)) filter.priority = priority;
     if (assignee && mongoose.isValidObjectId(assignee)) filter["assignees.userId"] = assignee;
+    if (property && mongoose.isValidObjectId(property)) filter.propertyId = property;
     if (search) {
       filter.$or = [
         { title: { $regex: search, $options: "i" } },
@@ -682,11 +688,49 @@ export const getTasks = async (req, res) => {
       { total: 0, mine: 0, dueToday: 0 }
     );
 
+    data = await withUnreadNotifications(data, req);
+
     return res.status(200).json({ success: true, total: data.length, data, stats });
   } catch (error) {
     console.error("Get Tasks Error:", error);
     return res.status(500).json({ success: false, message: "Failed to load tasks." });
   }
+};
+
+/**
+ * Attach the viewer's own unread in-app notifications to each task, so a list
+ * can badge exactly which tasks have news for this person (a new assignment,
+ * comment or update) instead of leaving them to match bell entries by title.
+ *
+ * `unreadNotifications` is the count; `unreadTypes` the distinct kinds, newest
+ * first. Read with find() rather than aggregate() so Mongoose casts the ids.
+ */
+const withUnreadNotifications = async (tasks, req) => {
+  if (!tasks.length) return tasks;
+  const rows = await Notification.find({
+    organizationId: req.user.organizationId,
+    userId: req.user._id,
+    relatedType: "Task",
+    relatedId: { $in: tasks.map((t) => t._id) },
+    read: false,
+  })
+    .select("relatedId type")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const byTask = new Map();
+  for (const n of rows) {
+    const key = String(n.relatedId);
+    const entry = byTask.get(key) || { count: 0, types: [] };
+    entry.count++;
+    if (!entry.types.includes(n.type)) entry.types.push(n.type);
+    byTask.set(key, entry);
+  }
+
+  return tasks.map((t) => {
+    const entry = byTask.get(String(t._id));
+    return { ...t, unreadNotifications: entry?.count || 0, unreadTypes: entry?.types || [] };
+  });
 };
 
 // ===========================================================================
@@ -705,7 +749,10 @@ export const getMyTasks = async (req, res) => {
       .sort({ dueDate: 1, createdAt: -1 })
       .lean();
 
-    const data = tasks.map((t) => decorate(t, req));
+    const data = await withUnreadNotifications(
+      tasks.map((t) => decorate(t, req)),
+      req
+    );
 
     // A compact summary so the member view can show their own counts without
     // calling the admin-only stats endpoint.
@@ -792,11 +839,15 @@ export const getTaskStats = async (req, res) => {
       )
       .sort((a, b) => a.daysUntilDue - b.daysUntilDue)
       .slice(0, 8);
+    const upcomingWithUnread = await withUnreadNotifications(upcoming, req);
 
     // Most recently touched, by the last progress entry or the task itself.
     const lastTouched = (t) =>
       new Date(t.lastUpdate?.createdAt || t.updatedAt || t.createdAt).getTime();
-    const recent = [...decorated].sort((a, b) => lastTouched(b) - lastTouched(a)).slice(0, 8);
+    const recent = await withUnreadNotifications(
+      [...decorated].sort((a, b) => lastTouched(b) - lastTouched(a)).slice(0, 8),
+      req
+    );
 
     return res.status(200).json({
       success: true,
@@ -808,7 +859,7 @@ export const getTaskStats = async (req, res) => {
         byMember: [...byMember.values()].sort((a, b) => b.total - a.total),
         completionRate: total ? Math.round((completed / total) * 100) : 0,
       },
-      upcoming,
+      upcoming: upcomingWithUnread,
       recent,
     });
   } catch (error) {

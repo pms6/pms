@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, X, UploadCloud, Loader2, Check, Star, Trash2 } from "lucide-react";
+import { ArrowLeft, X, UploadCloud, Loader2, Check, Star, Trash2, Plus } from "lucide-react";
 import { PageHeader } from "../Shared/ui";
 import uploadToCloudinary from "@/app/utils/uploadToCloudinary";
 import api from "@/app/api/api";
@@ -129,6 +129,7 @@ const EMPTY = {
   billsIncluded: { gas: false, electricity: false, water: false, internet: false },
   wifi: null,
   notes: "",
+  exTenants: [],
   images: [],
   // Preferences for new flatmate
   prefSmoking: "NO_PREFERENCE",
@@ -141,6 +142,10 @@ const EMPTY = {
   prefCouples: false,
   prefVegetarian: false,
 };
+
+// One blank ex-tenant row. Every field is optional.
+const EMPTY_EX_TENANT = { name: "", email: "", joinDate: "", endDate: "" };
+const toInputDate = (d) => (d ? new Date(d).toISOString().split("T")[0] : "");
 
 const isPristine = (form) => JSON.stringify(form) === JSON.stringify(EMPTY);
 
@@ -179,6 +184,12 @@ const fromApi = (room) => ({
   billsIncluded: { ...EMPTY.billsIncluded, ...(room.billsIncluded || {}) },
   wifi: room.billsIncluded?.wifi ?? null,
   notes: room.notes || "",
+  exTenants: (room.exTenants || []).map((t) => ({
+    name: t.name || "",
+    email: t.email || "",
+    joinDate: toInputDate(t.joinDate),
+    endDate: toInputDate(t.endDate),
+  })),
   images: room.images || [],
   prefSmoking: room.preferences?.smoking || "NO_PREFERENCE",
   prefGender: room.preferences?.gender || "ANY",
@@ -246,6 +257,16 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
 
   const [form, setForm] = useState(EMPTY);
   const setField = useCallback((key, value) => setForm((f) => ({ ...f, [key]: value })), []);
+
+  const addExTenant = () =>
+    setForm((f) => ({ ...f, exTenants: [...(f.exTenants || []), { ...EMPTY_EX_TENANT }] }));
+  const removeExTenant = (index) =>
+    setForm((f) => ({ ...f, exTenants: f.exTenants.filter((_, i) => i !== index) }));
+  const setExTenant = (index, key, value) =>
+    setForm((f) => ({
+      ...f,
+      exTenants: f.exTenants.map((t, i) => (i === index ? { ...t, [key]: value } : t)),
+    }));
   const setBill = (key, value) =>
     setForm((f) => ({ ...f, billsIncluded: { ...f.billsIncluded, [key]: value } }));
 
@@ -408,6 +429,13 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
       setError("Maximum age cannot be lower than the minimum age");
       return;
     }
+    const badDates = form.exTenants.findIndex(
+      (t) => t.joinDate && t.endDate && t.endDate < t.joinDate
+    );
+    if (badDates !== -1) {
+      setError(`Ex-tenant ${badDates + 1}: end date cannot be before the join date`);
+      return;
+    }
 
     setSaving(true);
     try {
@@ -452,6 +480,15 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
           vegetarianPreferred: form.prefVegetarian,
         },
         notes: form.notes.trim() || undefined,
+        // Always sent (even empty) so removing every ex-tenant clears them.
+        exTenants: form.exTenants
+          .map((t) => ({
+            name: t.name.trim(),
+            email: t.email.trim(),
+            joinDate: t.joinDate || null,
+            endDate: t.endDate || null,
+          }))
+          .filter((t) => t.name || t.email || t.joinDate || t.endDate),
         images: form.images,
       };
 
@@ -700,6 +737,58 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
           <Field label="Room Notes">
             <textarea className={`${FIELD} min-h-[90px] resize-y`} value={form.notes} onChange={(e) => setField("notes", e.target.value)} placeholder="Add room features, access notes, or viewing instructions" />
           </Field>
+        </Panel>
+
+        <Panel title="Ex-Tenants">
+          <p className="text-[11px] text-gray-400 font-medium -mt-2">
+            Previous tenants of this room. Everything here is optional.
+          </p>
+
+          {form.exTenants.length === 0 && (
+            <p className="text-xs text-gray-400 font-medium bg-gray-50 border border-gray-100 rounded-xl p-3">
+              No ex-tenants added for this room.
+            </p>
+          )}
+
+          {form.exTenants.map((t, i) => (
+            <div key={i} className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                  Ex-Tenant {i + 1}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => removeExTenant(i)}
+                  className="flex items-center gap-1 text-[11px] font-bold text-gray-400 hover:text-red-600"
+                  title="Remove ex-tenant"
+                >
+                  <Trash2 size={13} /> Remove
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Name">
+                  <input className={FIELD} value={t.name} onChange={(e) => setExTenant(i, "name", e.target.value)} placeholder="e.g., John Smith" />
+                </Field>
+                <Field label="Email">
+                  <input type="email" className={FIELD} value={t.email} onChange={(e) => setExTenant(i, "email", e.target.value)} placeholder="e.g., john@example.com" />
+                </Field>
+                <Field label="Join date">
+                  <input type="date" className={FIELD} value={t.joinDate} max={t.endDate || undefined} onChange={(e) => setExTenant(i, "joinDate", e.target.value)} />
+                </Field>
+                <Field label="End date">
+                  <input type="date" className={FIELD} value={t.endDate} min={t.joinDate || undefined} onChange={(e) => setExTenant(i, "endDate", e.target.value)} />
+                </Field>
+              </div>
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={addExTenant}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-dashed border-gray-200 hover:border-[#F47C3C] hover:text-[#F47C3C] text-[#0F253B] text-xs font-bold rounded-xl transition-all"
+          >
+            <Plus size={14} /> {form.exTenants.length ? "Add another ex-tenant" : "Add ex-tenant"}
+          </button>
         </Panel>
 
         <Panel title="Preferences for new flatmate">

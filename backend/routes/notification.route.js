@@ -4,6 +4,7 @@ import {
   listNotifications,
   markNotificationRead,
   markAllNotificationsRead,
+  markTaskNotificationsRead,
 } from "../controllers/notification.controller.js";
 import { protect, staffOnly } from "../middleware/auth.js";
 
@@ -16,6 +17,7 @@ router.use(staffOnly);
 
 router.get("/", listNotifications);
 router.patch("/read-all", markAllNotificationsRead);
+router.patch("/task/:taskId/read", markTaskNotificationsRead);
 router.patch("/:id/read", markNotificationRead);
 
 export default router;

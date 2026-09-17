@@ -241,7 +241,6 @@ export const updateProperty = async (req, res) => {
       location,
       zone,
       bank,
-      exTenant,
       description,
       transport,
       livingRoom,
@@ -295,7 +294,6 @@ export const updateProperty = async (req, res) => {
     // `!== undefined` rather than truthiness.
     if (zone !== undefined) property.zone = zone;
     if (bank !== undefined) property.bank = bank;
-    if (exTenant !== undefined) property.exTenant = exTenant;
     if (description !== undefined) property.description = description;
     if (transport !== undefined) property.transport = transport;
     if (livingRoom !== undefined) property.livingRoom = livingRoom;

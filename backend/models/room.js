@@ -352,6 +352,23 @@ const roomSchema = new mongoose.Schema(
     },
 
     // ============================
+    // Ex-Tenants
+    //
+    // People who used to live in THIS room. Kept per room rather than on the
+    // property — an HMO's rooms each have their own history. Every field is
+    // optional; the office often only knows a name or an email.
+    // ============================
+
+    exTenants: [
+      {
+        name: { type: String, trim: true, default: "" },
+        email: { type: String, trim: true, lowercase: true, default: "" },
+        joinDate: { type: Date, default: null },
+        endDate: { type: Date, default: null },
+      },
+    ],
+
+    // ============================
     // Internal
     // ============================
 

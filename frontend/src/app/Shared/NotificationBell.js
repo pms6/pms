@@ -7,6 +7,7 @@ import { toast } from "react-toastify";
 import api from "../api/api";
 import { useAuth } from "../Context/AuthContext";
 import { getEffectiveRole } from "../utils/roles";
+import { NOTIFICATIONS_ARRIVED, NOTIFICATIONS_READ } from "./TaskNotificationBadge";
 
 /* ---------------------------------------------------------------------------
  * The bell every staff portal shows in its header — the in-app half of the
@@ -72,6 +73,8 @@ export default function NotificationBell() {
         for (const n of fresh.slice(0, 3)) {
           toast.info(n.title, { autoClose: 6000 });
         }
+        // Let an open task list badge the tasks these are about.
+        if (fresh.length) window.dispatchEvent(new Event(NOTIFICATIONS_ARRIVED));
       }
       seenIds.current = new Set(rows.map((n) => n._id));
 
@@ -91,9 +94,13 @@ export default function NotificationBell() {
       if (document.visibilityState === "visible") load();
     };
     document.addEventListener("visibilitychange", onVisible);
+    // A task list cleared a task's notifications by opening it — refresh the
+    // count now rather than on the next poll.
+    window.addEventListener(NOTIFICATIONS_READ, load);
     return () => {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener(NOTIFICATIONS_READ, load);
     };
   }, [load]);
 
