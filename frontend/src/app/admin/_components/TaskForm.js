@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import { X, Loader2, Paperclip } from "lucide-react";
-import { uploadFileToCloudinary } from "../../utils/uploadToCloudinary";
+import { uploadAnyFileToCloudinary } from "../../utils/uploadToCloudinary";
 import {
   TASK_PRIORITIES,
   SETTABLE_STATUSES,
@@ -99,7 +99,9 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
         setUploading(true);
         uploaded = await Promise.all(
           files.map(async (f) => {
-            const up = await uploadFileToCloudinary(f);
+            // Any file type — a task brief is as often a spreadsheet or a CSV
+            // export as it is a PDF, and the comment composer accepts the same.
+            const up = await uploadAnyFileToCloudinary(f);
             return { name: up.name || f.name, url: up.url, publicId: up.publicId || "" };
           })
         );

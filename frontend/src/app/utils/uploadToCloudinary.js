@@ -189,6 +189,26 @@ export const uploadFileToCloudinary = async (file) => {
 // a larger limit here would only turn a clear message into a failed request.
 export const ANY_FILE_MAX_SIZE = 10 * 1024 * 1024;
 
+/**
+ * The ceiling that actually applies to one file.
+ *
+ * ANY_FILE_MAX_SIZE is the *raw* ceiling, and for a while it was applied to
+ * everything — which quietly rejected files Cloudinary would have taken, since
+ * `auto` routes an image, a PDF or a video away from the raw pipeline and into
+ * a tier with a far higher limit. A 30MB phone video of a job is the usual
+ * casualty: refused locally, never attempted. Each kind now gets its own
+ * ceiling, so the only files turned away are ones the upload would genuinely
+ * fail on.
+ */
+const limitForFile = (file) => {
+  const type = file.type || "";
+  const name = file.name || "";
+  if (type.startsWith("video/")) return MEDIA_VIDEO_MAX_SIZE;
+  if (type === "application/pdf" || /\.pdf$/i.test(name)) return MEDIA_PDF_MAX_SIZE;
+  if (type.startsWith("image/")) return MEDIA_IMAGE_MAX_SIZE;
+  return ANY_FILE_MAX_SIZE;
+};
+
 /** "2.4 MB" / "812 KB" — for the size beside an attachment. */
 export const formatBytes = (bytes) => {
   const n = Number(bytes);
@@ -210,9 +230,10 @@ export const uploadAnyFileToCloudinary = async (file) => {
   if (file.size === 0) {
     throw new Error(`"${file.name}" is empty`);
   }
-  if (file.size > ANY_FILE_MAX_SIZE) {
+  const limit = limitForFile(file);
+  if (file.size > limit) {
     throw new Error(
-      `"${file.name}" is ${formatBytes(file.size)} — the limit is ${formatBytes(ANY_FILE_MAX_SIZE)}`
+      `"${file.name}" is ${formatBytes(file.size)} — the limit is ${formatBytes(limit)}`
     );
   }
 

@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 import { X, ChevronLeft, ChevronRight, Paperclip, Download } from "lucide-react";
+import { downloadUrlFor } from "@/app/utils/uploadToCloudinary";
+import { fileKind } from "./fileType";
 
 const IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|svg|heic|heif)(\?.*)?$/i;
 
@@ -65,8 +67,17 @@ export default function AttachmentLightbox({ items, index, onClose, onNavigate }
           <div className="bg-white rounded-2xl p-10 flex flex-col items-center gap-3 max-w-sm text-center">
             <Paperclip size={32} className="text-[#F47C3C]" />
             <p className="font-bold text-[#0F253B] break-all">{item.name || "Attachment"}</p>
+            {/* A PDF is worth previewing in a tab, so it keeps its raw URL.
+                Anything else — a spreadsheet, a CSV, a .msg — is stored as a
+                Cloudinary `raw` asset under a random public_id: opened
+                directly it either dumps as text in the tab or saves under a
+                meaningless name, so it goes through fl_attachment instead. */}
             <a
-              href={item.url}
+              href={
+                fileKind(item.url, item.name) === "pdf"
+                  ? item.url
+                  : downloadUrlFor(item.url, item.name)
+              }
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 px-4 py-2 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl text-sm transition-all"

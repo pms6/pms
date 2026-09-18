@@ -6,7 +6,7 @@ import {
   MessageSquare, FileCheck2, History, Lock, ListChecks, Building2,
 } from "lucide-react";
 import api from "@/app/api/api";
-import { uploadFileToCloudinary } from "@/app/utils/uploadToCloudinary";
+import { uploadAnyFileToCloudinary } from "@/app/utils/uploadToCloudinary";
 import {
   PRIORITY_TONE, STATUS_TONE, SETTABLE_STATUSES,
   fmtDate, fmtDateTime, fmtSchedule, displayName, dueLabel, FIELD, LABEL,
@@ -112,9 +112,13 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
       let attachments = [];
       if (files.length) {
         setUploading(true);
+        // uploadAnyFileToCloudinary, not the PDF/Word/image one: what gets
+        // attached to a task comment is whatever the job produced — a
+        // spreadsheet of readings, a CSV export, a .msg from a contractor —
+        // and rejecting those just pushes the file back into email.
         attachments = await Promise.all(
           files.map(async (f) => {
-            const up = await uploadFileToCloudinary(f);
+            const up = await uploadAnyFileToCloudinary(f);
             return { name: up.name || f.name, url: up.url, publicId: up.publicId || "" };
           })
         );
@@ -135,8 +139,13 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
       setIsReport(false);
       onChanged?.(data.data);
     } catch (err) {
+      // An upload failure throws a plain Error with the reason (too large,
+      // empty file, preset rejected it) and no `response` — without err.message
+      // in the chain it collapsed into a bare "Failed to add the comment." and
+      // there was no way to tell which file was the problem.
       setError(
         err.response?.data?.message ||
+          err.message ||
           (commenting ? "Failed to add the comment." : "Failed to record the update.")
       );
     } finally {
