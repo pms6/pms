@@ -17,7 +17,7 @@
 // treat the link itself as the access control.
 
 import Property from "../models/Property.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 import Owner from "../models/Owner.js";
 import Organization from "../models/Organization.js";
 import User from "../models/User.js";

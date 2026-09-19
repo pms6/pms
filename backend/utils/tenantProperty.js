@@ -10,7 +10,7 @@
 
 import Tenancy from "../models/Tenancy.js";
 import Property from "../models/Property.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 
 export async function resolveTenantProperty(user) {
   const email = (user?.email || "").toLowerCase();

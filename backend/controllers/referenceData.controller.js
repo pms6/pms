@@ -7,7 +7,7 @@
 import ReferenceData, { REFERENCE_STATUS } from "../models/ReferenceData.js";
 import CheckIn from "../models/CheckIn.js";
 import Property from "../models/Property.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 
 const EDITABLE_KEYS = [
   "propertyId",

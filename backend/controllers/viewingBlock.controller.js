@@ -6,7 +6,7 @@
 // viewing.controller.js calls.
 import ViewingBlock from "../models/ViewingBlock.js";
 import Property from "../models/Property.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/; // YYYY-MM-DD
 

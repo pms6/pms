@@ -9,7 +9,7 @@
 // still exists (both fields are unique), throwing a duplicate-key error.
 
 import Property from "../models/Property.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 
 /** Next property code, e.g. PROP-000001. */
 export const generatePropertyCode = async () => {

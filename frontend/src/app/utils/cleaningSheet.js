@@ -12,7 +12,7 @@
 export const SHEET_COLUMNS = ["Property", "Category", "Date", "Day", "Status"];
 
 // Roughly the proportions of the original — Property is the wide one.
-const COLUMN_WIDTHS = [38, 22, 14, 14, 12, 10, 12, 40];
+const COLUMN_WIDTHS = [38, 22, 14, 14, 12, 16, 14, 10, 12, 10, 40];
 
 // The sheet writes 20/05/2026.
 export const fmtDate = (value) => {
@@ -87,7 +87,7 @@ export const exportCleaningSheet = async (rows = [], { extended = true } = {}) =
   const XLSX = await import("xlsx");
 
   const columns = extended
-    ? [...SHEET_COLUMNS, "Call", "Message", "Notes"]
+    ? [...SHEET_COLUMNS, "Room", "Next due", "Call", "Message", "Email", "Notes"]
     : SHEET_COLUMNS;
   const aoa = [["Cleaning Messages Schedule"], []];
 
@@ -103,7 +103,14 @@ export const exportCleaningSheet = async (rows = [], { extended = true } = {}) =
         statusText(row.status),
       ];
       if (extended)
-        cells.push(yesNo(row.callMade), yesNo(row.messageSent), row.notes || "");
+        cells.push(
+          row.room || "",
+          fmtDate(row.nextDueDate),
+          yesNo(row.callMade),
+          yesNo(row.messageSent),
+          yesNo(row.emailSent),
+          row.notes || ""
+        );
       aoa.push(cells);
     }
     aoa.push([]);

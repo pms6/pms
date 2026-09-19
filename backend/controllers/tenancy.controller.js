@@ -5,7 +5,7 @@ import Tenant from "../models/Tenant.js";
 import Organization from "../models/Organization.js";
 import Onboarding from "../models/Onboarding.js";
 import Property from "../models/Property.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 import mongoose from "mongoose";
 import { stayDuration } from "../utils/duration.js";
 

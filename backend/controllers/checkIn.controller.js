@@ -6,7 +6,7 @@
 
 import CheckIn from "../models/CheckIn.js";
 import Property from "../models/Property.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 
 /**
  * Whitelist of fields a client may set. Anything else on the body — including

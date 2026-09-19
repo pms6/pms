@@ -56,6 +56,26 @@ const cleaningFileSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// One contact made about a visit — a message, an email or a call — kept as a
+// running history on the record so anyone opening it can see who was chased,
+// how, and what was said.
+export const COMMUNICATION_CHANNELS = ["message", "email", "call"];
+
+const communicationSchema = new mongoose.Schema(
+  {
+    channel: { type: String, enum: COMMUNICATION_CHANNELS, required: true },
+    // The phone number or email address it went to.
+    to: { type: String, trim: true, default: "" },
+    subject: { type: String, trim: true, default: "" },
+    message: { type: String, trim: true, default: "" },
+    note: { type: String, trim: true, default: "" },
+    at: { type: Date, default: Date.now },
+    by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    byName: { type: String, trim: true, default: "" },
+  },
+  { _id: true }
+);
+
 const cleaningScheduleSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -81,6 +101,14 @@ const cleaningScheduleSchema = new mongoose.Schema(
     },
     property: { type: String, trim: true, required: true },
 
+    // Self inspections are done room by room. Optional — every other category,
+    // and inspections entered before rooms were tracked, are property-level.
+    roomId: { type: mongoose.Schema.Types.ObjectId, ref: "Room", default: null },
+    room: { type: String, trim: true, default: "" },
+
+    // Written by the automatic schedule rather than entered by hand.
+    auto: { type: Boolean, default: false },
+
     // Which of the three jobs this row is. Defaulted rather than required so
     // the thousands of rows already on the sheet stay valid and simply read as
     // the category they were nearly all written for; the form always sends one.
@@ -105,6 +133,16 @@ const cleaningScheduleSchema = new mongoose.Schema(
     // or both. Just flags: which channel was used, nothing more.
     messageSent: { type: Boolean, default: false },
     callMade: { type: Boolean, default: false },
+    emailSent: { type: Boolean, default: false },
+
+    // The full record behind those three flags.
+    communications: { type: [communicationSchema], default: [] },
+
+    // When this task is next due, worked out from its category (see
+    // utils/cleaningPlan.js) — a month on for fridge and washing machine, three
+    // for a self inspection, one turn of the portfolio for a rotation clean.
+    nextDueDate: { type: Date, default: null },
+    completedAt: { type: Date, default: null },
 
     // What goes out to the cleaner, and anything the office needs to remember.
     // `message` is the cleaning message for this visit — the sheet is named
@@ -130,6 +168,12 @@ const cleaningScheduleSchema = new mongoose.Schema(
 );
 
 cleaningScheduleSchema.index({ organizationId: 1, isDeleted: 1, date: 1 });
+// Keeps the automatic schedule from writing the same visit twice if it is run
+// twice at once. Hand-entered rows are exempt.
+cleaningScheduleSchema.index(
+  { organizationId: 1, propertyId: 1, roomId: 1, category: 1, date: 1 },
+  { unique: true, partialFilterExpression: { auto: true, isDeleted: false } }
+);
 // The board is read one category at a time, filtered to a month.
 cleaningScheduleSchema.index({ organizationId: 1, category: 1, isDeleted: 1, date: 1 });
 

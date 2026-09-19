@@ -4,7 +4,7 @@ import Lead from "../models/Lead.js";
 import User from "../models/User.js";
 import Tenant from "../models/Tenant.js";
 import Tenancy from "../models/Tenancy.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 import Organization from "../models/Organization.js";
 import bcrypt from "bcrypt";
 import env from "../config/env.js";

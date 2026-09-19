@@ -7,7 +7,7 @@
 // except createEnquiry, which DOES require a signed-in user (see routes).
 
 import Property from "../models/Property.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 import Organization from "../models/Organization.js";
 import Lead from "../models/Lead.js";
 import Onboarding from "../models/Onboarding.js";

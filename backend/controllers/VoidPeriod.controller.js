@@ -1,5 +1,5 @@
 import VoidPeriod from "../models/voidPeriod.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 import { calculateVoidMetrics, toMoney } from "../utils/voidMath.js";
 
 // Re-exported so anything already importing it from here keeps working; the

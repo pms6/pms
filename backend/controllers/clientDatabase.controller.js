@@ -15,7 +15,7 @@
 // the client, and duplicating them here would just let them go stale.
 
 import Property from "../models/Property.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 import Client, { CLIENT_STATUSES } from "../models/Client.js";
 import { contractDuration, stayDuration, genderAndNationality } from "../utils/duration.js";
 

@@ -17,6 +17,10 @@ import {
   Refrigerator,
   WashingMachine,
   ClipboardCheck,
+  Mail,
+  Phone,
+  MessageSquare,
+  Send,
 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import { MediaUploader, MediaViewerModal, AttachmentRow } from "./MediaAttachments";
@@ -41,7 +45,50 @@ import { guardModalClose } from "@/app/Shared/modalGuard";
 
 export const CLEANING_STATUSES = ["PENDING", "DONE"];
 const STATUS_LABEL = { PENDING: "Pending", DONE: "Done" };
-const STATUS_TONE = { PENDING: "amber", DONE: "green" };
+
+// Where a task stands against today's date. Derived, never stored — a stored
+// "overdue" would be wrong by tomorrow morning. Done wins over everything;
+// otherwise it is the date that decides.
+export const TASK_STATES = ["UPCOMING", "DUE", "OVERDUE", "COMPLETED"];
+const STATE_LABEL = {
+  UPCOMING: "Upcoming",
+  DUE: "Due today",
+  OVERDUE: "Overdue",
+  COMPLETED: "Completed",
+};
+const STATE_TONE = { UPCOMING: "blue", DUE: "amber", OVERDUE: "red", COMPLETED: "green" };
+
+// The API stores UTC-midnight dates, so the day is read from the ISO string;
+// today is the reader's own calendar day.
+const todayKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+const taskState = (row, today = todayKey()) => {
+  if (row.status === "DONE") return "COMPLETED";
+  const day = row.date ? new Date(row.date).toISOString().slice(0, 10) : "";
+  if (!day) return "UPCOMING";
+  if (day < today) return "OVERDUE";
+  if (day === today) return "DUE";
+  return "UPCOMING";
+};
+
+const communicationsOf = (row) =>
+  Array.isArray(row?.communications) ? row.communications : [];
+
+const CHANNELS = {
+  message: { label: "Message", icon: MessageSquare, flag: "messageSent" },
+  email: { label: "Email", icon: Mail, flag: "emailSent" },
+  call: { label: "Call", icon: Phone, flag: "callMade" },
+};
+
+const fmtDateTime = (v) => {
+  const d = new Date(v);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+};
 
 // The sections the board is split into. Each tile across the top is one of
 // these, read on its own — the way the compliance register is read one
@@ -94,6 +141,7 @@ const filesOf = (row) => (Array.isArray(row?.files) ? row.files : []);
 const matchesSearch = (row, needle) =>
   [
     row.property,
+    row.room,
     categoryOf(row),
     row.notes,
     row.inspectorName,
@@ -128,6 +176,7 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
     status: initial?.status || "PENDING",
     messageSent: Boolean(initial?.messageSent),
     callMade: Boolean(initial?.callMade),
+    emailSent: Boolean(initial?.emailSent),
     notes: initial?.notes || "",
     inspectorName: initial?.inspectorName || "",
   });
@@ -171,6 +220,7 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
         status: form.status,
         messageSent: form.messageSent,
         callMade: form.callMade,
+        emailSent: form.emailSent,
         notes: form.notes.trim(),
         ...(form.category === NAMED_CATEGORY
           ? { inspectorName: form.inspectorName.trim() }
@@ -261,7 +311,7 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
 
           {/* Call and Message are tracked separately — each is its own labelled
               tick, styled like the Done toggle. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className={LABEL}>Call</label>
               <button
@@ -298,6 +348,25 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
                   <Circle size={15} className="text-gray-300" />
                 )}
                 Message
+              </button>
+            </div>
+            <div>
+              <label className={LABEL}>Email</label>
+              <button
+                type="button"
+                onClick={toggle("emailSent")}
+                className={`w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-bold transition-all ${
+                  form.emailSent
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                    : "bg-gray-50 border-gray-100 text-gray-500 hover:bg-gray-100"
+                }`}
+              >
+                {form.emailSent ? (
+                  <CheckCircle2 size={15} className="text-emerald-600" />
+                ) : (
+                  <Circle size={15} className="text-gray-300" />
+                )}
+                Email
               </button>
             </div>
           </div>
@@ -342,7 +411,7 @@ function ViewRow({ label, children }) {
   );
 }
 
-function ViewModal({ row, onClose, onEdit, onViewFiles }) {
+function ViewModal({ row, onClose, onEdit, onViewFiles, onContact }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
@@ -354,17 +423,19 @@ function ViewModal({ row, onClose, onEdit, onViewFiles }) {
             <h3 className="text-xl font-bold text-[#0F253B] break-words">{row.property}</h3>
             <p className="text-xs text-gray-400 font-medium">
               {fmtDate(row.date)} · {dayName(row.date)}
+              {row.room ? ` · ${row.room}` : ""}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Badge tone={CATEGORY_TONE[categoryOf(row)] || "gray"}>{categoryOf(row)}</Badge>
-            <Badge tone={STATUS_TONE[row.status] || "gray"}>{STATUS_LABEL[row.status] || row.status}</Badge>
+            <Badge tone={STATE_TONE[taskState(row)]}>{STATE_LABEL[taskState(row)]}</Badge>
             <button onClick={onClose} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <ViewRow label="Month">{monthLabel(monthKey(row.date))}</ViewRow>
+          <ViewRow label="Next due">{fmtDate(row.nextDueDate)}</ViewRow>
           {categoryOf(row) === NAMED_CATEGORY && (
             <ViewRow label="Name">{row.inspectorName}</ViewRow>
           )}
@@ -388,7 +459,24 @@ function ViewModal({ row, onClose, onEdit, onViewFiles }) {
               Message
             </span>
           </ViewRow>
+          <ViewRow label="Email">
+            <span className="flex items-center gap-1.5">
+              {row.emailSent ? (
+                <CheckCircle2 size={15} className="text-emerald-600" />
+              ) : (
+                <Circle size={15} className="text-gray-300" />
+              )}
+              Email
+            </span>
+          </ViewRow>
         </div>
+
+        {communicationsOf(row).length > 0 && (
+          <div className="mt-5">
+            <p className={LABEL}>Communication history</p>
+            <CommHistory items={communicationsOf(row)} />
+          </div>
+        )}
 
         {row.notes && (
           <div className="mt-5">
@@ -417,6 +505,12 @@ function ViewModal({ row, onClose, onEdit, onViewFiles }) {
 
         <div className="mt-6 flex gap-3">
           <button
+            onClick={() => onContact(row)}
+            className="px-4 py-3 bg-[#0F253B] hover:bg-[#0b1c2d] text-white font-bold rounded-xl transition-all flex items-center gap-2"
+          >
+            <Send size={16} /> Contact
+          </button>
+          <button
             onClick={() => onEdit(row)}
             className="flex-1 flex items-center justify-center gap-2 py-3 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all active:scale-[0.98]"
           >
@@ -428,6 +522,223 @@ function ViewModal({ row, onClose, onEdit, onViewFiles }) {
           >
             Close
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Communication — message, email or call about one visit, with the history
+ * ------------------------------------------------------------------ */
+function CommHistory({ items }) {
+  // Newest first — what was last said is what the next person needs.
+  const ordered = [...items].sort((a, b) => new Date(b.at) - new Date(a.at));
+
+  return (
+    <div className="space-y-2">
+      {ordered.map((c, i) => {
+        const ch = CHANNELS[c.channel] || CHANNELS.message;
+        const Icon = ch.icon;
+        return (
+          <div key={c._id || i} className="flex gap-3 p-3 bg-gray-50 border border-gray-100 rounded-xl">
+            <div className="w-8 h-8 shrink-0 rounded-lg bg-white text-[#F47C3C] flex items-center justify-center">
+              <Icon size={15} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-[#0F253B]">
+                {ch.label}
+                {c.to ? ` · ${c.to}` : ""}
+                <span className="ml-2 font-medium text-gray-400">
+                  {fmtDateTime(c.at)}
+                  {c.byName ? ` · ${c.byName}` : ""}
+                </span>
+              </p>
+              {c.subject && <p className="text-xs font-semibold text-gray-500 break-words">{c.subject}</p>}
+              {c.message && (
+                <p className="text-xs text-gray-500 whitespace-pre-line break-words mt-0.5">{c.message}</p>
+              )}
+              {c.note && (
+                <p className="text-xs text-[#0F253B] font-medium whitespace-pre-line break-words mt-1">
+                  Note: {c.note}
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CommModal({ row, onClose, onRecorded }) {
+  const [channel, setChannel] = useState("message");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const defaultMessage = `Hi, this is a reminder that the ${categoryOf(row).toLowerCase()} for ${row.property}${
+    row.room ? ` (${row.room})` : ""
+  } is scheduled for ${dayName(row.date)} ${fmtDate(row.date)}.`;
+
+  // Recipients are remembered per channel from the last contact on this record,
+  // so chasing the same person twice doesn't mean typing the number twice.
+  const lastTo = (c) =>
+    [...communicationsOf(row)].reverse().find((x) => x.channel === c && x.to)?.to || "";
+  const [form, setForm] = useState({
+    to: { message: lastTo("message"), email: lastTo("email"), call: lastTo("call") },
+    subject: `${categoryOf(row)} — ${row.property}`,
+    message: defaultMessage,
+    note: "",
+  });
+
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setTo = (e) => setForm((f) => ({ ...f, to: { ...f.to, [channel]: e.target.value } }));
+  const to = form.to[channel];
+
+  const record = async ({ open }) => {
+    if (!to.trim()) {
+      setError(channel === "email" ? "Enter an email address" : "Enter a phone number");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      // The email is sent by the server, so it is only recorded if it went.
+      // Messages and calls happen on this device: open the app, then record.
+      if (open && channel === "message") {
+        window.open(`sms:${to.trim()}?body=${encodeURIComponent(form.message)}`, "_self");
+      } else if (open && channel === "call") {
+        window.open(`tel:${to.trim()}`, "_self");
+      }
+
+      const res = await api.post(`/cleaning-schedule/${row._id}/communications`, {
+        channel,
+        to: to.trim(),
+        subject: channel === "email" ? form.subject : "",
+        message: channel === "call" ? "" : form.message,
+        note: form.note,
+        send: channel === "email" ? open : false,
+      });
+      onRecorded(res.data.data);
+      setForm((f) => ({ ...f, note: "" }));
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to record the communication");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const items = communicationsOf(row);
+  const mainLabel =
+    channel === "email" ? "Send email" : channel === "call" ? "Call & record" : "Open messages & record";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
+      <div
+        className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-5 gap-4">
+          <div className="min-w-0">
+            <h3 className="text-xl font-bold text-[#0F253B]">Contact</h3>
+            <p className="text-xs text-gray-400 font-medium break-words">
+              {row.property}
+              {row.room ? ` · ${row.room}` : ""} · {categoryOf(row)} · {fmtDate(row.date)}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">{error}</div>
+        )}
+
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          {Object.entries(CHANNELS).map(([key, ch]) => {
+            const Icon = ch.icon;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setChannel(key); setError(""); }}
+                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-bold transition-all ${
+                  channel === key
+                    ? "bg-[#0F253B] text-white border-[#0F253B]"
+                    : "bg-gray-50 text-gray-500 border-gray-100 hover:bg-gray-100"
+                }`}
+              >
+                <Icon size={15} /> {ch.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className={LABEL}>{channel === "email" ? "Email address" : "Phone number"}</label>
+            <input
+              className={FIELD}
+              type={channel === "email" ? "email" : "tel"}
+              value={to}
+              onChange={setTo}
+              placeholder={channel === "email" ? "name@example.com" : "+44 7…"}
+            />
+          </div>
+
+          {channel === "email" && (
+            <div>
+              <label className={LABEL}>Subject</label>
+              <input className={FIELD} value={form.subject} onChange={set("subject")} />
+            </div>
+          )}
+
+          {channel !== "call" && (
+            <div>
+              <label className={LABEL}>{channel === "email" ? "Email" : "Message"}</label>
+              <textarea rows={4} className={FIELD} value={form.message} onChange={set("message")} />
+            </div>
+          )}
+
+          <div>
+            <label className={LABEL}>Notes for the record</label>
+            <textarea
+              rows={2}
+              className={FIELD}
+              value={form.note}
+              onChange={set("note")}
+              placeholder={channel === "call" ? "What was agreed on the call…" : "Anything worth remembering…"}
+            />
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => record({ open: true })}
+              className="flex-1 flex items-center justify-center gap-2 py-3 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 text-white font-bold rounded-xl transition-all active:scale-[0.98]"
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+              {mainLabel}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => record({ open: false })}
+              title="Save this to the history without sending or opening anything"
+              className="px-4 py-3 bg-gray-50 hover:bg-gray-100 border border-gray-100 text-[#0F253B] disabled:opacity-50 font-bold rounded-xl transition-all"
+            >
+              Record only
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <p className={LABEL}>History</p>
+          {items.length ? (
+            <CommHistory items={items} />
+          ) : (
+            <p className="text-xs text-gray-400 font-medium">Nothing recorded for this visit yet.</p>
+          )}
         </div>
       </div>
     </div>
@@ -447,12 +758,16 @@ export default function CleaningScheduleBoard({
 
   const [q, setQ] = useState("");
   const [month, setMonth] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  // "" or one of TASK_STATES — the upcoming / due / overdue / completed tiles.
+  const [stateFilter, setStateFilter] = useState("");
   // "All" or one of CLEANING_CATEGORIES — the tiles across the top.
   const [category, setCategory] = useState(DEFAULT_CATEGORY);
 
   const [modal, setModal] = useState(null); // {} = create, row = edit
   const [viewing, setViewing] = useState(null);
+  // The row being contacted. Held as an id so the panel always shows the live
+  // row, and its history grows as contacts are recorded.
+  const [contactId, setContactId] = useState(null);
   // The row whose attachments are open in the media viewer.
   const [viewingFiles, setViewingFiles] = useState(null);
   const [exporting, setExporting] = useState(false);
@@ -489,9 +804,10 @@ export default function CleaningScheduleBoard({
   // under these filters rather than merely not selected.
   const categoryCounts = useMemo(() => {
     const needle = q.trim().toLowerCase();
+    const today = todayKey();
     const base = rows
       .filter((r) => (month ? monthKey(r.date) === month : true))
-      .filter((r) => (statusFilter ? r.status === statusFilter : true))
+      .filter((r) => (stateFilter ? taskState(r, today) === stateFilter : true))
       .filter((r) => (needle ? matchesSearch(r, needle) : true));
 
     const counts = {};
@@ -503,16 +819,33 @@ export default function CleaningScheduleBoard({
       if (r.status === "DONE") counts[c].done++;
     }
     return counts;
-  }, [rows, q, month, statusFilter]);
+  }, [rows, q, month, stateFilter]);
+
+  // The state tiles count within the selected category, month and search, but
+  // not within the state itself — otherwise picking "Overdue" would zero the
+  // other three and leave nowhere to go.
+  const stateCounts = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const today = todayKey();
+    const counts = { UPCOMING: 0, DUE: 0, OVERDUE: 0, COMPLETED: 0 };
+    for (const r of rows) {
+      if (categoryOf(r) !== category) continue;
+      if (month && monthKey(r.date) !== month) continue;
+      if (needle && !matchesSearch(r, needle)) continue;
+      counts[taskState(r, today)]++;
+    }
+    return counts;
+  }, [rows, q, month, category]);
 
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
+    const today = todayKey();
     return rows
       .filter((r) => (month ? monthKey(r.date) === month : true))
-      .filter((r) => (statusFilter ? r.status === statusFilter : true))
+      .filter((r) => (stateFilter ? taskState(r, today) === stateFilter : true))
       .filter((r) => categoryOf(r) === category)
       .filter((r) => (needle ? matchesSearch(r, needle) : true));
-  }, [rows, q, month, statusFilter, category]);
+  }, [rows, q, month, stateFilter, category]);
 
   const groups = useMemo(() => groupByMonth(visible), [visible]);
 
@@ -543,7 +876,9 @@ export default function CleaningScheduleBoard({
     const snapshot = rows;
     setRows((prev) => prev.map((r) => (r._id === row._id ? { ...r, status } : r)));
     try {
-      await api.patch(`/cleaning-schedule/${row._id}/status`, { status });
+      const res = await api.patch(`/cleaning-schedule/${row._id}/status`, { status });
+      // Finishing a repeat task puts the next one on the board.
+      if (res.data?.generated > 0) await load();
     } catch (err) {
       setRows(snapshot);
       alert(err.response?.data?.message || "Failed to update status");
@@ -561,12 +896,17 @@ export default function CleaningScheduleBoard({
     }
   };
 
-  const doneCount = visible.filter((r) => r.status === "DONE").length;
+  const recordCommunication = (updated) =>
+    setRows((prev) => prev.map((r) => (r._id === updated._id ? updated : r)));
+
+  const contactRow = contactId ? rows.find((r) => r._id === contactId) : null;
+
+  // Each tile is also the filter for that state; clicking the active one clears it.
   const cards = [
-    { label: "Entries", value: visible.length },
-    { label: "Done", value: doneCount },
-    { label: "Pending", value: visible.length - doneCount },
-    { label: "Months", value: months.length },
+    { state: "UPCOMING", tone: "text-blue-600" },
+    { state: "DUE", tone: "text-amber-600" },
+    { state: "OVERDUE", tone: "text-red-600" },
+    { state: "COMPLETED", tone: "text-emerald-600" },
   ];
 
   // One tile per section — the register's own tabs.
@@ -606,12 +946,23 @@ export default function CleaningScheduleBoard({
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {cards.map((s) => (
-          <div key={s.label} className="bg-white border border-gray-100 rounded-2xl p-4">
-            <p className="text-2xl font-bold text-[#0F253B]">{loading ? "—" : s.value}</p>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-gray-400 mt-1">{s.label}</p>
-          </div>
-        ))}
+        {cards.map((s) => {
+          const selected = stateFilter === s.state;
+          return (
+            <button
+              key={s.state}
+              onClick={() => setStateFilter(selected ? "" : s.state)}
+              className={`text-left bg-white border rounded-2xl p-4 transition-all ${
+                selected ? "border-[#0F253B] ring-2 ring-[#0F253B]/10" : "border-gray-100 hover:bg-gray-50"
+              }`}
+            >
+              <p className={`text-2xl font-bold ${s.tone}`}>{loading ? "—" : stateCounts[s.state]}</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-gray-400 mt-1">
+                {STATE_LABEL[s.state]}
+              </p>
+            </button>
+          );
+        })}
       </div>
 
       {/* The register's tabs — one per job, with what each holds under the
@@ -676,12 +1027,12 @@ export default function CleaningScheduleBoard({
         </select>
 
         <div className="flex gap-2 flex-wrap">
-          {[["", "All"], ...CLEANING_STATUSES.map((s) => [s, STATUS_LABEL[s]])].map(([v, l]) => (
+          {[["", "All"], ...TASK_STATES.map((s) => [s, STATE_LABEL[s]])].map(([v, l]) => (
             <button
               key={v || "all"}
-              onClick={() => setStatusFilter(v)}
+              onClick={() => setStateFilter(v)}
               className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all ${
-                statusFilter === v
+                stateFilter === v
                   ? "bg-[#0F253B] text-white border-[#0F253B]"
                   : "bg-white text-gray-500 border-gray-100 hover:bg-gray-50"
               }`}
@@ -709,9 +1060,9 @@ export default function CleaningScheduleBoard({
                 <th className="px-4 py-3 w-36">Category</th>
                 <th className="px-4 py-3 w-32">Day</th>
                 <th className="px-4 py-3 w-32">Date</th>
-                <th className="px-4 py-3 w-28">Status</th>
-                <th className="px-4 py-3 w-24">Call</th>
-                <th className="px-4 py-3 w-28">Message</th>
+                <th className="px-4 py-3 w-36">Status</th>
+                <th className="px-4 py-3 w-32">Next due</th>
+                <th className="px-4 py-3 w-36">Contact</th>
                 <th className="px-4 py-3 w-32 text-right">Actions</th>
               </tr>
             </thead>
@@ -745,6 +1096,7 @@ export default function CleaningScheduleBoard({
                     onEdit={setModal}
                     onDelete={remove}
                     onToggle={toggleStatus}
+                    onContact={(r) => setContactId(r._id)}
                   />
                 ))
               )}
@@ -760,6 +1112,16 @@ export default function CleaningScheduleBoard({
           onEdit={(row) => { setViewing(null); setModal(row); }}
           // Swap to the viewer rather than stacking it over the detail panel.
           onViewFiles={(row) => { setViewing(null); setViewingFiles(row); }}
+          onContact={(row) => { setViewing(null); setContactId(row._id); }}
+        />
+      )}
+
+      {contactRow && (
+        <CommModal
+          key={contactRow._id}
+          row={contactRow}
+          onClose={() => setContactId(null)}
+          onRecorded={recordCommunication}
         />
       )}
 
@@ -790,7 +1152,7 @@ export default function CleaningScheduleBoard({
 }
 
 // One month block — the band, then its rows, as the sheet prints it.
-function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
+function FragmentGroup({ group, onView, onEdit, onDelete, onToggle, onContact }) {
   const done = group.rows.filter((r) => r.status === "DONE").length;
   return (
     <>
@@ -809,6 +1171,7 @@ function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
           <td className="px-4 py-3 text-gray-400 font-medium">{i + 1}</td>
           <td className="px-4 py-3">
             <p className="font-semibold text-[#0F253B]">{r.property}</p>
+            {r.room && <p className="text-[11px] font-bold text-gray-500">{r.room}</p>}
             {r.inspectorName && (
               <p className="text-[11px] font-bold text-[#F47C3C]">{r.inspectorName}</p>
             )}
@@ -832,28 +1195,41 @@ function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
               ) : (
                 <Circle size={15} className="text-gray-300" />
               )}
-              <Badge tone={STATUS_TONE[r.status] || "gray"}>{STATUS_LABEL[r.status] || r.status}</Badge>
+              <Badge tone={STATE_TONE[taskState(r)]}>{STATE_LABEL[taskState(r)]}</Badge>
             </button>
           </td>
-          <td className="px-4 py-3">
-            <span className="flex items-center gap-1.5 font-medium text-[#0F253B]">
-              {r.callMade ? (
-                <CheckCircle2 size={15} className="text-emerald-600" />
-              ) : (
-                <Circle size={15} className="text-gray-300" />
-              )}
-              Call
-            </span>
+          <td className="px-4 py-3 text-gray-500 font-medium whitespace-nowrap">
+            {r.nextDueDate ? fmtDate(r.nextDueDate) : "—"}
           </td>
           <td className="px-4 py-3">
-            <span className="flex items-center gap-1.5 font-medium text-[#0F253B]">
-              {r.messageSent ? (
-                <CheckCircle2 size={15} className="text-emerald-600" />
-              ) : (
-                <Circle size={15} className="text-gray-300" />
+            {/* Message, email, call — lit once that channel has been used on
+                this visit. Any of them opens the contact panel. */}
+            <button
+              onClick={() => onContact(r)}
+              title={
+                communicationsOf(r).length
+                  ? `${communicationsOf(r).length} recorded — open contact history`
+                  : "Message, email or call"
+              }
+              className="flex items-center gap-1 p-1.5 -m-1.5 rounded-lg hover:bg-gray-100"
+            >
+              {Object.entries(CHANNELS).map(([key, ch]) => {
+                const Icon = ch.icon;
+                return (
+                  <span
+                    key={key}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                      r[ch.flag] ? "bg-emerald-50 text-emerald-600" : "bg-gray-50 text-gray-300"
+                    }`}
+                  >
+                    <Icon size={14} />
+                  </span>
+                );
+              })}
+              {communicationsOf(r).length > 0 && (
+                <span className="text-[11px] font-bold text-gray-400 ml-0.5">{communicationsOf(r).length}</span>
               )}
-              Message
-            </span>
+            </button>
           </td>
           <td className="px-4 py-3">
             <div className="flex items-center justify-end gap-1">

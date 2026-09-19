@@ -7,7 +7,7 @@
 import CheckOut, { DEPOSIT_STATUS } from "../models/CheckOut.js";
 import CheckIn from "../models/CheckIn.js";
 import Property from "../models/Property.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 
 const EDITABLE_KEYS = [
   "propertyId",

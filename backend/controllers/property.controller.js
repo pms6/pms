@@ -1,6 +1,6 @@
 // controllers/propertyController.js
 import Property from "../models/Property.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 // PROP-000001 sequencing lives in utils/codes.js so approved property
 // submissions land in the same sequence as properties created in-app.
 import { generatePropertyCode } from "../utils/codes.js";

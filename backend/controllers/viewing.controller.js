@@ -1,6 +1,6 @@
 import Viewing from "../models/Viewing.js";
 import Lead from "../models/Lead.js";
-import Room from "../models/Room.js";
+import Room from "../models/room.js";
 import { blockedReason } from "./viewingBlock.controller.js";
 
 // Every staff-facing response shapes a viewing the same way. createdBy is here

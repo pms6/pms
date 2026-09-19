@@ -12,6 +12,7 @@ import cron from "node-cron";
 import { sendAllPendingReminders } from "./cranjob/complianceReminder.js";
 import { sendAllContractReminders } from "./cranjob/contractReminder.js";
 import { sendAllLocationDigests } from "./cranjob/locationDigest.js";
+import { generateAllSchedules } from "./cranjob/cleaningSchedule.js";
 import { purgeExpiredCaptures, closeAbandonedSessions } from "./controllers/screenMonitor.controller.js";
 
 const app = express();
@@ -108,6 +109,16 @@ cron.schedule("0 * * * *", async () => {
       `Location digests sent: ${result.sentCount}, Skipped: ${result.skipped}, Offline: ${result.offline}, Errors: ${result.errors.length}`
     );
   }
+});
+
+// Early every morning, top up every organization's automatic cleaning schedule
+// — the rotation, the monthly fridge / washing machine cleans and the quarterly
+// self inspections — so the board is already current when the office opens.
+cron.schedule("30 5 * * *", async () => {
+  const result = await generateAllSchedules();
+  console.log(
+    `Cleaning schedules generated: ${result.created} new entries, Errors: ${result.errors}`
+  );
 });
 
 // Routes
