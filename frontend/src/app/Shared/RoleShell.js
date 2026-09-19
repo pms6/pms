@@ -138,7 +138,7 @@ export default function RoleShell({
 
       {/* Mobile sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#0F253B] text-white transform transition-transform duration-300 md:hidden ${
+        className={`fixed top-0 left-0 z-50 w-64 h-[100dvh] flex flex-col overflow-y-auto overscroll-contain bg-[#0F253B] text-white transform transition-transform duration-300 md:hidden ${
           isOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
