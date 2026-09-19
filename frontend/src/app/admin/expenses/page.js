@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Plus,
   X,
@@ -188,6 +188,28 @@ function ReceiptPreview({ file, index }) {
   );
 }
 
+// Small square preview for a file row in the form: the picture itself for an
+// image, a type badge for anything else.
+function FileThumb({ src, kind, label }) {
+  const [failed, setFailed] = useState(false);
+  if (kind === "image" && src && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt=""
+        onError={() => setFailed(true)}
+        className="h-12 w-12 shrink-0 rounded-lg border border-gray-100 bg-white object-cover"
+      />
+    );
+  }
+  return (
+    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-gray-100 bg-white text-[10px] font-bold text-gray-400">
+      {label}
+    </span>
+  );
+}
+
 function Field({ label, value, span = false }) {
   return (
     <div className={span ? "sm:col-span-2" : ""}>
@@ -305,6 +327,16 @@ function ExpenseModal({ expense, properties, onClose, onSave }) {
   const [newFiles, setNewFiles] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Local previews for files picked but not uploaded yet (images only).
+  const newPreviews = useMemo(
+    () => newFiles.map((f) => (f.type?.startsWith("image/") ? URL.createObjectURL(f) : "")),
+    [newFiles]
+  );
+  useEffect(
+    () => () => newPreviews.forEach((u) => u && URL.revokeObjectURL(u)),
+    [newPreviews]
+  );
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -482,9 +514,14 @@ function ExpenseModal({ expense, properties, onClose, onSave }) {
                       href={f.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 text-xs font-bold text-[#0F253B] truncate hover:underline"
+                      title="Open in a new tab"
+                      className="inline-flex min-w-0 items-center gap-3 text-xs font-bold text-[#0F253B] hover:underline"
                     >
-                      <Paperclip size={14} className="text-[#F47C3C] shrink-0" />
+                      <FileThumb
+                        src={f.url}
+                        kind={fileKind(f.url, f.name)}
+                        label={kindLabel(f.url, f.name)}
+                      />
                       <span className="truncate">{f.name || `Receipt ${idx + 1}`}</span>
                     </a>
                     <button
@@ -507,8 +544,12 @@ function ExpenseModal({ expense, properties, onClose, onSave }) {
                     key={`${file.name}-${idx}`}
                     className="flex items-center justify-between gap-3 px-3 py-2 bg-orange-50/60 border border-orange-100 rounded-xl"
                   >
-                    <span className="inline-flex items-center gap-2 text-xs font-bold text-[#0F253B] truncate">
-                      <Paperclip size={14} className="text-[#F47C3C] shrink-0" />
+                    <span className="inline-flex min-w-0 items-center gap-3 text-xs font-bold text-[#0F253B]">
+                      <FileThumb
+                        src={newPreviews[idx]}
+                        kind={file.type?.startsWith("image/") ? "image" : fileKind("", file.name)}
+                        label={kindLabel("", file.name)}
+                      />
                       <span className="truncate">{file.name}</span>
                     </span>
                     <button

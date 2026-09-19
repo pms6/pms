@@ -84,6 +84,9 @@ const CATEGORY_SHORT = {
   "Washing Machine Descaling": "Descaling",
 };
 
+// Only Self Inspection entries record the name of the person who did it.
+const NAMED_CATEGORY = "Self Inspection";
+
 const filesOf = (row) => (Array.isArray(row?.files) ? row.files : []);
 
 // One row against the search box. Pulled out of the filter chain because the
@@ -93,6 +96,7 @@ const matchesSearch = (row, needle) =>
     row.property,
     categoryOf(row),
     row.notes,
+    row.inspectorName,
     dayName(row.date),
     ...filesOf(row).map((f) => f.name),
   ].some((v) => String(v || "").toLowerCase().includes(needle));
@@ -125,6 +129,7 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
     messageSent: Boolean(initial?.messageSent),
     callMade: Boolean(initial?.callMade),
     notes: initial?.notes || "",
+    inspectorName: initial?.inspectorName || "",
   });
 
   // The evidence for the visit. Kept out of `form` because the uploader appends
@@ -167,6 +172,9 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
         messageSent: form.messageSent,
         callMade: form.callMade,
         notes: form.notes.trim(),
+        ...(form.category === NAMED_CATEGORY
+          ? { inspectorName: form.inspectorName.trim() }
+          : {}),
         files,
       });
     } catch (err) {
@@ -217,6 +225,18 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
               required
             />
           </div>
+
+          {form.category === NAMED_CATEGORY && (
+            <div>
+              <label className={LABEL}>Name (optional)</label>
+              <input
+                className={FIELD}
+                value={form.inspectorName}
+                onChange={set("inspectorName")}
+                placeholder="Who did the self inspection"
+              />
+            </div>
+          )}
 
           {/* The section this entry belongs to is set by the card selected on
               the board, so the form does not ask again. */}
@@ -345,6 +365,9 @@ function ViewModal({ row, onClose, onEdit, onViewFiles }) {
 
         <div className="grid grid-cols-3 gap-4">
           <ViewRow label="Month">{monthLabel(monthKey(row.date))}</ViewRow>
+          {categoryOf(row) === NAMED_CATEGORY && (
+            <ViewRow label="Name">{row.inspectorName}</ViewRow>
+          )}
           <ViewRow label="Call">
             <span className="flex items-center gap-1.5">
               {row.callMade ? (
@@ -786,6 +809,9 @@ function FragmentGroup({ group, onView, onEdit, onDelete, onToggle }) {
           <td className="px-4 py-3 text-gray-400 font-medium">{i + 1}</td>
           <td className="px-4 py-3">
             <p className="font-semibold text-[#0F253B]">{r.property}</p>
+            {r.inspectorName && (
+              <p className="text-[11px] font-bold text-[#F47C3C]">{r.inspectorName}</p>
+            )}
             {r.notes && <p className="text-[11px] font-medium text-gray-400 truncate max-w-md">{r.notes}</p>}
           </td>
           <td className="px-4 py-3">

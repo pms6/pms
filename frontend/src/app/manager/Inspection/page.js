@@ -60,6 +60,7 @@ export default function InspectionsPage() {
     propertyId: "",
     roomId: "",
     inspector: user?._id || "",
+    inspectorName: "",
     notes: "",
   });
 
@@ -98,6 +99,7 @@ export default function InspectionsPage() {
           [
             insp.propertyId?.name,
             insp.roomId?.roomName,
+            insp.inspectorName,
             insp.inspector?.name,
             insp.notes,
           ].some((field) => field?.toLowerCase().includes(term))
@@ -133,6 +135,7 @@ export default function InspectionsPage() {
       propertyId: inspection.propertyId?._id || "",
       roomId: inspection.roomId?._id || "",
       inspector: inspection.inspector?._id || user?._id || "",
+      inspectorName: inspection.inspectorName || "",
       notes: inspection.notes || "",
     });
     setShowEditModal(true);
@@ -192,6 +195,7 @@ export default function InspectionsPage() {
       propertyId: "",
       roomId: "",
       inspector: user?._id || "",
+      inspectorName: "",
       notes: "",
     });
     setEditingId(null);
@@ -338,7 +342,7 @@ export default function InspectionsPage() {
                       <td className="px-6 py-4 font-medium">
                         {typeLabel(inspection.type)}
                       </td>
-                      <td className="px-6 py-4">{inspection.inspector?.name || "—"}</td>
+                      <td className="px-6 py-4">{inspection.inspectorName || inspection.inspector?.name || inspection.inspector?.email || "—"}</td>
                       <td className="px-6 py-4">
                         <span className={`rounded-full px-3 py-1 text-xs font-medium ${getStatusColor(inspection.status)}`}>
                           {inspection.status.replace("_", " ")}
@@ -386,6 +390,14 @@ export default function InspectionsPage() {
                 required
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                className="w-full border border-gray-300 rounded-2xl px-4 py-3 focus:ring-2 focus:ring-orange-500 outline-none"
+              />
+
+              <input
+                type="text"
+                placeholder="Inspector name (optional) — e.g. council officer, surveyor"
+                value={formData.inspectorName}
+                onChange={(e) => setFormData({ ...formData, inspectorName: e.target.value })}
                 className="w-full border border-gray-300 rounded-2xl px-4 py-3 focus:ring-2 focus:ring-orange-500 outline-none"
               />
 

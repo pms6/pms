@@ -68,6 +68,13 @@ const inspectionSchema = new mongoose.Schema(
       required: true,
     },
 
+    // The name of the person who carried out (or will carry out) the visit,
+    // typed in by hand. `inspector` above is always a user of this system, but
+    // a visit is often made by someone who is not one — a council officer, an
+    // external surveyor, the landlord — so their name is kept as plain text.
+    // Where both exist the typed name is the one shown.
+    inspectorName: { type: String, trim: true, default: "" },
+
     status: {
       type: String,
       enum: ["SCHEDULED", "IN_PROGRESS", "COMPLETED", "CANCELLED", "OVERDUE"],

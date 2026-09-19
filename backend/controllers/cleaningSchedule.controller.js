@@ -13,6 +13,7 @@ const EDITABLE_KEYS = [
   "messageSent",
   "callMade",
   "cleaner",
+  "inspectorName",
   "message",
   "notes",
   "files",
@@ -47,6 +48,9 @@ const pickPayload = (body) => {
   }
   if (payload.property !== undefined) payload.property = String(payload.property).trim();
   if (payload.cleaner !== undefined) payload.cleaner = String(payload.cleaner).trim();
+  if (payload.inspectorName !== undefined) {
+    payload.inspectorName = String(payload.inspectorName ?? "").trim();
+  }
   if (payload.message !== undefined) payload.message = String(payload.message).trim();
   if (payload.notes !== undefined) payload.notes = String(payload.notes).trim();
   if (payload.messageSent !== undefined) payload.messageSent = Boolean(payload.messageSent);

@@ -111,6 +111,11 @@ const cleaningScheduleSchema = new mongoose.Schema(
     // after it — kept apart from `notes`, which is internal.
     // `cleaner` is a legacy free-text field kept so older rows still read.
     cleaner: { type: String, trim: true, default: "" },
+
+    // Who carried out a Self Inspection — typed in by hand, optional. Only the
+    // Self Inspection section of the board asks for it; every other category
+    // leaves it blank.
+    inspectorName: { type: String, trim: true, default: "" },
     message: { type: String, trim: true, default: "" },
     notes: { type: String, trim: true, default: "" },
 

@@ -718,224 +718,6 @@ export default function AdminVoidPage() {
         </div>
       )}
 
-      <div className="grid gap-6">
-        {/* Form */}
-        <form
-          ref={formRef}
-          onSubmit={submitVoid}
-          className="space-y-4 rounded-2xl border border-gray-100 bg-white p-5 scroll-mt-4"
-        >
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-[#0F253B]">
-              {editingId ? "Edit void period" : "Void period"}
-            </h2>
-            <Badge tone={editingId ? "blue" : "orange"}>
-              {editingId ? "Editing" : "Auto-calculated"}
-            </Badge>
-          </div>
-
-          {properties.length === 0 && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
-              No properties are linked to your organisation yet. Add a property first — a
-              void period is always recorded against one of your own rooms.
-            </div>
-          )}
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-1.5 text-sm font-medium text-gray-600">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                Property
-              </span>
-              <select
-                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white disabled:opacity-60"
-                value={form.propertyId}
-                onChange={handleField("propertyId")}
-                disabled={properties.length === 0}
-              >
-                {properties.length === 0 ? (
-                  <option value="">No properties in your organisation</option>
-                ) : (
-                  properties.map((property) => (
-                    <option key={property._id} value={property._id}>
-                      {property.name}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
-
-            <label className="space-y-1.5 text-sm font-medium text-gray-600">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                Room
-              </span>
-              <select
-                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white disabled:opacity-60"
-                value={form.roomId}
-                onChange={handleField("roomId")}
-                disabled={roomOptions.length === 0}
-              >
-                {roomOptions.length === 0 ? (
-                  <option value="">No rooms in this property</option>
-                ) : (
-                  roomOptions.map((room) => (
-                    <option
-                      key={room._id}
-                      value={room._id}
-                      disabled={room.status === "OCCUPIED"}
-                    >
-                      {room.roomName || room.roomNumber || "Room"}
-                      {room.status === "OCCUPIED" ? " (Occupied)" : ""}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
-
-            <label className="space-y-1.5 text-sm font-medium text-gray-600">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                Start date
-              </span>
-              <input
-                type="date"
-                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
-                value={form.startDate}
-                onChange={handleField("startDate")}
-              />
-            </label>
-
-            <label className="space-y-1.5 text-sm font-medium text-gray-600">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                End date
-              </span>
-              <input
-                type="date"
-                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
-                value={form.endDate}
-                onChange={handleField("endDate")}
-              />
-            </label>
-
-            <label className="space-y-1.5 text-sm font-medium text-gray-600 md:col-span-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                Tenant name
-              </span>
-              <input
-                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
-                value={form.tenantName}
-                onChange={handleField("tenantName")}
-                placeholder="e.g. Rajika"
-              />
-            </label>
-
-            <label className="space-y-1.5 text-sm font-medium text-gray-600 md:col-span-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                Notes
-              </span>
-              <textarea
-                rows={3}
-                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
-                value={form.notes}
-                onChange={handleField("notes")}
-                placeholder="Optional note about the void period"
-              />
-            </label>
-          </div>
-
-          {/* Last void helper */}
-          {lastVoid && !editingId && (
-            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm">
-              <p className="font-medium text-blue-800">
-                Last void for this room:{" "}
-                {formatDate(lastVoid.startDate)} → {formatDate(lastVoid.endDate)} (
-                {dayLabel(lastVoid.voidDays)}) · {money(lastVoid.totalVoid)}
-              </p>
-              <button
-                type="button"
-                onClick={continueFromLastVoid}
-                className="mt-2 text-xs font-bold text-blue-700 underline hover:text-blue-900"
-              >
-                Start new void the day after last one ended
-              </button>
-            </div>
-          )}
-
-          {selectedRoom?.status === "OCCUPIED" && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
-              This room is currently occupied. You cannot record a void while it is let.
-            </div>
-          )}
-
-          {selectedRoom && preview && selectedRoom.status !== "OCCUPIED" && (
-            <div className="rounded-2xl border border-dashed border-[#F47C3C]/40 bg-orange-50 p-4">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#F47C3C]">
-                Calculated
-              </p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-400">Rent</p>
-                  <p className="text-lg font-bold text-[#0F253B]">
-                    {money(selectedRoom.monthlyRent || 0)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-400">
-                    Per day
-                  </p>
-                  <p className="text-lg font-bold text-[#0F253B]">
-                    {rate(preview.dailyRent)}
-                  </p>
-                  <p className="text-[10px] font-medium text-gray-400">
-                    {money(selectedRoom.monthlyRent || 0)} ÷ 30
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-400">Days</p>
-                  <p className="text-lg font-bold text-[#0F253B]">{preview.voidDays}</p>
-                </div>
-              </div>
-              <div className="mt-4 border-t border-orange-100 pt-3">
-                <p className="text-[10px] uppercase tracking-widest text-gray-400">
-                  Total void
-                </p>
-                <p className="text-2xl font-bold text-[#0F253B]">
-                  {money(preview.totalVoid)}
-                </p>
-                <p className="text-[11px] font-medium text-gray-400">
-                  {rate(preview.dailyRent)} × {dayLabel(preview.voidDays)}
-                </p>
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2">
-            <button
-              type="submit"
-              disabled={
-                saving || !selectedRoom || selectedRoom.status === "OCCUPIED"
-              }
-              className="inline-flex items-center gap-2 rounded-xl bg-[#F47C3C] px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Plus size={16} />
-              {saving
-                ? "Saving..."
-                : editingId
-                ? "Save changes"
-                : "Save void period"}
-            </button>
-
-            {editingId && (
-              <button
-                type="button"
-                onClick={cancelEdit}
-                className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-bold text-gray-500 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-        </form>
-      </div>
-
       {/* Table + filters */}
       <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
         {/* Filter bar */}
@@ -1248,6 +1030,224 @@ export default function AdminVoidPage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="grid gap-6">
+        {/* Form */}
+        <form
+          ref={formRef}
+          onSubmit={submitVoid}
+          className="space-y-4 rounded-2xl border border-gray-100 bg-white p-5 scroll-mt-4"
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-[#0F253B]">
+              {editingId ? "Edit void period" : "Void period"}
+            </h2>
+            <Badge tone={editingId ? "blue" : "orange"}>
+              {editingId ? "Editing" : "Auto-calculated"}
+            </Badge>
+          </div>
+
+          {properties.length === 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              No properties are linked to your organisation yet. Add a property first — a
+              void period is always recorded against one of your own rooms.
+            </div>
+          )}
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-1.5 text-sm font-medium text-gray-600">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                Property
+              </span>
+              <select
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white disabled:opacity-60"
+                value={form.propertyId}
+                onChange={handleField("propertyId")}
+                disabled={properties.length === 0}
+              >
+                {properties.length === 0 ? (
+                  <option value="">No properties in your organisation</option>
+                ) : (
+                  properties.map((property) => (
+                    <option key={property._id} value={property._id}>
+                      {property.name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+
+            <label className="space-y-1.5 text-sm font-medium text-gray-600">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                Room
+              </span>
+              <select
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white disabled:opacity-60"
+                value={form.roomId}
+                onChange={handleField("roomId")}
+                disabled={roomOptions.length === 0}
+              >
+                {roomOptions.length === 0 ? (
+                  <option value="">No rooms in this property</option>
+                ) : (
+                  roomOptions.map((room) => (
+                    <option
+                      key={room._id}
+                      value={room._id}
+                      disabled={room.status === "OCCUPIED"}
+                    >
+                      {room.roomName || room.roomNumber || "Room"}
+                      {room.status === "OCCUPIED" ? " (Occupied)" : ""}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+
+            <label className="space-y-1.5 text-sm font-medium text-gray-600">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                Start date
+              </span>
+              <input
+                type="date"
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
+                value={form.startDate}
+                onChange={handleField("startDate")}
+              />
+            </label>
+
+            <label className="space-y-1.5 text-sm font-medium text-gray-600">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                End date
+              </span>
+              <input
+                type="date"
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
+                value={form.endDate}
+                onChange={handleField("endDate")}
+              />
+            </label>
+
+            <label className="space-y-1.5 text-sm font-medium text-gray-600 md:col-span-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                Tenant name
+              </span>
+              <input
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
+                value={form.tenantName}
+                onChange={handleField("tenantName")}
+                placeholder="e.g. Rajika"
+              />
+            </label>
+
+            <label className="space-y-1.5 text-sm font-medium text-gray-600 md:col-span-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                Notes
+              </span>
+              <textarea
+                rows={3}
+                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 outline-none focus:border-[#F47C3C] focus:bg-white"
+                value={form.notes}
+                onChange={handleField("notes")}
+                placeholder="Optional note about the void period"
+              />
+            </label>
+          </div>
+
+          {/* Last void helper */}
+          {lastVoid && !editingId && (
+            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm">
+              <p className="font-medium text-blue-800">
+                Last void for this room:{" "}
+                {formatDate(lastVoid.startDate)} → {formatDate(lastVoid.endDate)} (
+                {dayLabel(lastVoid.voidDays)}) · {money(lastVoid.totalVoid)}
+              </p>
+              <button
+                type="button"
+                onClick={continueFromLastVoid}
+                className="mt-2 text-xs font-bold text-blue-700 underline hover:text-blue-900"
+              >
+                Start new void the day after last one ended
+              </button>
+            </div>
+          )}
+
+          {selectedRoom?.status === "OCCUPIED" && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              This room is currently occupied. You cannot record a void while it is let.
+            </div>
+          )}
+
+          {selectedRoom && preview && selectedRoom.status !== "OCCUPIED" && (
+            <div className="rounded-2xl border border-dashed border-[#F47C3C]/40 bg-orange-50 p-4">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#F47C3C]">
+                Calculated
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-gray-400">Rent</p>
+                  <p className="text-lg font-bold text-[#0F253B]">
+                    {money(selectedRoom.monthlyRent || 0)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-gray-400">
+                    Per day
+                  </p>
+                  <p className="text-lg font-bold text-[#0F253B]">
+                    {rate(preview.dailyRent)}
+                  </p>
+                  <p className="text-[10px] font-medium text-gray-400">
+                    {money(selectedRoom.monthlyRent || 0)} ÷ 30
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-gray-400">Days</p>
+                  <p className="text-lg font-bold text-[#0F253B]">{preview.voidDays}</p>
+                </div>
+              </div>
+              <div className="mt-4 border-t border-orange-100 pt-3">
+                <p className="text-[10px] uppercase tracking-widest text-gray-400">
+                  Total void
+                </p>
+                <p className="text-2xl font-bold text-[#0F253B]">
+                  {money(preview.totalVoid)}
+                </p>
+                <p className="text-[11px] font-medium text-gray-400">
+                  {rate(preview.dailyRent)} × {dayLabel(preview.voidDays)}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={
+                saving || !selectedRoom || selectedRoom.status === "OCCUPIED"
+              }
+              className="inline-flex items-center gap-2 rounded-xl bg-[#F47C3C] px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus size={16} />
+              {saving
+                ? "Saving..."
+                : editingId
+                ? "Save changes"
+                : "Save void period"}
+            </button>
+
+            {editingId && (
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-bold text-gray-500 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </form>
       </div>
     </div>
   );

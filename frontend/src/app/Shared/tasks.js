@@ -147,18 +147,15 @@ export const fmtDate = (d) => {
   });
 };
 
-/** "9:00 am" on a UK clock. */
+/** "9am", "12pm", "9:30am" on a UK clock — no space before am/pm, and the
+ *  ":00" is dropped when the time falls exactly on the hour. */
 export const fmtTime = (d) => {
   const date = asDate(d);
   if (!date) return "—";
-  return date
-    .toLocaleTimeString("en-GB", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-      timeZone: UK_TZ,
-    })
-    .toLowerCase();
+  const { hour, minute } = ukParts(date);
+  const period = hour < 12 ? "am" : "pm";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return minute === 0 ? `${hour12}${period}` : `${hour12}:${pad(minute)}${period}`;
 };
 
 /** "5 Sep 2026, 9:00 am" on a UK clock. */

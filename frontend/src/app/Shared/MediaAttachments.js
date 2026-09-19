@@ -1,7 +1,17 @@
 "use client";
 
-import { useState } from "react";
-import { FileText, Download, X, UploadCloud, Loader2, Paperclip, Film } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  FileText,
+  Download,
+  X,
+  UploadCloud,
+  Loader2,
+  Paperclip,
+  Film,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { Badge } from "./ui";
 import PdfFrame from "./PdfFrame";
 import { fileKind, kindLabel } from "./fileType";
@@ -87,6 +97,7 @@ const KIND_TONE = { image: "blue", video: "orange", pdf: "red", file: "gray" };
  * rather than Cloudinary's random public_id.
  */
 export function AttachmentRow({ file, onRemove }) {
+  const [thumbFailed, setThumbFailed] = useState(false);
   const kind = previewKind(file);
   const label = file.name || file.url;
   const size = formatBytes(file.bytes);
@@ -94,7 +105,23 @@ export function AttachmentRow({ file, onRemove }) {
 
   return (
     <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
-      <Icon size={14} className="text-gray-400 shrink-0" />
+      {/* A picture shows itself, so what was uploaded is visible straight away;
+          anything else gets its type icon. */}
+      {kind === "image" && !thumbFailed ? (
+        <a href={file.url} target="_blank" rel="noopener noreferrer" className="shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={file.url}
+            alt={label}
+            onError={() => setThumbFailed(true)}
+            className="h-12 w-12 rounded-lg border border-gray-100 bg-white object-cover"
+          />
+        </a>
+      ) : (
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-gray-100 bg-white text-gray-400">
+          <Icon size={18} />
+        </span>
+      )}
 
       <a
         href={file.url}
@@ -157,12 +184,22 @@ export function MediaUploader({
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
 
-  const trackUploading = (updater) =>
-    setUploading((prev) => {
-      const next = updater(prev);
-      onUploadingChange?.(next.length);
-      return next;
-    });
+  // The parent hears about the in-flight count from an effect, not from inside
+  // the state updater: updaters run during render, and calling the parent's
+  // setState from there is what React rejects ("cannot update a component while
+  // rendering a different component"). The callback is held in a ref so an
+  // inline arrow from the parent does not re-fire the effect every render.
+  const onUploadingChangeRef = useRef(onUploadingChange);
+  useEffect(() => {
+    onUploadingChangeRef.current = onUploadingChange;
+  });
+
+  const uploadingCount = uploading.length;
+  useEffect(() => {
+    onUploadingChangeRef.current?.(uploadingCount);
+  }, [uploadingCount]);
+
+  const trackUploading = (updater) => setUploading(updater);
 
   /**
    * Upload a batch. Each file goes up independently and is appended as it
@@ -275,7 +312,26 @@ export function MediaViewerModal({ title, subtitle, files = [], onClose }) {
   // last record cannot carry over to one that has only a single file.
   const [active, setActive] = useState(0);
 
-  const current = files[Math.min(active, files.length - 1)];
+  const count = files.length;
+  const index = Math.min(active, count - 1);
+
+  // Left / right, wrapping at both ends.
+  const go = useCallback(
+    (delta) => setActive((i) => (Math.min(i, count - 1) + delta + count) % count),
+    [count]
+  );
+
+  useEffect(() => {
+    if (count < 2) return;
+    const onKey = (e) => {
+      if (e.key === "ArrowLeft") go(-1);
+      else if (e.key === "ArrowRight") go(1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [count, go]);
+
+  const current = files[index];
   const url = current?.url;
   const name = current?.name || "Attachment";
   const kind = current ? previewKind(current) : "file";
@@ -307,7 +363,7 @@ export function MediaViewerModal({ title, subtitle, files = [], onClose }) {
                 key={(f.url || "") + i}
                 onClick={() => setActive(i)}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border whitespace-nowrap transition-all ${
-                  i === active
+                  i === index
                     ? "bg-[#0F253B] text-white border-[#0F253B]"
                     : "bg-white text-gray-500 border-gray-100 hover:bg-gray-50"
                 }`}
@@ -319,6 +375,7 @@ export function MediaViewerModal({ title, subtitle, files = [], onClose }) {
           </div>
         )}
 
+        <div className="relative flex flex-1 min-h-0 flex-col">
         <div className="flex-1 overflow-auto bg-gray-100 min-h-[18rem]">
           {!url ? (
             <div className="flex h-full min-h-[18rem] items-center justify-center px-6 text-center">
@@ -352,8 +409,33 @@ export function MediaViewerModal({ title, subtitle, files = [], onClose }) {
           )}
         </div>
 
+        {count > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={() => go(-1)}
+              title="Previous"
+              className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full border border-gray-200 bg-white/90 p-2 text-[#0F253B] shadow-md transition-all hover:bg-white hover:text-[#F47C3C]"
+            >
+              <ChevronLeft size={22} />
+            </button>
+            <button
+              type="button"
+              onClick={() => go(1)}
+              title="Next"
+              className="absolute right-5 top-1/2 -translate-y-1/2 rounded-full border border-gray-200 bg-white/90 p-2 text-[#0F253B] shadow-md transition-all hover:bg-white hover:text-[#F47C3C]"
+            >
+              <ChevronRight size={22} />
+            </button>
+          </>
+        )}
+        </div>
+
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-t border-gray-100">
-          <p className="text-xs font-medium text-gray-400 truncate min-w-0">{url ? name : ""}</p>
+          <p className="text-xs font-medium text-gray-400 truncate min-w-0">
+            {url ? name : ""}
+            {url && count > 1 ? ` · ${index + 1} / ${count}` : ""}
+          </p>
           <div className="flex gap-2 shrink-0">
             {url && (
               <>

@@ -37,6 +37,8 @@ import presenceRoutes from "./presence.route.js"
 import timeReportRoutes from "./timeReport.route.js"
 import stayDurationRoutes from "./stayDuration.route.js"
 import notificationRoutes from "./notification.route.js"
+import gardenRoutes from "./garden.route.js"
+import courtClaimRoutes from "./courtClaim.route.js"
 
 const router = express.Router();
 
@@ -95,6 +97,12 @@ router.use("/inventory", inventoryRoutes);
 
 // Cleaning Messages Schedule — the month-by-month sheet of property cleans.
 router.use("/cleaning-schedule", cleaningScheduleRoutes);
+
+// Garden — the garden cutting log and the garden machines sheet.
+router.use("/garden", gardenRoutes);
+
+// Court Claims — claims brought by or against the company, with their paperwork.
+router.use("/court-claims", courtClaimRoutes);
 
 // Available Rooms Status — the make-ready sheet for rooms between tenants.
 router.use("/empty-rooms", emptyRoomStatusRoutes);

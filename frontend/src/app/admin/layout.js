@@ -36,6 +36,8 @@ import {
   Database,
   Contact,
   Lock,
+  Trees,
+  Gavel,
 } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 import ScreenMonitorToggle from "../Shared/ScreenMonitorToggle";
@@ -57,6 +59,8 @@ const NAV = [
   { href: "/admin/company-passwords", label: "Company Passwords", icon: Lock },
   { href: "/admin/internet", label: "Internet Details", icon: Wifi },
   { href: "/admin/inventory", label: "Inventory", icon: Package },
+  { href: "/admin/garden", label: "Garden", icon: Trees },
+  { href: "/admin/court-claims", label: "Court Claims", icon: Gavel },
   // Everything else, in its previous order.
   { href: "/admin/available", label: "Available Room", icon: CalendarClock },
   { href: "/admin/leads", label: "Leads", icon: UserPlus },
