@@ -7,6 +7,7 @@ import Onboarding from "../models/Onboarding.js";
 import Property from "../models/Property.js";
 import Room from "../models/Room.js";
 import mongoose from "mongoose";
+import { stayDuration } from "../utils/duration.js";
 
 // --- ADD THESE IMPORTS ---
 import bcrypt from "bcryptjs"; // or "bcrypt" depending on what you use
@@ -33,6 +34,7 @@ const EDITABLE_KEYS = [
   "tenant",
   "tenantEmail",
   "rent",
+  "firstMoveInDate",
   "startDate",
   "fixedTermEnd",
   "periodicStart",
@@ -47,6 +49,52 @@ const pickPayload = (body) => {
     if (body[key] !== undefined) payload[key] = body[key];
   }
   return payload;
+};
+
+/**
+ * The tenant's first move-in for a tenancy being CREATED.
+ *
+ * A renewal is a new tenancy record, so taking the new record's startDate would
+ * reset the overall stay to zero every time someone renews — the exact thing
+ * this field exists to prevent. Instead the earliest date this organisation
+ * already holds for the same tenant wins: their existing first move-in, or the
+ * start of their earliest tenancy if none was ever recorded.
+ *
+ * The same tenant means the same tenantId, or the same email when the tenancy
+ * was entered without a profile. Falls back to this tenancy's own start date
+ * for someone genuinely new.
+ *
+ * Only ever called on create. An update never derives this.
+ */
+const resolveFirstMoveIn = async (payload, organizationId) => {
+  if (payload.firstMoveInDate) return payload.firstMoveInDate;
+
+  const match = {};
+  if (payload.tenantId && mongoose.isValidObjectId(payload.tenantId)) {
+    match.tenantId = payload.tenantId;
+  } else if (payload.tenantEmail) {
+    match.tenantEmail = String(payload.tenantEmail).trim().toLowerCase();
+  }
+
+  if (Object.keys(match).length) {
+    // Deleted tenancies count: an ended tenancy is still time the tenant spent
+    // with us, and is usually exactly what a renewal is replacing.
+    const earlier = await Tenancy.find({ organizationId, ...match })
+      .select("firstMoveInDate startDate")
+      .sort({ startDate: 1 })
+      .limit(100)
+      .lean();
+
+    const known = earlier
+      .flatMap((t) => [t.firstMoveInDate, t.startDate])
+      .filter(Boolean)
+      .map((d) => new Date(d))
+      .filter((d) => !Number.isNaN(d.getTime()));
+
+    if (known.length) return new Date(Math.min(...known));
+  }
+
+  return payload.startDate || null;
 };
 
 // @desc    List tenancies (with optional property/status filters)
@@ -526,6 +574,11 @@ export const createTenancy = async (req, res) => {
       }
     }
 
+    // Carry the tenant's overall stay across a renewal: a new tenancy for
+    // someone already on the books inherits their first move-in rather than
+    // starting the count again from this record's start date.
+    payload.firstMoveInDate = await resolveFirstMoveIn(payload, organizationId);
+
     // Create Tenancy
     const tenancy = await Tenancy.create({
       ...payload,
@@ -598,7 +651,21 @@ export const updateTenancy = async (req, res) => {
       return res.status(404).json({ success: false, message: "Tenancy not found." });
     }
 
-    Object.assign(tenancy, pickPayload(req.body));
+    const payload = pickPayload(req.body);
+
+    // A stay cannot start in the future — that reads as a negative number of
+    // days on the board, which is worse than an empty cell.
+    if (payload.firstMoveInDate && new Date(payload.firstMoveInDate) > new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: "The first move-in date cannot be in the future.",
+      });
+    }
+
+    // Note what is NOT here: nothing derives firstMoveInDate from startDate on
+    // an update. Renewing writes the new tenancy dates and leaves the first
+    // move-in where it was; only an explicit edit moves it.
+    Object.assign(tenancy, payload);
     const updated = await tenancy.save();
 
     return res.status(200).json({ success: true, data: updated });
@@ -917,6 +984,11 @@ export const getTenantDirectory = async (req, res) => {
         tenancy: {
           status: t.status,
           rent: t.rent || 0,
+          // The tenant's overall stay, measured from their first move-in rather
+          // than from this tenancy — a renewal starts a new tenancy record and
+          // must not shorten how long they have been with us.
+          firstMoveInDate: t.firstMoveInDate || null,
+          stay: stayDuration(t.firstMoveInDate),
           startDate: t.startDate || null,
           fixedTermEnd: t.fixedTermEnd || null,
           periodicStart: t.periodicStart || null,

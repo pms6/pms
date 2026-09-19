@@ -34,6 +34,46 @@ export const contractDuration = (start, end) => {
   return { years, months, days };
 };
 
+/**
+ * How long a client has been with us overall — from their FIRST move-in date to
+ * today, not from the contract they happen to be on.
+ *
+ * This is deliberately not `contractDuration(contractStart, contractEnd)`. A
+ * renewal writes new contract dates; it does not touch firstMoveInDate, so the
+ * overall stay carries straight through a renewal instead of resetting to zero.
+ *
+ * `days` is whole elapsed days, counted between UTC midnights so a time of day
+ * stored on either date cannot shift the count by one. The calendar breakdown
+ * beside it is the same arithmetic contractDuration uses, so "2 years 8 months
+ * 17 days" and the day count always describe the same span.
+ *
+ * Returns null for a missing, unparseable or future first move-in date — a
+ * client cannot have stayed for a negative number of days.
+ */
+export const stayDuration = (firstMoveIn, asOf = new Date()) => {
+  if (!firstMoveIn) return null;
+
+  const from = new Date(firstMoveIn);
+  const to = new Date(asOf);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from) return null;
+
+  const midnight = (d) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const days = Math.floor((midnight(to) - midnight(from)) / 86400000);
+
+  const calendar = contractDuration(from, to) || { years: 0, months: 0, days: 0 };
+
+  return {
+    // The headline: total days since the first move-in.
+    days,
+    // The same span read as a calendar, for the months/years view.
+    years: calendar.years,
+    months: calendar.months,
+    dayPart: calendar.days,
+    // Whole months elapsed — "he has been with us 32 months".
+    totalMonths: calendar.years * 12 + calendar.months,
+  };
+};
+
 /** The sheet writes gender and nationality in one cell: "Female: British". */
 export const genderAndNationality = (record) => {
   const raw = record?.gender || "";

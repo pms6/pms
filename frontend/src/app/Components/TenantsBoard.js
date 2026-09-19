@@ -11,6 +11,24 @@ import { PageHeader, Badge } from "../Shared/ui";
 import { formatMoney } from "@/app/utils/listings";
 import api from "@/app/api/api";
 
+/**
+ * The tenant's overall stay, as the directory hands it over: total days since
+ * their FIRST move-in, not the start of the tenancy they are currently on. A
+ * renewal creates a new tenancy record and carries this across unchanged.
+ */
+const stayDays = (stay) =>
+  stay ? `${(stay.days || 0).toLocaleString("en-GB")} ${stay.days === 1 ? "day" : "days"}` : "";
+
+/** The same span read as a calendar — "2 years 8 months 17 days". */
+const stayLong = (stay) => {
+  if (!stay) return "";
+  const parts = [];
+  if (stay.years) parts.push(`${stay.years} ${stay.years === 1 ? "year" : "years"}`);
+  if (stay.months) parts.push(`${stay.months} ${stay.months === 1 ? "month" : "months"}`);
+  if (stay.dayPart) parts.push(`${stay.dayPart} ${stay.dayPart === 1 ? "day" : "days"}`);
+  return parts.length ? parts.join(" ") : "0 days";
+};
+
 // Status → Badge tone, across right-to-rent, references, guarantor and deposit.
 const CHECK_TONE = {
   verified: "green", passed: "green", approved: "green", protected: "green",
@@ -166,9 +184,17 @@ function TenantDetail({ row, onClose }) {
               {ob.completedAt && <Badge tone="green">Onboarded</Badge>}
             </div>
             <p className="text-xs text-gray-400 font-medium mt-2">
-              {tenancy.startDate ? `Moved in ${fmtDate(tenancy.startDate)}` : "No start date recorded"}
+              {tenancy.startDate ? `This tenancy from ${fmtDate(tenancy.startDate)}` : "No start date recorded"}
               {termLabel(tenancy) ? ` · ${termLabel(tenancy)}` : ""}
             </p>
+            {tenancy.stay && (
+              <p className="text-xs font-bold text-[#0F253B] mt-1" title={stayLong(tenancy.stay)}>
+                With us {stayDays(tenancy.stay)}
+                <span className="font-medium text-gray-400">
+                  {" "}· since {fmtDate(tenancy.firstMoveInDate)}
+                </span>
+              </p>
+            )}
           </div>
           <button onClick={onClose} className="text-gray-300 hover:text-gray-500 shrink-0" title="Close">
             <X size={20} />
@@ -286,7 +312,18 @@ function TenantDetail({ row, onClose }) {
         )}
       </Section>
 
-      {/* TENANCY TERMS */}
+      {/* OVERALL STAY — deliberately its own section, separate from the current
+          tenancy's terms below, which a renewal replaces. */}
+      <Section title="Stay with us">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <Info label="First move-in" value={fmtDate(tenancy.firstMoveInDate)} icon={CalendarClock} />
+          <Info label="Overall stay" value={stayDays(tenancy.stay)} icon={History} />
+          <Info label="In months" value={tenancy.stay ? `${tenancy.stay.totalMonths} months` : ""} />
+          <Info label="In full" value={stayLong(tenancy.stay)} />
+        </div>
+      </Section>
+
+      {/* TENANCY TERMS — the CURRENT tenancy only. */}
       <Section title="Tenancy">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Info label="Status" value={tenancy.status} />
@@ -620,6 +657,14 @@ export default function TenantsBoard() {
                           {termLabel(r.tenancy) ||
                             (r.tenancy?.startDate ? fmtDate(r.tenancy.startDate) : r.tenancy?.status)}
                         </span>
+                        {r.tenancy?.stay && (
+                          <span
+                            className="ml-auto shrink-0 text-[11px] font-bold text-[#0F253B]"
+                            title={`With us ${stayLong(r.tenancy.stay)} · since ${fmtDate(r.tenancy.firstMoveInDate)}`}
+                          >
+                            {stayDays(r.tenancy.stay)}
+                          </span>
+                        )}
                       </div>
                     </button>
                   );

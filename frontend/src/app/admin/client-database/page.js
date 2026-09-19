@@ -16,6 +16,8 @@ import {
   date,
   ordinal,
   duration,
+  stay,
+  stayLong,
   ROOM_STATUS_LABEL,
   ROOM_STATUS_TONE,
   exportCsv,
@@ -36,6 +38,9 @@ const COLUMNS = [
   { header: "Gender & Nationality", value: (r) => r.genderNationality },
   { header: "Room Type", value: (r) => r.roomType },
   { header: "Contact #", value: (r) => r.phone },
+  { header: "First Move-In Date", value: (r) => date(r.firstMoveInDate) },
+  { header: "Overall Stay (Days)", value: (r) => (r.stay ? r.stay.days : "") },
+  { header: "Overall Stay", value: (r) => stayLong(r.stay) },
   { header: "Start Date", value: (r) => date(r.contractStart) },
   { header: "End Date", value: (r) => date(r.contractEnd) },
   { header: "Total Duration", value: (r) => duration(r.duration) },
@@ -50,8 +55,17 @@ const COLUMNS = [
 // `basePath` lets the manager portal render this same screen under its own
 // routes, the way PropertiesBoard already works. Next passes page props here,
 // none of which is basePath, so a real page render falls back to /admin.
+// How the overall-stay column is read. Days is what the sheet is kept in; the
+// other two say the same span differently.
+const STAY_UNITS = [
+  { key: "days", label: "Days" },
+  { key: "months", label: "Months" },
+  { key: "years", label: "Years" },
+];
+
 export default function AdminClientDatabase({ basePath = "/admin" }) {
   const [rows, setRows] = useState([]);
+  const [stayUnit, setStayUnit] = useState("days");
   const [summary, setSummary] = useState({});
   const [properties, setProperties] = useState([]);
   const [agents, setAgents] = useState([]);
@@ -188,6 +202,15 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
       ],
     },
     {
+      title: "Stay with us",
+      rows: [
+        { label: "First move-in", value: date(r.firstMoveInDate) },
+        { label: "Overall stay", value: r.stay ? `${r.stay.days.toLocaleString("en-GB")} days` : "" },
+        { label: "In months", value: r.stay ? `${r.stay.totalMonths} months` : "" },
+        { label: "In full", value: stayLong(r.stay) },
+      ],
+    },
+    {
       title: "Contract",
       rows: [
         { label: "Start", value: date(r.contractStart) },
@@ -320,6 +343,26 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
           <option value="PAST">Past clients</option>
           <option value="">Everyone</option>
         </select>
+
+        {/* The overall stay is one measurement; this only changes how it reads. */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Stay in</span>
+          <div className="flex gap-1">
+            {STAY_UNITS.map((u) => (
+              <button
+                key={u.key}
+                onClick={() => setStayUnit(u.key)}
+                className={`px-2.5 py-2 text-xs font-bold rounded-lg border transition-all ${
+                  stayUnit === u.key
+                    ? "bg-[#0F253B] text-white border-[#0F253B]"
+                    : "bg-white text-gray-500 border-gray-100 hover:bg-gray-50"
+                }`}
+              >
+                {u.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* The sheet itself */}
@@ -336,6 +379,7 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
                 <th className="px-5 py-3">Gender &amp; Nationality</th>
                 <th className="px-5 py-3">Room type</th>
                 <th className="px-5 py-3">Contact</th>
+                <th className="px-5 py-3">Stay with us</th>
                 <th className="px-5 py-3">Period of contract</th>
                 <th className="px-5 py-3 text-right">Rent</th>
                 <th className="px-5 py-3 text-right">Deposit</th>
@@ -347,9 +391,9 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={15} className="px-5 py-10 text-center text-gray-400">Loading the client database…</td></tr>
+                <tr><td colSpan={16} className="px-5 py-10 text-center text-gray-400">Loading the client database…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={15} className="px-5 py-10 text-center text-gray-400">No clients match these filters</td></tr>
+                <tr><td colSpan={16} className="px-5 py-10 text-center text-gray-400">No clients match these filters</td></tr>
               ) : (
                 rows.map((r) => (
                   <tr
@@ -415,6 +459,18 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
                     <td className="px-5 py-3 text-gray-500">{r.genderNationality || "—"}</td>
                     <td className="px-5 py-3 text-gray-500">{r.roomType || "—"}</td>
                     <td className="px-5 py-3 text-gray-500">{r.phone || "—"}</td>
+                    <td className="px-5 py-3">
+                      {r.firstMoveInDate ? (
+                        <>
+                          <p className="text-[13px] font-bold text-[#0F253B]" title={stayLong(r.stay)}>
+                            {stay(r.stay, stayUnit)}
+                          </p>
+                          <p className="text-[11px] text-gray-400">since {date(r.firstMoveInDate)}</p>
+                        </>
+                      ) : (
+                        <span className="text-gray-300" title="No first move-in date recorded">—</span>
+                      )}
+                    </td>
                     <td className="px-5 py-3">
                       {r.contractStart || r.contractEnd ? (
                         <>

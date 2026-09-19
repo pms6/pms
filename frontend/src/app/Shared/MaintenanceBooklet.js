@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Plus,
   X,
@@ -86,6 +86,10 @@ const LABEL = "block text-[10px] font-bold text-gray-400 uppercase tracking-wide
 
 const blankStep = () => ({ title: "", detail: "" });
 
+// How a room reads everywhere in the booklet — the picker, the filter bar
+// and the denormalised `room` string stored on an entry.
+const roomLabel = (r) => `${r.roomName || r.title || "Room"}${r.roomNumber ? ` · ${r.roomNumber}` : ""}`;
+
 const isVideo = (item) =>
   item?.type === "video" || /\.(mp4|mov|webm|m4v|avi|mkv)(\?|$)/i.test(item?.url || "");
 
@@ -96,6 +100,14 @@ const isPdf = (item) =>
 
 // Icon + label for an attachment's caption line.
 const mediaKind = (item) => (isVideo(item) ? "Video" : isPdf(item) ? "PDF" : "Photo");
+
+// The two halves of a job. An attachment saved before the booklet asked which
+// half it showed has no stage, so it is kept in its own group and never lost.
+const STAGES = [
+  { key: "before", label: "Before", hint: "The problem as it was found" },
+  { key: "after", label: "After", hint: "The finished work" },
+];
+const atStage = (items, stage) => items.filter((x) => (x.stage || "") === stage);
 
 // Older entries stored a single `image` string; fold it into the gallery so
 // nothing uploaded before the media field existed disappears from the screen.
@@ -141,12 +153,100 @@ function MediaTile({ item, className = "" }) {
   );
 }
 
+/** One stage's attachments in the read-only view. Always rendered for Before
+ * and After so the pair reads as a comparison even when one half is missing. */
+function MediaGroup({ label, items }) {
+  return (
+    <div>
+      <p className={LABEL}>{label} ({items.length})</p>
+      {items.length === 0 ? (
+        <p className="text-xs text-gray-300 font-medium py-6 text-center rounded-xl border border-dashed border-gray-100">
+          No {label.toLowerCase()} attachments
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          {items.map((item) => (
+            <div key={item.url}>
+              <MediaTile item={item} className="w-full h-28" />
+              <p className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-gray-400 truncate">
+                {isVideo(item) ? <Film size={11} /> : isPdf(item) ? <FileText size={11} /> : <ImageIcon size={11} />}
+                <span className="truncate">{item.name || mediaKind(item)}</span>
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The label under a row's field in the read-only view. */
 function ViewRow({ label, children }) {
   return (
     <div>
       <p className={LABEL}>{label}</p>
       <p className="text-sm font-semibold text-[#0F253B] break-words">{children || "—"}</p>
+    </div>
+  );
+}
+
+/** One upload section — a drop target for a stage and the tiles already on it.
+ * Omitting `onAdd` makes it read-only apart from removing, which is how the
+ * legacy "Other Attachments" group is shown. */
+function MediaUploadSection({ label, hint, items, uploading, onAdd, onRemove }) {
+  return (
+    <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+            <ImageIcon size={13} /> {label}
+          </p>
+          <p className="text-[11px] text-gray-400 font-medium truncate">{hint}</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {items.length > 0 && (
+            <span className="rounded-full bg-white border border-gray-100 px-2.5 py-1 text-[10px] font-bold text-gray-500">
+              {items.length}
+            </span>
+          )}
+          {uploading > 0 && (
+            <span className="text-[11px] font-bold text-gray-400 flex items-center gap-1.5">
+              <Loader2 size={13} className="animate-spin" /> Uploading {uploading}…
+            </span>
+          )}
+        </div>
+      </div>
+
+      {onAdd && (
+        <label className="flex flex-col items-center justify-center gap-1 py-5 rounded-xl border-2 border-dashed border-gray-200 bg-white hover:border-[#F47C3C] hover:bg-orange-50/40 cursor-pointer transition-all">
+          <UploadCloud size={20} className="text-gray-300" />
+          <span className="text-xs font-bold text-[#0F253B]">Add {label.toLowerCase()} photos, videos or PDFs</span>
+          <span className="text-[11px] text-gray-400 font-medium">Images &amp; PDFs up to 15MB · video up to 100MB</span>
+          <input type="file" accept="image/*,video/*,application/pdf" multiple className="hidden" onChange={onAdd} />
+        </label>
+      )}
+
+      {items.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {items.map((item) => (
+            <div key={item.url} className="relative group">
+              <MediaTile item={item} className="w-full h-28" />
+              <button
+                type="button"
+                onClick={() => onRemove(item.url)}
+                title="Remove"
+                className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-white/90 text-gray-400 hover:text-red-600 shadow-sm"
+              >
+                <X size={13} />
+              </button>
+              <p className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-gray-400 truncate">
+                {isVideo(item) ? <Film size={11} /> : isPdf(item) ? <FileText size={11} /> : <ImageIcon size={11} />}
+                <span className="truncate">{item.name || mediaKind(item)}</span>
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -182,11 +282,11 @@ function RequestModal({ initial, srNo, properties, suppliers, onClose, onSave })
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(0);
+  // Counted per stage so the spinner sits in the section being uploaded to.
+  const [uploading, setUploading] = useState({ before: 0, after: 0 });
+  const uploadingTotal = uploading.before + uploading.after;
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const roomLabel = (r) => `${r.roomName || r.title || "Room"}${r.roomNumber ? ` · ${r.roomNumber}` : ""}`;
 
   // An existing entry already has a property — load its rooms so the picker
   // isn't empty when the operator opens the edit form.
@@ -254,21 +354,21 @@ function RequestModal({ initial, srNo, properties, suppliers, onClose, onSave })
   /* --- photos and videos --- */
   // Uploads run one at a time so a failure names the file that failed and the
   // ones already up are kept.
-  const addMedia = async (e) => {
+  const addMedia = (stage) => async (e) => {
     const files = Array.from(e.target.files || []);
     e.target.value = ""; // let the same file be picked again after a removal
     if (!files.length) return;
 
     setError("");
-    setUploading(files.length);
+    setUploading((u) => ({ ...u, [stage]: u[stage] + files.length }));
     for (const file of files) {
       try {
         const item = await uploadMediaToCloudinary(file);
-        setForm((f) => ({ ...f, media: [...f.media, item] }));
+        setForm((f) => ({ ...f, media: [...f.media, { ...item, stage }] }));
       } catch (err) {
         setError(err.message || `Could not upload "${file.name}"`);
       } finally {
-        setUploading((n) => n - 1);
+        setUploading((u) => ({ ...u, [stage]: u[stage] - 1 }));
       }
     }
   };
@@ -282,7 +382,7 @@ function RequestModal({ initial, srNo, properties, suppliers, onClose, onSave })
       setError("Issue is required");
       return;
     }
-    if (uploading > 0) {
+    if (uploadingTotal > 0) {
       setError("Wait for the uploads to finish");
       return;
     }
@@ -422,48 +522,30 @@ function RequestModal({ initial, srNo, properties, suppliers, onClose, onSave })
             <textarea rows={2} className={FIELD} value={form.description} onChange={set("description")} placeholder="Details of the issue…" />
           </div>
 
-          {/* ---- Photos, videos & PDFs ---- */}
-          <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
-                <ImageIcon size={13} /> Photos, Videos &amp; PDFs
-              </p>
-              {uploading > 0 && (
-                <span className="text-[11px] font-bold text-gray-400 flex items-center gap-1.5">
-                  <Loader2 size={13} className="animate-spin" /> Uploading {uploading}…
-                </span>
-              )}
-            </div>
+          {/* ---- Before / After photos, videos & PDFs ---- */}
+          {STAGES.map((stage) => (
+            <MediaUploadSection
+              key={stage.key}
+              label={stage.label}
+              hint={stage.hint}
+              items={atStage(form.media, stage.key)}
+              uploading={uploading[stage.key]}
+              onAdd={addMedia(stage.key)}
+              onRemove={removeMedia}
+            />
+          ))}
 
-            <label className="flex flex-col items-center justify-center gap-1 py-5 rounded-xl border-2 border-dashed border-gray-200 bg-white hover:border-[#F47C3C] hover:bg-orange-50/40 cursor-pointer transition-all">
-              <UploadCloud size={20} className="text-gray-300" />
-              <span className="text-xs font-bold text-[#0F253B]">Add photos, videos or PDFs</span>
-              <span className="text-[11px] text-gray-400 font-medium">Images &amp; PDFs up to 15MB · video up to 100MB</span>
-              <input type="file" accept="image/*,video/*,application/pdf" multiple className="hidden" onChange={addMedia} />
-            </label>
-
-            {form.media.length > 0 && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {form.media.map((item) => (
-                  <div key={item.url} className="relative group">
-                    <MediaTile item={item} className="w-full h-28" />
-                    <button
-                      type="button"
-                      onClick={() => removeMedia(item.url)}
-                      title="Remove"
-                      className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-white/90 text-gray-400 hover:text-red-600 shadow-sm"
-                    >
-                      <X size={13} />
-                    </button>
-                    <p className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-gray-400 truncate">
-                      {isVideo(item) ? <Film size={11} /> : isPdf(item) ? <FileText size={11} /> : <ImageIcon size={11} />}
-                      <span className="truncate">{item.name || mediaKind(item)}</span>
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* Attachments saved before the booklet split them into Before and
+              After. Shown on their own so an old entry loses nothing. */}
+          {atStage(form.media, "").length > 0 && (
+            <MediaUploadSection
+              label="Other Attachments"
+              hint="Saved before Before/After existed"
+              items={atStage(form.media, "")}
+              uploading={0}
+              onRemove={removeMedia}
+            />
+          )}
 
           {/* ---- Solution column ---- */}
           <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4 space-y-3">
@@ -666,19 +748,13 @@ function ViewModal({ entry, srNo, onClose, onEdit }) {
         </div>
 
         {media.length > 0 && (
-          <div className="mt-5">
-            <p className={LABEL}>Photos, Videos &amp; PDFs ({media.length})</p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {media.map((item) => (
-                <div key={item.url}>
-                  <MediaTile item={item} className="w-full h-32" />
-                  <p className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-gray-400 truncate">
-                    {isVideo(item) ? <Film size={11} /> : isPdf(item) ? <FileText size={11} /> : <ImageIcon size={11} />}
-                    <span className="truncate">{item.name || mediaKind(item)}</span>
-                  </p>
-                </div>
-              ))}
-            </div>
+          <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {STAGES.map((stage) => (
+              <MediaGroup key={stage.key} label={stage.label} items={atStage(media, stage.key)} />
+            ))}
+            {atStage(media, "").length > 0 && (
+              <MediaGroup label="Other Attachments" items={atStage(media, "")} />
+            )}
           </div>
         )}
 
@@ -712,6 +788,10 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
+  const [propertyFilter, setPropertyFilter] = useState("");
+  const [roomFilter, setRoomFilter] = useState("");
+  const [filterRooms, setFilterRooms] = useState([]);
+  const [filterRoomsLoading, setFilterRoomsLoading] = useState(false);
   const [q, setQ] = useState("");
   const [modal, setModal] = useState(null); // {} = create, entry = edit
   const [viewing, setViewing] = useState(null); // read-only detail panel
@@ -741,6 +821,41 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
 
   useEffect(() => { load(); }, [load]);
 
+  // The room filter only makes sense inside one property, so its options are
+  // that property's rooms. Picking a property loads them and clears the room;
+  // roomsToken drops the answer to a property the operator has moved off.
+  const roomsToken = useRef(0);
+
+  const selectProperty = useCallback(async (propertyId) => {
+    const token = ++roomsToken.current;
+    setPropertyFilter(propertyId);
+    setRoomFilter("");
+    setFilterRooms([]);
+    if (!propertyId) {
+      setFilterRoomsLoading(false);
+      return;
+    }
+    setFilterRoomsLoading(true);
+    try {
+      const res = await api.get(`/rooms/property/${propertyId}`);
+      if (token === roomsToken.current) setFilterRooms(res.data.data || []);
+    } catch {
+      if (token === roomsToken.current) setFilterRooms([]);
+    } finally {
+      if (token === roomsToken.current) setFilterRoomsLoading(false);
+    }
+  }, []);
+
+  // The names to compare against for rows saved before the id fields existed.
+  const propertyName = useMemo(
+    () => properties.find((p) => p._id === propertyFilter)?.name || "",
+    [properties, propertyFilter]
+  );
+  const roomName = useMemo(() => {
+    const r = filterRooms.find((x) => x._id === roomFilter);
+    return r ? roomLabel(r) : "";
+  }, [filterRooms, roomFilter]);
+
   // Outstanding work first (pending / assigned / in progress), sorted issues
   // drop to the bottom automatically — the office reads the top of the list.
   // Within each group the order is creation order (stored srNo, createdAt
@@ -756,13 +871,53 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
           new Date(a.createdAt) - new Date(b.createdAt)
       )
       .filter((m) => (filter ? m.status === filter : true))
+      // Entries written before the property picker existed only carry the
+      // denormalised name, so match on either the id or the name.
+      .filter((m) =>
+        propertyFilter
+          ? String(m.propertyId || "") === propertyFilter ||
+            (!m.propertyId && m.property && m.property === propertyName)
+          : true
+      )
+      .filter((m) =>
+        roomFilter
+          ? String(m.roomId || "") === roomFilter || (!m.roomId && m.room && m.room === roomName)
+          : true
+      )
       .filter((m) =>
         needle
           ? [m.title, m.property, m.room, m.category, m.supplier, m.reportedBy, m.solutionTitle, m.ref]
               .some((v) => String(v || "").toLowerCase().includes(needle))
           : true
       );
-  }, [list, filter, q]);
+  }, [list, filter, q, propertyFilter, roomFilter, propertyName, roomName]);
+
+  // The sheet is read one status at a time — a card per stage of the work, in
+  // the order an entry moves through them. A row left on a retired status
+  // ("open" / "closed") lands in a trailing card so it is never hidden; that
+  // card only appears when such a row exists.
+  const sections = useMemo(() => {
+    const byStatus = new Map(STATUSES.map((st) => [st, []]));
+    const legacy = [];
+    rows.forEach((m) => (byStatus.get(m.status) || legacy).push(m));
+
+    const out = STATUSES.map((st) => ({
+      key: st,
+      title: nice(st),
+      rows: byStatus.get(st),
+      tone: STATUS_TONE[st],
+      empty: `Nothing ${nice(st)}`,
+    }));
+    if (legacy.length) {
+      out.push({ key: "__legacy", title: "Other", rows: legacy, tone: "gray", empty: "Nothing here" });
+    }
+    // Picking a status above means only that card is wanted — the rest would
+    // all be empty by definition.
+    return filter ? out.filter((sec) => sec.key === filter) : out;
+  }, [rows, filter]);
+
+  // Whether a section is empty because of a filter or because there is nothing.
+  const filtered = Boolean(filter || q || propertyFilter || roomFilter);
 
   // Sr# shown in the table is the row's POSITION in the list as it reads now —
   // always 1..N with no gaps. The stored srNo is a permanent record id and
@@ -883,6 +1038,39 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
             className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]"
           />
         </div>
+        <select
+          value={propertyFilter}
+          onChange={(e) => selectProperty(e.target.value)}
+          className="px-3 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]"
+        >
+          <option value="">All properties</option>
+          {properties.map((p) => (
+            <option key={p._id} value={p._id}>{p.name}</option>
+          ))}
+        </select>
+
+        <select
+          value={roomFilter}
+          onChange={(e) => setRoomFilter(e.target.value)}
+          disabled={!propertyFilter || filterRoomsLoading}
+          title={propertyFilter ? "Filter by room" : "Pick a property first"}
+          className="px-3 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C] disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <option value="">{filterRoomsLoading ? "Loading rooms…" : "All rooms"}</option>
+          {filterRooms.map((r) => (
+            <option key={r._id} value={r._id}>{roomLabel(r)}</option>
+          ))}
+        </select>
+
+        {(propertyFilter || roomFilter) && (
+          <button
+            onClick={() => selectProperty("")}
+            className="px-3 py-2.5 text-xs font-bold text-gray-500 hover:text-[#0F253B] border border-gray-100 bg-white rounded-xl transition-all"
+          >
+            Clear
+          </button>
+        )}
+
         <div className="flex gap-2 flex-wrap">
           {["", ...STATUSES].map((s) => (
             <button
@@ -898,50 +1086,31 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
         </div>
       </div>
 
-      <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
-                <th className="px-4 py-3 w-14">Sr#</th>
-                <th className="px-4 py-3">Property</th>
-                <th className="px-4 py-3 w-28">Date</th>
-                <th className="px-4 py-3">Issue</th>
-                <th className="px-4 py-3 w-36">Status</th>
-                <th className="px-4 py-3 w-24 text-right">Cost</th>
-                <th className="px-4 py-3">Solution</th>
-                <th className="px-4 py-3 w-32 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={8} className="px-5 py-10 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin inline text-[#F47C3C]" /></td></tr>
-              ) : rows.length === 0 ? (
-                <tr><td colSpan={8} className="px-5 py-10 text-center text-gray-400">No booklet entries {filter || q ? "match this filter" : "yet"}</td></tr>
-              ) : (
-                rows.map((m, i) => {
-                  const open = expanded === m._id;
-                  const steps = m.solutionSteps?.length || 0;
-                  return (
-                    <FragmentRow
-                      key={m._id}
-                      m={m}
-                      srNo={i + 1}
-                      open={open}
-                      steps={steps}
-                      onToggle={() => setExpanded(open ? null : m._id)}
-                      onStatus={(s) => changeStatus(m, s)}
-                      onView={() => setViewing(m)}
-                      onEdit={() => setModal(m)}
-                      onDelete={() => remove(m)}
-                    />
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+      {loading ? (
+        <div className="flex h-64 items-center justify-center bg-white border border-gray-100 rounded-2xl">
+          <Loader2 className="w-8 h-8 animate-spin text-[#F47C3C]" />
         </div>
-      </div>
+      ) : (
+        <div className="space-y-5">
+          {sections.map((sec) => (
+            <BookletSection
+              key={sec.key}
+              title={sec.title}
+              count={sec.rows.length}
+              tone={sec.tone}
+              rows={sec.rows}
+              posOf={posOf}
+              emptyMessage={filtered ? `No ${sec.title} entries match this filter` : sec.empty}
+              expanded={expanded}
+              onToggle={setExpanded}
+              onStatus={changeStatus}
+              onView={setViewing}
+              onEdit={setModal}
+              onDelete={remove}
+            />
+          ))}
+        </div>
+      )}
 
       {viewing && (
         <ViewModal
@@ -962,6 +1131,86 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
           onSave={save}
         />
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * One status of the sheet — a titled card with its own count and table.
+ * Each stage of the work is read on its own, rather than as one run of
+ * rows with the sorted ones at the bottom.
+ * ------------------------------------------------------------------ */
+// Keyed by STATUS_TONE so a card's pill matches the badge on its rows.
+const SECTION_PILL = {
+  amber: "bg-amber-50 text-amber-700",
+  blue: "bg-blue-50 text-blue-700",
+  orange: "bg-orange-50 text-orange-700",
+  green: "bg-emerald-50 text-emerald-700",
+  gray: "bg-gray-100 text-gray-600",
+};
+
+function BookletSection({
+  title,
+  count,
+  tone,
+  rows,
+  posOf,
+  emptyMessage,
+  expanded,
+  onToggle,
+  onStatus,
+  onView,
+  onEdit,
+  onDelete,
+}) {
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
+      <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+        <h2 className="text-base font-bold text-[#0F253B] capitalize">{title}</h2>
+        <span className={`rounded-full px-3 py-1 text-xs font-bold ${SECTION_PILL[tone] || SECTION_PILL.gray}`}>
+          {count} {count === 1 ? "Entry" : "Entries"}
+        </span>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
+              <th className="px-4 py-3 w-14">Sr#</th>
+              <th className="px-4 py-3">Property</th>
+              <th className="px-4 py-3 w-28">Date</th>
+              <th className="px-4 py-3">Issue</th>
+              <th className="px-4 py-3 w-36">Status</th>
+              <th className="px-4 py-3 w-24 text-right">Cost</th>
+              <th className="px-4 py-3">Solution</th>
+              <th className="px-4 py-3 w-32 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr><td colSpan={8} className="px-5 py-14 text-center text-sm text-gray-400">{emptyMessage}</td></tr>
+            ) : (
+              rows.map((m) => {
+                const open = expanded === m._id;
+                return (
+                  <FragmentRow
+                    key={m._id}
+                    m={m}
+                    srNo={posOf.get(m._id)}
+                    open={open}
+                    steps={m.solutionSteps?.length || 0}
+                    onToggle={() => onToggle(open ? null : m._id)}
+                    onStatus={(st) => onStatus(m, st)}
+                    onView={() => onView(m)}
+                    onEdit={() => onEdit(m)}
+                    onDelete={() => onDelete(m)}
+                  />
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

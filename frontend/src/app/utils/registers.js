@@ -56,6 +56,31 @@ export const duration = (d) => {
   return parts.length ? parts.join(" ") : "0 days";
 };
 
+/**
+ * The overall stay, in whichever unit the register is currently reading in.
+ *
+ * "days" is the default and the figure the sheet is kept in; "months" and
+ * "years" are the same span said differently, never a second measurement.
+ */
+export const stay = (s, unit = "days") => {
+  if (!s) return "—";
+  if (unit === "months") {
+    const m = s.totalMonths || 0;
+    const rest = s.dayPart || 0;
+    const head = `${m} ${m === 1 ? "month" : "months"}`;
+    return rest ? `${head} ${rest} ${rest === 1 ? "day" : "days"}` : head;
+  }
+  if (unit === "years") {
+    return duration({ years: s.years, months: s.months, days: s.dayPart });
+  }
+  const d = s.days || 0;
+  return `${d.toLocaleString("en-GB")} ${d === 1 ? "day" : "days"}`;
+};
+
+/** The long form, for a tooltip or a detail panel — always the full calendar. */
+export const stayLong = (s) =>
+  s ? duration({ years: s.years, months: s.months, days: s.dayPart }) : "—";
+
 export const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",

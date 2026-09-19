@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Home, Wrench, ShieldAlert, TrendingUp, BedDouble } from "lucide-react";
 import { StatCard, PageHeader, Card, Badge } from "../../Shared/ui";
 import api from "../../api/api";
+import WorkHoursSummaryCard from "../../Shared/WorkHoursSummaryCard";
 
 const PRIORITY_TONE = { urgent: "red", high: "amber", med: "gray", low: "gray" };
 
@@ -146,6 +147,9 @@ export default function ManagerDashboard() {
         <StatCard icon={TrendingUp} label="Vacant Rooms" value={s.occupancy?.vacant || 0} />
         <StatCard icon={Wrench} label="In Maintenance" value={s.occupancy?.maintenance || 0} sub="rooms" />
       </div>
+
+      {/* Team working hours — the week so far, linking into the full report */}
+      <WorkHoursSummaryCard basePath="/manager" />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Compliance Card */}

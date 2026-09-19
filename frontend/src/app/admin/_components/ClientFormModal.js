@@ -38,6 +38,7 @@ const emptyForm = {
   paymentDueDay: "",
   bank: "",
   agent: "",
+  firstMoveInDate: "",
   contractStart: "",
   contractEnd: "",
   status: "ACTIVE",
@@ -58,6 +59,7 @@ export default function ClientFormModal({ initial, properties, onClose, onSave }
       rent: initial.rent ?? "",
       deposit: initial.deposit ?? "",
       paymentDueDay: initial.paymentDueDay ?? "",
+      firstMoveInDate: dateInput(initial.firstMoveInDate),
       contractStart: dateInput(initial.contractStart),
       contractEnd: dateInput(initial.contractEnd),
       status: initial.status || "ACTIVE",
@@ -326,8 +328,26 @@ export default function ClientFormModal({ initial, properties, onClose, onSave }
             </div>
           </div>
 
-          {/* Period of contract — the only dates this register keeps. The room
-              rented and check-in dates live on the check-in record. */}
+          {/* First move-in — deliberately its own block, above and apart from the
+              contract dates. Renewing a contract means changing the two fields
+              below and leaving this one alone. */}
+          <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+            <label className={LABEL}>First move-in date</label>
+            <input
+              type="date"
+              max={new Date().toISOString().slice(0, 10)}
+              className={FIELD}
+              value={form.firstMoveInDate}
+              onChange={set("firstMoveInDate")}
+            />
+            <p className="mt-1.5 text-[11px] font-medium text-gray-400">
+              When this client first came to us — not the current contract. The overall stay is
+              counted from here and carries through every renewal.
+            </p>
+          </div>
+
+          {/* Period of contract — the CURRENT contract. The room rented and
+              check-in dates live on the check-in record. */}
           <div className="grid sm:grid-cols-3 gap-3">
             <div>
               <label className={LABEL}>Contract start</label>

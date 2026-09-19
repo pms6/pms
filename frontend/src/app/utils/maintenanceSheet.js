@@ -58,12 +58,20 @@ export const solutionText = (row) => {
 };
 
 // Attachments are URLs; one per line keeps the cell readable and each link
-// clickable once the sheet is opened.
+// clickable once the sheet is opened. Before/After shots are labelled so the
+// sheet keeps the distinction the booklet shows.
 const attachmentsText = (row) => {
   const media = Array.isArray(row.media) ? row.media : [];
-  const urls = media.map((f) => f.url).filter(Boolean);
-  if (row.image && !urls.includes(row.image)) urls.unshift(row.image);
-  return urls.join("\n");
+  const seen = new Set();
+  const lines = [];
+  media.forEach((f) => {
+    if (!f?.url || seen.has(f.url)) return;
+    seen.add(f.url);
+    const stage = f.stage === "before" ? "Before: " : f.stage === "after" ? "After: " : "";
+    lines.push(`${stage}${f.url}`);
+  });
+  if (row.image && !seen.has(row.image)) lines.unshift(row.image);
+  return lines.join("\n");
 };
 
 const rowToCells = (row, srNo) => [

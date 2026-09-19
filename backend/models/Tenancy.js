@@ -57,6 +57,13 @@ const tenancySchema = new mongoose.Schema(
     // ============================
     rent: { type: Number, default: 0 },
 
+    // When this tenant FIRST moved in with us, which is not the same thing as
+    // when the tenancy below started. A renewal is a new tenancy record with a
+    // new startDate; this carries across so the overall stay never resets.
+    // Nothing derives it after the record is created — only an explicit edit
+    // moves it.
+    firstMoveInDate: { type: Date, default: null, index: true },
+
     startDate: { type: Date, default: null },
     // A fixed-term tenancy has an end date; a periodic one has a periodic
     // start date instead. Exactly one is typically set.

@@ -29,8 +29,10 @@ const EDITABLE_KEYS = [
   "image",
 ];
 
-// Attachments arrive as [{ url, publicId, name, type, format, bytes }] straight
-// from the browser's Cloudinary upload. Keep only rows that actually have a URL.
+// Attachments arrive as [{ url, publicId, name, type, format, bytes, stage }]
+// straight from the browser's Cloudinary upload, where `stage` says whether the
+// shot is of the problem ("before") or the finished work ("after"). Keep only
+// rows that actually have a URL.
 const cleanMedia = (media) => {
   if (!Array.isArray(media)) return [];
   return media
@@ -45,6 +47,7 @@ const cleanMedia = (media) => {
         : "image",
       format: String(f?.format ?? "").trim(),
       bytes: Number(f?.bytes) || 0,
+      stage: ["before", "after"].includes(f?.stage) ? f.stage : "",
     }))
     .filter((f) => f.url);
 };

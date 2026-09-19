@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Card } from "../../Shared/ui";
 import api from "../../api/api";
+import WorkHoursSummaryCard from "../../Shared/WorkHoursSummaryCard";
 
 function Kpi({ icon: Icon, label, value, delta, tone = "light" }) {
   const wrap = {
@@ -227,6 +228,9 @@ export default function AdminDashboard() {
           <div><p className="text-2xl font-bold text-[#0F253B]">{stats.complianceDue}</p><p className="text-xs font-medium text-gray-400">Compliance due soon</p></div>
         </div>
       </div>
+
+      {/* Team working hours — the week so far, linking into the full report */}
+      <WorkHoursSummaryCard basePath="/admin" />
 
       {/* Activity + Today's Viewings */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

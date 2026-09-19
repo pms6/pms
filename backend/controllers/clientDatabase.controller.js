@@ -17,7 +17,7 @@
 import Property from "../models/Property.js";
 import Room from "../models/Room.js";
 import Client, { CLIENT_STATUSES } from "../models/Client.js";
-import { contractDuration, genderAndNationality } from "../utils/duration.js";
+import { contractDuration, stayDuration, genderAndNationality } from "../utils/duration.js";
 
 /**
  * Whitelist of fields a client may set. Anything else on the body — including
@@ -35,6 +35,7 @@ const EDITABLE_KEYS = [
   "phone",
   "gender",
   "nationality",
+  "firstMoveInDate",
   "contractStart",
   "contractEnd",
   "rent",
@@ -56,7 +57,7 @@ const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const exactCi = (value) => new RegExp(`^${escapeRegExp(String(value).trim())}$`, "i");
 
 const NUMERIC_KEYS = ["rent", "deposit"];
-const DATE_KEYS = ["contractStart", "contractEnd"];
+const DATE_KEYS = ["firstMoveInDate", "contractStart", "contractEnd"];
 const REF_KEYS = ["propertyId", "roomId"];
 
 const pickPayload = (body) => {
@@ -111,6 +112,18 @@ const normalisePayload = (payload) => {
   if (payload.contractStart && payload.contractEnd) {
     if (new Date(payload.contractEnd) < new Date(payload.contractStart)) {
       return "The contract end date cannot be before the start date.";
+    }
+  }
+
+  // A stay cannot start in the future — that reads as a negative number of days
+  // on the register, which is worse than an empty cell.
+  if (payload.firstMoveInDate) {
+    const moveIn = new Date(payload.firstMoveInDate);
+    if (Number.isNaN(moveIn.getTime())) {
+      return "The first move-in date is not a valid date.";
+    }
+    if (moveIn > new Date()) {
+      return "The first move-in date cannot be in the future.";
     }
   }
 
@@ -260,7 +273,13 @@ export const getClientDatabase = async (req, res) => {
         phone: c.phone || "",
         email: c.email || "",
 
-        // Period of contract — the only dates this register keeps.
+        // First move-in, and the overall stay measured from it. Independent of
+        // the contract dates below: a renewal moves those and leaves this alone,
+        // so a client on their fourth contract still reads as one long stay.
+        firstMoveInDate: c.firstMoveInDate || null,
+        stay: stayDuration(c.firstMoveInDate, now),
+
+        // Period of contract — the CURRENT contract only.
         contractStart: c.contractStart || null,
         contractEnd: c.contractEnd || null,
         duration: contractDuration(c.contractStart, c.contractEnd),
@@ -402,6 +421,14 @@ export const createClient = async (req, res) => {
     const { error } = await attachLinks(payload, organizationId);
     if (error) return res.status(404).json({ success: false, message: error });
 
+    // A new client's first move-in is their first contract's start unless the
+    // office typed one — someone entered from the old sheet may have moved in
+    // years before the contract that is running now. This happens on CREATE
+    // only: an update never derives it, so a renewal cannot overwrite it.
+    if (!payload.firstMoveInDate && payload.contractStart) {
+      payload.firstMoveInDate = payload.contractStart;
+    }
+
     const row = await Client.create({
       ...payload,
       organizationId,
@@ -446,6 +473,11 @@ export const updateClient = async (req, res) => {
 
     const { error } = await attachLinks(payload, organizationId);
     if (error) return res.status(404).json({ success: false, message: error });
+
+    // Note what is NOT here: nothing derives firstMoveInDate from contractStart
+    // on an update. Renewing a contract writes the new contract dates and
+    // leaves the first move-in exactly where it was, which is the whole point
+    // of keeping them as separate fields. Only an explicit edit moves it.
 
     const row = await Client.findOneAndUpdate(
       { _id: req.params.id, organizationId, isDeleted: false },

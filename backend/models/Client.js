@@ -15,9 +15,11 @@ import mongoose from "mongoose";
 //   • The same person can exist in both, with different details, and neither
 //     register corrects the other.
 //
-// The two dates the sheet is kept on are the contract's. Room rented date and
-// check-in date deliberately have no place here — they belong to the check-in
-// register, which is where they are managed.
+// The contract dates are the CURRENT contract's, and firstMoveInDate is the
+// client's original move-in — the two are independent on purpose, so renewing a
+// contract cannot shorten how long the client has been with us. Room rented date
+// and check-in date deliberately have no place here — they belong to the
+// check-in register, which is where they are managed.
 
 export const CLIENT_STATUSES = ["ACTIVE", "PAST"];
 
@@ -91,7 +93,17 @@ const clientSchema = new mongoose.Schema(
     nationality: { type: String, trim: true, default: "" },
 
     // ============================
-    // Period of contract — the only dates this register keeps
+    // First move-in — when this client came to us, ever
+    // ============================
+    // Kept completely apart from the contract dates below. A renewal writes a
+    // new contractStart/contractEnd and never touches this, so the overall stay
+    // carries through every renewal instead of resetting to zero. Nothing
+    // derives it automatically after the row is created: it is the one date on
+    // this register that only a person can change.
+    firstMoveInDate: { type: Date, default: null, index: true },
+
+    // ============================
+    // Period of contract — the CURRENT contract, nothing more
     // ============================
     contractStart: { type: Date, default: null, index: true },
     contractEnd: { type: Date, default: null, index: true },

@@ -42,6 +42,9 @@ const mediaSchema = new mongoose.Schema(
     // "pdf" covers documents attached to an entry — a quote, an invoice, a
     // contractor's report — which Cloudinary stores as an `image` resource.
     type: { type: String, enum: ["image", "video", "pdf"], default: "image" },
+    // Which half of the job the attachment shows. "" is an attachment saved
+    // before the booklet asked the question, so it belongs to neither.
+    stage: { type: String, enum: ["before", "after", ""], default: "" },
     format: { type: String, trim: true, default: "" },
     bytes: { type: Number, default: 0 },
   },

@@ -6,6 +6,8 @@ import {
   KeyRound,
   UserPlus,
   CalendarClock,
+  Timer,
+  Hourglass,
   ClipboardCheck,
   DoorOpen,
   Wallet,
@@ -66,11 +68,13 @@ const NAV = [
   { href: "/manager/audit", label: "Audit Log", icon: ClipboardCheck },
   { href: "/manager/team", label: "Team", icon: Users },
   { href: "/manager/live-location", label: "Live Location", icon: MapPin },
+  { href: "/manager/work-hours", label: "Working Hours", icon: Timer },
   { href: "/manager/tasks", label: "My Tasks", icon: ListChecks },
 
   // The registers that replace the office spreadsheets, in the same order as
   // the owner portal.
   { href: "/manager/client-database", label: "Client Database", icon: Database },
+  { href: "/manager/stay-duration", label: "Stay Duration", icon: Hourglass },
   { href: "/manager/check-in", label: "Check-in", icon: LogIn },
   { href: "/manager/reference-data", label: "Reference Data", icon: Contact },
   { href: "/manager/deposit-register", label: "Deposit", icon: PiggyBank },

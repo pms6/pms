@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Plus, Search, X, Pencil, Trash2, FileText, Paperclip, Loader2 } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
 import { OWNER_STATUS, money } from "../_data/dummy";
@@ -10,6 +10,12 @@ import { guardModalClose } from "@/app/Shared/modalGuard";
 const PAYOUT_TONE = { paid: "green", due: "amber", pending: "blue" };
 const statusMeta = (v) => OWNER_STATUS.find((s) => s.v === v) || { label: v, tone: "gray" };
 function initials(name) { return (name || "?").split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase(); }
+
+// How a room reads in the filter — matches the maintenance booklet.
+const roomLabel = (r) => `${r.roomName || r.title || "Room"}${r.roomNumber ? ` · ${r.roomNumber}` : ""}`;
+// The populated property a room sits in. Owners are stored against property
+// NAMES, so the name is what the filter ultimately compares.
+const roomProperty = (r) => (typeof r?.propertyId === "object" ? r.propertyId?.name : "") || r?.property || "";
 
 function OwnerModal({ initial, propertyOptions, onClose, onSave }) {
   const isEdit = Boolean(initial);
@@ -29,8 +35,17 @@ function OwnerModal({ initial, propertyOptions, onClose, onSave }) {
   const [saving, setSaving] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
-  const toggleProperty = (name) =>
-    setForm((f) => ({ ...f, properties: f.properties.includes(name) ? f.properties.filter((p) => p !== name) : [...f.properties, name] }));
+  // The picker only offers what isn't already on the owner, so choosing from it
+  // always adds. Removing is done on the chip below.
+  const addProperty = (e) => {
+    const name = e.target.value;
+    e.target.value = "";
+    if (!name) return;
+    setForm((f) => (f.properties.includes(name) ? f : { ...f, properties: [...f.properties, name] }));
+  };
+
+  const removeProperty = (name) =>
+    setForm((f) => ({ ...f, properties: f.properties.filter((p) => p !== name) }));
 
   const addFiles = (e) => {
     const names = Array.from(e.target.files || []).map((f) => f.name);
@@ -62,6 +77,10 @@ function OwnerModal({ initial, propertyOptions, onClose, onSave }) {
       setSaving(false);
     }
   };
+
+  // An owner saved before a property was renamed can hold a name the picker no
+  // longer lists; it still shows as a chip, it just isn't offered again.
+  const unpicked = propertyOptions.filter((p) => !form.properties.includes(p.name));
 
   const field = "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium";
   const labelCls = "block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5";
@@ -113,16 +132,23 @@ function OwnerModal({ initial, propertyOptions, onClose, onSave }) {
             {propertyOptions.length === 0 ? (
               <p className="text-[11px] text-gray-400 font-medium">No properties yet — add properties first to link them.</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                {propertyOptions.map((p) => {
-                  const on = form.properties.includes(p.name);
-                  return (
-                    <button key={p._id || p.name} type="button" onClick={() => toggleProperty(p.name)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${on ? "bg-[#F47C3C] text-white border-[#F47C3C]" : "bg-gray-50 text-gray-500 border-gray-100 hover:bg-gray-100"}`}>
-                      {p.name}
+              <select className={field} value="" onChange={addProperty} disabled={unpicked.length === 0}>
+                <option value="">{unpicked.length === 0 ? "All properties added" : "Select a property to add…"}</option>
+                {unpicked.map((p) => (
+                  <option key={p._id || p.name} value={p.name}>{p.name}</option>
+                ))}
+              </select>
+            )}
+            {form.properties.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {form.properties.map((name) => (
+                  <span key={name} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-[#F47C3C] text-white">
+                    {name}
+                    <button type="button" onClick={() => removeProperty(name)} title={`Remove ${name}`} className="text-white/70 hover:text-white">
+                      <X size={12} />
                     </button>
-                  );
-                })}
+                  </span>
+                ))}
               </div>
             )}
             <p className="text-[11px] text-gray-400 font-medium mt-1.5">{form.properties.length} propert{form.properties.length === 1 ? "y" : "ies"} selected</p>
@@ -166,6 +192,9 @@ export default function AdminOwners() {
   const [owners, setOwners] = useState([]);
   const [propertyOptions, setPropertyOptions] = useState([]);
   const [q, setQ] = useState("");
+  const [propertyFilter, setPropertyFilter] = useState("");
+  const [roomFilter, setRoomFilter] = useState("");
+  const [rooms, setRooms] = useState([]);
   const [modal, setModal] = useState(null); // null | {} (create) | owner (edit)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -192,7 +221,19 @@ export default function AdminOwners() {
     }
   }, []);
 
-  useEffect(() => { fetchOwners(); fetchProperties(); }, [fetchOwners, fetchProperties]);
+  // Every room in the organization, each carrying its property. Loaded once so
+  // the room filter can work on its own — pick a room and see who owns the
+  // place it is in, without knowing the property first.
+  const fetchRooms = useCallback(async () => {
+    try {
+      const res = await api.get("/rooms", { params: { limit: 500 } });
+      setRooms(res.data?.data || []);
+    } catch {
+      /* room filter is optional context; ignore */
+    }
+  }, []);
+
+  useEffect(() => { fetchOwners(); fetchProperties(); fetchRooms(); }, [fetchOwners, fetchProperties, fetchRooms]);
 
   // Create or update, then refresh. Throws on failure so the modal shows it.
   const save = async (payload) => {
@@ -215,7 +256,23 @@ export default function AdminOwners() {
     }
   };
 
-  const list = owners.filter((o) => o.name?.toLowerCase().includes(q.toLowerCase()) || (o.email || "").toLowerCase().includes(q.toLowerCase()));
+  // Narrowed to the chosen property once there is one; otherwise every room is
+  // on offer and the option says which property it belongs to.
+  const roomOptions = useMemo(
+    () => (propertyFilter ? rooms.filter((r) => roomProperty(r) === propertyFilter) : rooms),
+    [rooms, propertyFilter]
+  );
+
+  // A room stands in for its property — the owner record knows nothing finer.
+  const roomPropertyName = useMemo(
+    () => roomProperty(rooms.find((r) => r._id === roomFilter)),
+    [rooms, roomFilter]
+  );
+
+  const list = owners
+    .filter((o) => (propertyFilter ? (o.properties || []).includes(propertyFilter) : true))
+    .filter((o) => (roomFilter ? (o.properties || []).includes(roomPropertyName) : true))
+    .filter((o) => o.name?.toLowerCase().includes(q.toLowerCase()) || (o.email || "").toLowerCase().includes(q.toLowerCase()));
   const totalIncome = owners.reduce((s, o) => s + (o.monthlyIncome || 0), 0);
   const totalProperties = owners.reduce((s, o) => s + (o.properties?.length || 0), 0);
 
@@ -245,9 +302,46 @@ export default function AdminOwners() {
         ))}
       </div>
 
-      <div className="relative max-w-sm">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search owners…" className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]" />
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative max-w-sm flex-1 min-w-[200px]">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search owners…" className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]" />
+        </div>
+
+        <select
+          value={propertyFilter}
+          onChange={(e) => { setPropertyFilter(e.target.value); setRoomFilter(""); }}
+          className="px-3 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]"
+        >
+          <option value="">All properties</option>
+          {propertyOptions.map((p) => (
+            <option key={p._id || p.name} value={p.name}>{p.name}</option>
+          ))}
+        </select>
+
+        <select
+          value={roomFilter}
+          onChange={(e) => setRoomFilter(e.target.value)}
+          disabled={roomOptions.length === 0}
+          title={roomOptions.length === 0 ? "No rooms to filter by" : "Show the owner of the property this room is in"}
+          className="px-3 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C] disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <option value="">All rooms</option>
+          {roomOptions.map((r) => (
+            <option key={r._id} value={r._id}>
+              {propertyFilter ? roomLabel(r) : `${roomProperty(r) || "—"} · ${roomLabel(r)}`}
+            </option>
+          ))}
+        </select>
+
+        {(propertyFilter || roomFilter) && (
+          <button
+            onClick={() => { setPropertyFilter(""); setRoomFilter(""); }}
+            className="px-3 py-2.5 text-xs font-bold text-gray-500 hover:text-[#0F253B] border border-gray-100 bg-white rounded-xl transition-all"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {error && (
@@ -276,7 +370,7 @@ export default function AdminOwners() {
               {loading ? (
                 <tr><td colSpan={7} className="px-5 py-10 text-center text-gray-400"><Loader2 className="w-6 h-6 animate-spin inline text-[#F47C3C]" /></td></tr>
               ) : list.length === 0 ? (
-                <tr><td colSpan={7} className="px-5 py-10 text-center text-gray-400">No owners found</td></tr>
+                <tr><td colSpan={7} className="px-5 py-10 text-center text-gray-400">{q || propertyFilter || roomFilter ? "No owners match this filter" : "No owners found"}</td></tr>
               ) : (
                 list.map((o) => {
                   const sm = statusMeta(o.status);

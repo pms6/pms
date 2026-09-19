@@ -34,6 +34,8 @@ import emptyRoomStatusRoutes from "./emptyRoomStatus.route.js"
 import companyPasswordRoutes from "./companyPassword.route.js"
 import screenMonitorRoutes from "./screenMonitor.route.js"
 import presenceRoutes from "./presence.route.js"
+import timeReportRoutes from "./timeReport.route.js"
+import stayDurationRoutes from "./stayDuration.route.js"
 import notificationRoutes from "./notification.route.js"
 
 const router = express.Router();
@@ -83,6 +85,10 @@ router.use("/reference-data", referenceDataRoutes);
 router.use("/deposit-register", depositRegisterRoutes);
 router.use("/client-database", clientDatabaseRoutes);
 
+// Overall Stay Duration — how long each person has been with us, read across
+// the client register and the tenancy register together.
+router.use("/stay-duration", stayDurationRoutes);
+
 // Inventory — the schedule of condition, flattened across every property and
 // room so the whole organisation reads as one sheet.
 router.use("/inventory", inventoryRoutes);
@@ -101,6 +107,10 @@ router.use("/screen-monitor", screenMonitorRoutes);
 
 // Who on the team is at their desk right now.
 router.use("/presence", presenceRoutes);
+
+// Team working-hours reporting, read off the monitored shifts. Wider audience
+// than the screenshots — owner, admin and manager — and it never returns one.
+router.use("/time-reports", timeReportRoutes);
 
 // In-app alerts — the bell every role's portal reads, mostly fed today by
 // Task Management (assignment, comments, progress updates).

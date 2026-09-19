@@ -6,6 +6,8 @@ import {
   KeyRound,
   UserPlus,
   CalendarClock,
+  Timer,
+  Hourglass,
   ClipboardCheck,
   DoorOpen,
   Wallet,
@@ -73,6 +75,7 @@ const NAV = [
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardCheck },
   { href: "/admin/users", label: "Team", icon: Users },
   { href: "/admin/live-location", label: "Live Location", icon: MapPin },
+  { href: "/admin/work-hours", label: "Working Hours", icon: Timer },
   { href: "/admin/staff-monitoring", label: "Staff Monitoring", icon: Monitor },
   { href: "/admin/settings", label: "Account", icon: Settings },
 
@@ -80,6 +83,7 @@ const NAV = [
   // lifecycle order — a tenant moves in, holds a deposit, moves out — but as
   // plain entries like everything else above them.
   { href: "/admin/client-database", label: "Client Database", icon: Database },
+  { href: "/admin/stay-duration", label: "Stay Duration", icon: Hourglass },
   { href: "/admin/check-in", label: "Check-in", icon: LogIn },
   { href: "/admin/reference-data", label: "Reference Data", icon: Contact },
   { href: "/admin/deposit-register", label: "Deposit", icon: PiggyBank },
