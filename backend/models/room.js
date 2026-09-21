@@ -89,9 +89,19 @@ const roomSchema = new mongoose.Schema(
     // Pricing
     // ============================
 
+    // The room's price — for a room that can take a couple, the price for
+    // one person living in it (single occupancy).
     monthlyRent: {
       type: Number,
       required: true,
+    },
+
+    // Optional second price for the same room when two people / a couple live
+    // in it. null = the room has one price only.
+    doubleOccupancyRent: {
+      type: Number,
+      default: null,
+      min: 0,
     },
 
     // Whether monthlyRent is advertised per calendar month or per week.

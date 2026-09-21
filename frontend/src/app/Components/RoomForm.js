@@ -110,6 +110,7 @@ const EMPTY = {
   roomNumber: "",
   description: "",
   monthlyRent: "",
+  doubleOccupancyRent: "",
   rentPeriod: "MONTHLY",
   securityDeposit: "",
   holdingDeposit: "",
@@ -165,6 +166,7 @@ const fromApi = (room) => ({
   roomNumber: room.roomNumber || "",
   description: room.description || "",
   monthlyRent: room.monthlyRent ?? "",
+  doubleOccupancyRent: room.doubleOccupancyRent ?? "",
   rentPeriod: room.rentPeriod || "MONTHLY",
   securityDeposit: room.securityDeposit ?? "",
   holdingDeposit: room.holdingDeposit ?? "",
@@ -421,6 +423,10 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
       setError("Cost of room is required and must be greater than 0");
       return;
     }
+    if (form.doubleOccupancyRent !== "" && Number(form.doubleOccupancyRent) < 0) {
+      setError("Double occupancy / couple price cannot be negative");
+      return;
+    }
     if (form.maximumTenancy > 0 && form.maximumTenancy < form.minimumTenancy) {
       setError("Maximum stay cannot be shorter than the minimum stay");
       return;
@@ -455,6 +461,8 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
         furnished: form.furnished,
         floor: form.floor.trim() || undefined,
         monthlyRent: Number(form.monthlyRent),
+        // Blank clears it — the room then has one price only.
+        doubleOccupancyRent: Number(form.doubleOccupancyRent) > 0 ? Number(form.doubleOccupancyRent) : null,
         rentPeriod: form.rentPeriod,
         securityDeposit: form.securityDeposit ? Number(form.securityDeposit) : undefined,
         holdingDeposit: form.holdingDeposit ? Number(form.holdingDeposit) : undefined,
@@ -625,7 +633,7 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
         </Panel>
 
         <Panel title="Pricing">
-          <Field label="Cost of room *">
+          <Field label="Cost of room *" hint="If the room also has a couple price, this is the single occupancy price.">
             <div className="flex flex-wrap items-center gap-2">
               <div className="w-40">
                 <MoneyInput
@@ -636,6 +644,19 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
                 />
               </div>
               <Choice options={RENT_PERIODS} value={form.rentPeriod} onChange={(v) => setField("rentPeriod", v)} />
+            </div>
+          </Field>
+
+          <Field
+            label="Double occupancy / couple price (optional)"
+            hint="Leave blank if the room has one price. Uses the same period as the cost of room."
+          >
+            <div className="w-40">
+              <MoneyInput
+                value={form.doubleOccupancyRent}
+                onChange={(e) => setField("doubleOccupancyRent", e.target.value)}
+                placeholder="1050"
+              />
             </div>
           </Field>
 

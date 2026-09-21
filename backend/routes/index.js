@@ -39,6 +39,7 @@ import stayDurationRoutes from "./stayDuration.route.js"
 import notificationRoutes from "./notification.route.js"
 import gardenRoutes from "./garden.route.js"
 import courtClaimRoutes from "./courtClaim.route.js"
+import emailRecordRoutes from "./emailRecord.route.js"
 
 const router = express.Router();
 
@@ -103,6 +104,10 @@ router.use("/garden", gardenRoutes);
 
 // Court Claims — claims brought by or against the company, with their paperwork.
 router.use("/court-claims", courtClaimRoutes);
+
+// Email Records — the property-management communication log: emails, calls
+// and messages, their replies and follow-ups.
+router.use("/email-records", emailRecordRoutes);
 
 // Available Rooms Status — the make-ready sheet for rooms between tenants.
 router.use("/empty-rooms", emptyRoomStatusRoutes);

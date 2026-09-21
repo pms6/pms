@@ -13,6 +13,7 @@ import { sendAllPendingReminders } from "./cranjob/complianceReminder.js";
 import { sendAllContractReminders } from "./cranjob/contractReminder.js";
 import { sendAllLocationDigests } from "./cranjob/locationDigest.js";
 import { generateAllSchedules } from "./cranjob/cleaningSchedule.js";
+import { sweepEmailFollowUps } from "./cranjob/emailFollowUp.js";
 import { purgeExpiredCaptures, closeAbandonedSessions } from "./controllers/screenMonitor.controller.js";
 
 const app = express();
@@ -69,6 +70,14 @@ cron.schedule("0 8 * * *", async () => {
   const contracts = await sendAllContractReminders();
   console.log(
     `Contract reminders sent: ${contracts.sentCount}, Skipped: ${contracts.skipped}, Errors: ${contracts.errors.length}`
+  );
+
+  // Email Records whose follow-up date has come round, and urgent ones left
+  // unresolved past it.
+  console.log("Running email record follow-ups...");
+  const emails = await sweepEmailFollowUps();
+  console.log(
+    `Email follow-up reminders: ${emails.reminders}, Escalations: ${emails.escalations}, Errors: ${emails.errors.length}`
   );
 
   // Staff screenshots past their organization's retention period are deleted

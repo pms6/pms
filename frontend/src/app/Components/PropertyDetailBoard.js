@@ -170,7 +170,10 @@ function RoomDetail({ room, property, onEdit, onManage }) {
                 </button>
               </div>
             </div>
-            <p className="text-2xl font-bold text-[#0F253B] mt-4">{room.rent ? money(room.rent) : "-"}<span className="text-xs font-medium text-gray-400">/mo</span></p>
+            <p className="text-2xl font-bold text-[#0F253B] mt-4">{room.rent ? money(room.rent) : "-"}<span className="text-xs font-medium text-gray-400">/mo{room.coupleRent ? " single occupancy" : ""}</span></p>
+            {room.coupleRent && (
+              <p className="text-sm font-bold text-[#0F253B] mt-1">{money(room.coupleRent)}<span className="text-xs font-medium text-gray-400">/mo double occupancy / couple</span></p>
+            )}
             {room.tenant && <p className="text-sm text-[#0F253B] font-semibold mt-2 flex items-center gap-1.5"><UserRound size={14} className="text-[#F47C3C]" />{room.tenant}</p>}
             {room.notes && <p className="text-sm text-gray-500 font-medium mt-4 leading-6">{room.notes}</p>}
           </div>
@@ -320,6 +323,7 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
           name: room.roomName,
           title: room.title,
           rent: room.monthlyRent,
+          coupleRent: room.doubleOccupancyRent || null,
           moneyHeld: room.securityDeposit || 0,
           status: room.status,
           tenant: room.currentTenant?.name || null,

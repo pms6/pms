@@ -142,9 +142,14 @@ export default function NotificationBell() {
     // the list — so this is the deepest a click can point: that role's own
     // task list, with ?open= for the list to pick up and open the panel on
     // load (admin/tasks/page.js and Shared/MyTasks.js both read it).
-    const target = n.relatedType === "Task" && n.relatedId
-      ? `${taskPath}?open=${n.relatedId}`
-      : taskPath;
+    // Email Records lives in the admin portal only, so its notifications go
+    // there for an admin and fall back to the task list for anyone else.
+    const target =
+      n.relatedType === "EmailRecord" && n.relatedId && role === "organization"
+        ? `/admin/email-records?open=${n.relatedId}`
+        : n.relatedType === "Task" && n.relatedId
+          ? `${taskPath}?open=${n.relatedId}`
+          : taskPath;
     router.push(target);
   };
 

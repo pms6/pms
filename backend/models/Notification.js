@@ -15,6 +15,11 @@ export const NOTIFICATION_TYPES = [
   "task_assigned",
   "task_comment",
   "task_update",
+  // Email Records — a record handed to someone, a follow-up that has come
+  // due, and an urgent one left unresolved past its follow-up date.
+  "email_assigned",
+  "email_followup",
+  "email_escalated",
 ];
 
 const notificationSchema = new mongoose.Schema(

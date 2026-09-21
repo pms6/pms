@@ -122,8 +122,10 @@ export default function AvailableRoomsPage() {
                 </td>
                 <td className="px-5 py-4 text-gray-600">{row.area}</td>
                 <td className="px-5 py-4 text-gray-600">{row.zone || "—"}</td>
-                <td className="px-5 py-4 font-medium text-gray-900">
-                  {row.price}
+                <td className="px-5 py-4 font-medium text-gray-900 whitespace-nowrap">
+                  {(row.priceLines?.length ? row.priceLines : [row.price]).map((line) => (
+                    <p key={line}>{line}</p>
+                  ))}
                 </td>
                 <td className="px-5 py-4 text-gray-600">{row.deposit}</td>
                 <td className="px-5 py-4 text-gray-600">

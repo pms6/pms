@@ -33,6 +33,46 @@ const cleanExTenants = (list) => {
     .filter((t) => t.name || t.email || t.joinDate || t.endDate);
 };
 
+// A second, optional price from the form: blank / zero / nonsense clears it.
+const optionalPrice = (v) => {
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  return v !== null && v !== "" && Number.isFinite(n) && n > 0 ? n : null;
+};
+
+// "Size of room" on the room form is stored as `occupancy`; the older
+// roomType values SINGLE / DOUBLE are only a fallback for rooms saved before
+// that field was filled in.
+const ROOM_SIZE_LABEL = { SINGLE: "Single", DOUBLE: "Double", TWIN: "Twin", FAMILY: "Family" };
+
+const roomSizeLabel = (room) => {
+  if (room.roomType === "STUDIO") return "Studio";
+  if (ROOM_SIZE_LABEL[room.occupancy]) return ROOM_SIZE_LABEL[room.occupancy];
+  if (room.roomType === "DOUBLE") return "Double";
+  return "Single";
+};
+
+const gbp = (n) => `£${Number(n || 0).toLocaleString("en-GB", { maximumFractionDigits: 2 })}`;
+
+// The Available Rooms "Price" cell, one line per price:
+//   one price            -> ["Single: £650"] / ["Double Ensuite: £900"]
+//   single + couple      -> ["Single occupancy: £970", "Double/Couple: £1,050"]
+const roomPriceLines = (room) => {
+  const ensuite = room.roomType === "ENSUITE" || room.bathroomType === "private";
+  const per = room.rentPeriod === "WEEKLY" ? " pw" : "";
+  const rent = room.monthlyRent || 0;
+  const coupleRent = room.doubleOccupancyRent > 0 ? room.doubleOccupancyRent : null;
+  const suffix = ensuite ? " (Ensuite)" : "";
+
+  if (coupleRent) {
+    return [
+      `Single occupancy${suffix}: ${gbp(rent)}${per}`,
+      `Double/Couple${suffix}: ${gbp(coupleRent)}${per}`,
+    ];
+  }
+  return [`${roomSizeLabel(room)}${ensuite ? " Ensuite" : ""}: ${gbp(rent)}${per}`];
+};
+
 export const createRoom = async (req, res) => {
   try {
     const organizationId = req.user.organizationId;
@@ -52,6 +92,7 @@ export const createRoom = async (req, res) => {
       roomSize,
       bathroomType,
       monthlyRent,
+      doubleOccupancyRent,
       rentPeriod,
       securityDeposit,
       holdingDeposit,
@@ -126,6 +167,7 @@ export const createRoom = async (req, res) => {
       roomSize,
       bathroomType,
       monthlyRent,
+      doubleOccupancyRent: optionalPrice(doubleOccupancyRent) ?? null,
       rentPeriod: rentPeriod || "MONTHLY",
       securityDeposit,
       holdingDeposit,
@@ -402,6 +444,7 @@ export const updateRoom = async (req, res) => {
       roomSize,
       bathroomType,
       monthlyRent,
+      doubleOccupancyRent,
       rentPeriod,
       securityDeposit,
       holdingDeposit,
@@ -440,6 +483,7 @@ export const updateRoom = async (req, res) => {
     if (roomSize !== undefined) room.roomSize = roomSize;
     if (bathroomType) room.bathroomType = bathroomType;
     if (monthlyRent) room.monthlyRent = monthlyRent;
+    if (doubleOccupancyRent !== undefined) room.doubleOccupancyRent = optionalPrice(doubleOccupancyRent);
     if (rentPeriod) room.rentPeriod = rentPeriod;
     if (securityDeposit !== undefined) room.securityDeposit = securityDeposit;
     if (holdingDeposit !== undefined) room.holdingDeposit = holdingDeposit;
@@ -584,10 +628,15 @@ export const updateRoomStatus = async (req, res) => {
 export const updateRoomPricing = async (req, res) => {
   try {
     const { id } = req.params;
-    const { monthlyRent, securityDeposit, holdingDeposit } = req.body;
+    const { monthlyRent, doubleOccupancyRent, securityDeposit, holdingDeposit } = req.body;
     const organizationId = req.user.organizationId;
 
-    if (!monthlyRent && securityDeposit === undefined && holdingDeposit === undefined) {
+    if (
+      !monthlyRent &&
+      doubleOccupancyRent === undefined &&
+      securityDeposit === undefined &&
+      holdingDeposit === undefined
+    ) {
       return res.status(400).json({
         success: false,
         message: "At least one pricing field is required.",
@@ -607,6 +656,7 @@ export const updateRoomPricing = async (req, res) => {
     }
 
     if (monthlyRent) room.monthlyRent = monthlyRent;
+    if (doubleOccupancyRent !== undefined) room.doubleOccupancyRent = optionalPrice(doubleOccupancyRent);
     if (securityDeposit !== undefined) room.securityDeposit = securityDeposit;
     if (holdingDeposit !== undefined) room.holdingDeposit = holdingDeposit;
 
@@ -885,12 +935,11 @@ export const getAvailableRooms = async (req, res) => {
 
       // Pricing
       const rent = room.monthlyRent || 0;
+      const coupleRent = room.doubleOccupancyRent > 0 ? room.doubleOccupancyRent : null;
       const deposit = room.securityDeposit != null ? room.securityDeposit : null;
 
-      const priceStr =
-        room.roomType === "ENSUITE" || room.bathroomType === "private"
-          ? `Ensuite:£${rent}`
-          : `DR=£${rent}`;
+      const priceLines = roomPriceLines(room);
+      const priceStr = priceLines.join(" / ");
 
       const depositStr = deposit != null ? `£${deposit}` : "—";
 
@@ -903,7 +952,9 @@ export const getAvailableRooms = async (req, res) => {
         zone: property.zone || null,
         price: priceStr,
         deposit: depositStr,
+        priceLines,
         monthlyRent: rent,
+        doubleOccupancyRent: coupleRent,
         securityDeposit: deposit,
         exTenant: exTenantName,
         exTenantDetail,
@@ -914,7 +965,7 @@ export const getAvailableRooms = async (req, res) => {
           endDate: t.endDate || null,
         })),
         occupancy:
-          room.occupancy === "DOUBLE" || room.occupancy === "TWIN"
+          coupleRent || room.occupancy === "DOUBLE" || room.occupancy === "TWIN"
             ? "Single/Double"
             : "Single",
         bank: property.bank || null,
