@@ -40,6 +40,7 @@ import notificationRoutes from "./notification.route.js"
 import gardenRoutes from "./garden.route.js"
 import courtClaimRoutes from "./courtClaim.route.js"
 import emailRecordRoutes from "./emailRecord.route.js"
+import councilTaxBillsRoutes from "./councilTaxBills.route.js"
 
 const router = express.Router();
 
@@ -108,6 +109,9 @@ router.use("/court-claims", courtClaimRoutes);
 // Email Records — the property-management communication log: emails, calls
 // and messages, their replies and follow-ups.
 router.use("/email-records", emailRecordRoutes);
+
+// Council Tax and Bills — the council tax sheet and the utility bills record.
+router.use("/council-tax-bills", councilTaxBillsRoutes);
 
 // Available Rooms Status — the make-ready sheet for rooms between tenants.
 router.use("/empty-rooms", emptyRoomStatusRoutes);

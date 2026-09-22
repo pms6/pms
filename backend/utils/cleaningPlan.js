@@ -27,10 +27,14 @@ export const RECURRING = {
 };
 
 const ROTATION = "Cleaning Schedule";
+const FRIDGE = "Fridge Cleaning";
+const INSPECTION = "Self Inspection";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// How far ahead of its due date a repeat task is put on the board.
-const RECURRING_LOOKAHEAD_DAYS = 30;
+// How far a Self Inspection is allowed to be nudged to dodge a same-day
+// Fridge Cleaning for the same property. Generous, but bounded so a data
+// oddity can never spin the shift into an infinite loop.
+const CONFLICT_MAX_SHIFT_DAYS = 60;
 
 /* ------------------------------------------------------------------ *
  * Date helpers
@@ -63,6 +67,15 @@ export const addMonths = (date, months) => {
   const month = ((target % 12) + 12) % 12;
   const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   return new Date(Date.UTC(year, month, Math.min(d.getUTCDate(), lastDay)));
+};
+
+// The last day of the calendar month `date` falls in. A UK office's calendar
+// date never disagrees with its UTC one — a UTC midnight is already the next
+// local instant, not the previous local day — so this needs no timezone
+// conversion despite the properties all being in Europe/London.
+export const endOfMonth = (date) => {
+  const d = utcDay(date);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
 };
 
 // 1970-01-05 was a Monday. Working days are numbered from there with Sundays
@@ -125,7 +138,7 @@ export const computeNextDue = (category, date, cycleDays) => {
 // since its last clean; each day takes the properties that have waited longest.
 // Existing rows — done, pending or hand-entered — count both as slots already
 // taken and as the property's last clean, so re-running never doubles anything.
-const planRotation = async ({ organizationId, properties, start, horizon, cycle }) => {
+export const planRotation = async ({ organizationId, properties, start, horizon, cycle }) => {
   const existing = await CleaningSchedule.find({
     organizationId,
     isDeleted: false,
@@ -180,10 +193,42 @@ const planRotation = async ({ organizationId, properties, start, horizon, cycle 
   return docs;
 };
 
+// Every date already on record for a category, per property — used to keep
+// Fridge Cleaning and Self Inspection off each other's day for the same
+// property (see below). Keyed by day string rather than by Date object so a
+// lookup is a Set.has rather than a date comparison.
+const datesByProperty = (rows) => {
+  const map = new Map();
+  for (const row of rows) {
+    const key = String(row.propertyId);
+    if (!map.has(key)) map.set(key, new Set());
+    map.get(key).add(dayKey(row.date));
+  }
+  return map;
+};
+
+// Nudges `date` forward, working day by working day, until it lands somewhere
+// not already in `takenDates` for this property. A no-op when there is
+// nothing to dodge.
+const shiftAwayFromDates = (date, takenDates) => {
+  let candidate = utcDay(date);
+  if (!takenDates || !takenDates.size) return candidate;
+  let guard = 0;
+  while (takenDates.has(dayKey(candidate)) && guard < CONFLICT_MAX_SHIFT_DAYS) {
+    candidate = nextWorkingDay(addDays(candidate, 1));
+    guard++;
+  }
+  return candidate;
+};
+
 // Fridge, washing machine and self-inspection. Each *subject* (a property, or a
 // room for inspections) keeps exactly one open task: when its latest one is
 // finished, the next is put on the board at latest date + interval.
-const planRecurring = async ({ organizationId, properties, start }) => {
+//
+// Bounded to the current month: a subject that isn't due until next month is
+// left for next month's run to add, rather than pre-planned now. That keeps a
+// single run from ever flooding the board with weeks of lookahead.
+export const planRecurring = async ({ organizationId, properties, start, monthEnd }) => {
   const propIds = properties.map((p) => p._id);
   const rooms = await Room.find({ organizationId, propertyId: { $in: propIds } })
     .select("propertyId title roomName")
@@ -212,10 +257,34 @@ const planRecurring = async ({ organizationId, properties, start }) => {
     latest.map((l) => [`${l._id.c}|${l._id.p}|${l._id.r || ""}`, l])
   );
 
-  const monthly = workingDaysBetween(start, addDays(start, 30));
-  const quarterly = workingDaysBetween(start, addDays(start, 90));
+  // Fridge/Inspection dates already on record, so a newly computed date for
+  // one never lands on the other's day for the same property — checked (and
+  // updated) as this run goes, so two subjects colliding within the same run
+  // are caught too, not just against history.
+  const [existingFridge, existingInspection] = await Promise.all([
+    CleaningSchedule.find({ organizationId, isDeleted: false, category: FRIDGE, propertyId: { $in: propIds } })
+      .select("propertyId date")
+      .lean(),
+    CleaningSchedule.find({ organizationId, isDeleted: false, category: INSPECTION, propertyId: { $in: propIds } })
+      .select("propertyId date")
+      .lean(),
+  ]);
+  const fridgeDatesByProperty = datesByProperty(existingFridge);
+  const inspectionDatesByProperty = datesByProperty(existingInspection);
+
+  // This month's remaining working days: spreads a never-scheduled Fridge
+  // Cleaning / Washing Machine Descaling across the month (their cycle IS a
+  // month, so that's the whole window), and is the cutoff for any recomputed
+  // due date regardless of category.
+  const monthDays = workingDaysBetween(start, monthEnd);
+  // A first-ever Self Inspection has no due date to anchor to, so rather than
+  // cram a whole portfolio's worth of first inspections into whatever's left
+  // of the current month, it gets spread across its actual 3-month cycle —
+  // matching how every inspection after it will be spaced once it has a real
+  // history to recur from.
+  const quarterDays = workingDaysBetween(start, addDays(start, 90));
   const spread = (days, index, total, shift = 0) =>
-    days[(Math.floor((index * days.length) / total) + shift) % days.length];
+    days.length ? days[(Math.floor((index * days.length) / total) + shift) % days.length] : null;
 
   const docs = [];
   const consider = ({ category, property, index, room }) => {
@@ -227,19 +296,30 @@ const planRecurring = async ({ organizationId, properties, start }) => {
 
     let date;
     if (!last) {
-      // Never scheduled: spread the portfolio over the interval rather than
-      // stacking everything on the first day.
-      const days = months === 1 ? monthly : quarterly;
+      // Never scheduled: spread the portfolio over its natural cycle rather
+      // than stacking everything on the first day — a month for Fridge and
+      // Washing Machine, a full quarter for a first-ever Self Inspection.
+      const days = category === INSPECTION ? quarterDays : monthDays;
       const shift = category === "Washing Machine Descaling" ? Math.floor(days.length / 2) : 0;
       date = spread(days, index, properties.length, shift);
+      if (!date) return; // no working days available to place it
     } else if (last.status === "DONE") {
       let due = addMonths(last.date, months);
       if (due < start) due = start;
       due = nextWorkingDay(due);
-      if (due > addDays(start, RECURRING_LOOKAHEAD_DAYS)) return;
+      // Due next month or later: that month's own run will add it when it
+      // comes round, rather than this run reaching ahead for it.
+      if (due > monthEnd) return;
       date = due;
     } else {
       return; // still open — nothing to add
+    }
+
+    const propKey = String(property._id);
+    if (category === FRIDGE) {
+      date = shiftAwayFromDates(date, inspectionDatesByProperty.get(propKey));
+    } else if (category === INSPECTION) {
+      date = shiftAwayFromDates(date, fridgeDatesByProperty.get(propKey));
     }
 
     docs.push({
@@ -250,15 +330,23 @@ const planRecurring = async ({ organizationId, properties, start }) => {
       date,
       nextDueDate: addMonths(date, months),
     });
+
+    if (category === FRIDGE) {
+      if (!fridgeDatesByProperty.has(propKey)) fridgeDatesByProperty.set(propKey, new Set());
+      fridgeDatesByProperty.get(propKey).add(dayKey(date));
+    } else if (category === INSPECTION) {
+      if (!inspectionDatesByProperty.has(propKey)) inspectionDatesByProperty.set(propKey, new Set());
+      inspectionDatesByProperty.get(propKey).add(dayKey(date));
+    }
   };
 
   properties.forEach((property, index) => {
-    consider({ category: "Fridge Cleaning", property, index });
+    consider({ category: FRIDGE, property, index });
     consider({ category: "Washing Machine Descaling", property, index });
 
     const own = rooms.filter((r) => String(r.propertyId) === String(property._id));
-    if (own.length) own.forEach((room) => consider({ category: "Self Inspection", property, index, room }));
-    else consider({ category: "Self Inspection", property, index });
+    if (own.length) own.forEach((room) => consider({ category: INSPECTION, property, index, room }));
+    else consider({ category: INSPECTION, property, index });
   });
 
   return docs;
@@ -290,12 +378,17 @@ const backfillNextDue = async (organizationId, cycle) => {
  * Bring one organization's schedule up to date. Safe to run as often as you
  * like — it only ever adds what is missing.
  *
+ * Bounded to the calendar month `start` falls in: a run never plans past the
+ * end of its own month, so it can never flood the board with weeks of
+ * lookahead. The next month's own run (the nightly sweep, or this same
+ * function called again on/after the 1st) picks up from there — nothing
+ * needs to be pre-planned for it now.
+ *
  * @returns {{ created: number }}
  */
 export const generateSchedule = async ({
   organizationId,
   createdBy = null,
-  horizonDays = 28,
   today = new Date(),
   // Where the schedule begins, when that should not be today — the first run
   // starts on the coming Monday rather than part-way through a week.
@@ -303,22 +396,25 @@ export const generateSchedule = async ({
   dryRun = false,
 }) => {
   const properties = await Property.find({ organizationId, isDeleted: false, status: "ACTIVE" })
-    .select("name")
-    .sort({ name: 1 })
+    .select("name cleaningRotationOrder")
+    // An organization can pin its rotation to a specific order (e.g. matching
+    // how the office has always read its sheet) via cleaningRotationOrder;
+    // everyone else leaves it null and keeps the old alphabetical order.
+    .sort({ cleaningRotationOrder: 1, name: 1 })
     .lean();
   if (!properties.length) return { created: 0 };
 
   // Today is never scheduled — whatever is happening today was settled before
   // it began — so by default the schedule picks up from tomorrow.
   const start = utcDay(startDate || addDays(today, 1));
-  const horizon = addDays(start, horizonDays);
+  const horizon = endOfMonth(start);
   const cycle = cycleWorkingDays(properties.length);
 
   await backfillNextDue(organizationId, cycle);
 
   const planned = [
     ...(await planRotation({ organizationId, properties, start, horizon, cycle })),
-    ...(await planRecurring({ organizationId, properties, start })),
+    ...(await planRecurring({ organizationId, properties, start, monthEnd: horizon })),
   ];
   if (!planned.length) return { created: 0 };
   if (dryRun) return { created: 0, planned: planned.length, start };

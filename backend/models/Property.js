@@ -349,6 +349,17 @@ const propertySchema = new mongoose.Schema(
         default: "ACTIVE"
     },
 
+    // Where this property falls in the automatic cleaning rotation, when the
+    // office needs a specific order rather than alphabetical by name. null
+    // (the default, for every property that has never needed this) sorts
+    // after any explicit number, so setting it for one organization's
+    // portfolio never reorders anyone else's.
+    cleaningRotationOrder: {
+        type: Number,
+        default: null,
+        index: true
+    },
+
     isDeleted: {
         type: Boolean,
         default: false

@@ -15,6 +15,7 @@ import { sendAllLocationDigests } from "./cranjob/locationDigest.js";
 import { generateAllSchedules } from "./cranjob/cleaningSchedule.js";
 import { sweepEmailFollowUps } from "./cranjob/emailFollowUp.js";
 import { purgeExpiredCaptures, closeAbandonedSessions } from "./controllers/screenMonitor.controller.js";
+import CleaningSchedule from "./models/CleaningSchedule.js";
 
 const app = express();
 
@@ -24,6 +25,13 @@ app.set("trust proxy", env.trustProxy);
 
 // Connect Database
 await connectDB();
+
+// Production disables Mongoose's autoIndex (index builds are slow to run on
+// every boot), which silently meant the cleaning schedule's duplicate-guard
+// index — the thing that stops two overlapping runs from writing the same
+// auto entry twice — was never actually created there. Building it here,
+// once, for just this collection, is a no-op once it already exists.
+await CleaningSchedule.init();
 
 // Security Middleware
 app.use(helmet());
@@ -123,12 +131,19 @@ cron.schedule("0 * * * *", async () => {
 // Early every morning, top up every organization's automatic cleaning schedule
 // — the rotation, the monthly fridge / washing machine cleans and the quarterly
 // self inspections — so the board is already current when the office opens.
-cron.schedule("30 5 * * *", async () => {
-  const result = await generateAllSchedules();
-  console.log(
-    `Cleaning schedules generated: ${result.created} new entries, Errors: ${result.errors}`
-  );
-});
+// Pinned to Europe/London regardless of the server's own timezone: the
+// properties are all UK addresses, and "today"/"this month" for the schedule
+// must match the office's calendar day, not the host's.
+cron.schedule(
+  "30 5 * * *",
+  async () => {
+    const result = await generateAllSchedules();
+    console.log(
+      `Cleaning schedules generated: ${result.created} new entries, Errors: ${result.errors}`
+    );
+  },
+  { timezone: "Europe/London" }
+);
 
 // Routes
 app.use(env.apiPrefix, routes);
