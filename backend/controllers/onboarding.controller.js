@@ -1011,6 +1011,11 @@ export const getOnboardingRequests = async (req, res) => {
       organizationId,
       isDeleted: false,
       source: "Website",
+      // A genuine public enquiry, not a staff-typed lead that merely picked
+      // "Website" as its Source on the Leads board — createdByRole is blank
+      // only for the former (see createEnquiry in public.controller.js), so a
+      // staff-added one is worked from the Leads board itself, not here.
+      createdByRole: "",
       // Not yet accepted (converted) or dismissed (lost).
       //
       // "pending" MUST be here: createEnquiry files every website request as

@@ -216,27 +216,41 @@ export const getLeads = async (req, res) => {
     const { status, source, search = "" } = req.query;
 
     const filter = { organizationId, isDeleted: false };
+    const and = [];
 
     if (status) filter.status = status;
 
-    // Website requests are worked from the Onboarding requests inbox
-    // (GET /onboarding/requests → accept), not from this board, so they are
-    // kept off it by default rather than appearing in both places.
+    // Website ENQUIRIES (submitted through the public property page) are
+    // worked from the Onboarding requests inbox (GET /onboarding/requests →
+    // accept), not from this board, so they are kept off it by default rather
+    // than appearing in both places.
+    //
+    // That is a different thing from a staff member picking "Website" as the
+    // Source on a lead they typed in themselves on this board — that lead must
+    // never disappear on refresh. createdByRole is blank only for a genuine
+    // public enquiry (createEnquiry in public.controller.js sets it to "";
+    // createLead here always stamps the staff member's role), so that is the
+    // real signal, not the source value alone.
     //
     // The record itself is untouched — it still carries the applicant's
     // screening answers and the approve/reject trail, and asking for
-    // ?source=Website explicitly still returns them, so nothing is stranded.
+    // ?source=Website explicitly still returns everything with that source,
+    // staff-added or not, so nothing is stranded.
     if (source) filter.source = source;
-    else filter.source = { $ne: WEBSITE_SOURCE };
+    else and.push({ $or: [{ source: { $ne: WEBSITE_SOURCE } }, { createdByRole: { $ne: "" } }] });
 
     if (search) {
-      filter.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
-        { phone: { $regex: search, $options: "i" } },
-        { interestedIn: { $regex: search, $options: "i" } },
-      ];
+      and.push({
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+          { phone: { $regex: search, $options: "i" } },
+          { interestedIn: { $regex: search, $options: "i" } },
+        ],
+      });
     }
+
+    if (and.length) filter.$and = and;
 
     const leads = await Lead.find(filter)
       .populate("propertyId", "name")
@@ -577,15 +591,17 @@ export const getLeadStats = async (req, res) => {
   try {
     const organizationId = req.user.organizationId;
 
-    // Excludes website requests for the same reason getLeads does — the column
-    // counts have to describe the board the user is actually looking at.
+    // Excludes website ENQUIRIES for the same reason getLeads does — the
+    // column counts have to describe the board the user is actually looking
+    // at. Same createdByRole distinction as getLeads: a staff-added lead with
+    // source "Website" still counts.
     const counts = await Promise.all(
       LEAD_STAGES.map((stage) =>
         Lead.countDocuments({
           organizationId,
           isDeleted: false,
           status: stage,
-          source: { $ne: WEBSITE_SOURCE },
+          $or: [{ source: { $ne: WEBSITE_SOURCE } }, { createdByRole: { $ne: "" } }],
         })
       )
     );

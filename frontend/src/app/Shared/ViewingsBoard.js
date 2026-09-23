@@ -344,6 +344,7 @@ const useViewingsData = ({
     updateViewingStatus,
     rescheduleViewing,
     respondToRequest,
+    fetchSupportingData,
   };
 };
 
@@ -739,6 +740,7 @@ export default function ViewingsBoard({
     updateViewingStatus,
     rescheduleViewing,
     respondToRequest,
+    fetchSupportingData,
   } = useViewingsData({
     status: filter,
     person,
@@ -773,7 +775,13 @@ export default function ViewingsBoard({
               <CalendarX2 size={18} /> Block a date
             </button>
             <button
-              onClick={() => setOpen(true)}
+              onClick={() => {
+                // Leads approved elsewhere (Leads board, another tab) since this
+                // page loaded must be pickable right away — refetch rather than
+                // relying on the stale snapshot taken on mount.
+                fetchSupportingData();
+                setOpen(true);
+              }}
               className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]"
             >
               <Plus size={18} /> Schedule
