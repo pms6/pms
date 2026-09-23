@@ -135,6 +135,15 @@ const cleaningScheduleSchema = new mongoose.Schema(
     callMade: { type: Boolean, default: false },
     emailSent: { type: Boolean, default: false },
 
+    // Whether photo evidence was taken for a Self Inspection. The actual files
+    // already attach to `files` below, but the office reads this sheet as a
+    // list first and needs to see at a glance which visits have pictures on
+    // record, the same way messageSent/callMade/emailSent let it scan for
+    // which were chased — without opening every row to check the attachments.
+    // Only the Self Inspection section of the board asks for it, same as
+    // inspectorName.
+    picturesTaken: { type: Boolean, default: false },
+
     // The full record behind those three flags.
     communications: { type: [communicationSchema], default: [] },
 

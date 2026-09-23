@@ -179,6 +179,7 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
     emailSent: Boolean(initial?.emailSent),
     notes: initial?.notes || "",
     inspectorName: initial?.inspectorName || "",
+    picturesTaken: Boolean(initial?.picturesTaken),
   });
 
   // The evidence for the visit. Kept out of `form` because the uploader appends
@@ -223,7 +224,7 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
         emailSent: form.emailSent,
         notes: form.notes.trim(),
         ...(form.category === NAMED_CATEGORY
-          ? { inspectorName: form.inspectorName.trim() }
+          ? { inspectorName: form.inspectorName.trim(), picturesTaken: form.picturesTaken }
           : {}),
         files,
       });
@@ -285,6 +286,28 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
                 onChange={set("inspectorName")}
                 placeholder="Who did the self inspection"
               />
+            </div>
+          )}
+
+          {form.category === NAMED_CATEGORY && (
+            <div>
+              <label className={LABEL}>Pictures</label>
+              <button
+                type="button"
+                onClick={toggle("picturesTaken")}
+                className={`w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-bold transition-all ${
+                  form.picturesTaken
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                    : "bg-gray-50 border-gray-100 text-gray-500 hover:bg-gray-100"
+                }`}
+              >
+                {form.picturesTaken ? (
+                  <CheckCircle2 size={15} className="text-emerald-600" />
+                ) : (
+                  <Circle size={15} className="text-gray-300" />
+                )}
+                Pictures taken
+              </button>
             </div>
           )}
 
@@ -437,7 +460,19 @@ function ViewModal({ row, onClose, onEdit, onViewFiles, onContact }) {
           <ViewRow label="Month">{monthLabel(monthKey(row.date))}</ViewRow>
           <ViewRow label="Next due">{fmtDate(row.nextDueDate)}</ViewRow>
           {categoryOf(row) === NAMED_CATEGORY && (
-            <ViewRow label="Name">{row.inspectorName}</ViewRow>
+            <>
+              <ViewRow label="Name">{row.inspectorName}</ViewRow>
+              <ViewRow label="Pictures">
+                <span className="flex items-center gap-1.5">
+                  {row.picturesTaken ? (
+                    <CheckCircle2 size={15} className="text-emerald-600" />
+                  ) : (
+                    <Circle size={15} className="text-gray-300" />
+                  )}
+                  Pictures
+                </span>
+              </ViewRow>
+            </>
           )}
           <ViewRow label="Call">
             <span className="flex items-center gap-1.5">
@@ -885,6 +920,21 @@ export default function CleaningScheduleBoard({
     }
   };
 
+  // Pictures, like Done, is a flag the office flips all day from the row
+  // itself — opening the edit form just to tick one box would be the same
+  // friction the Done toggle was built to avoid.
+  const togglePictures = async (row) => {
+    const picturesTaken = !row.picturesTaken;
+    const snapshot = rows;
+    setRows((prev) => prev.map((r) => (r._id === row._id ? { ...r, picturesTaken } : r)));
+    try {
+      await api.put(`/cleaning-schedule/${row._id}`, { picturesTaken });
+    } catch (err) {
+      setRows(snapshot);
+      alert(err.response?.data?.message || "Failed to update pictures");
+    }
+  };
+
   const exportSheet = async () => {
     setExporting(true);
     try {
@@ -1096,6 +1146,7 @@ export default function CleaningScheduleBoard({
                     onEdit={setModal}
                     onDelete={remove}
                     onToggle={toggleStatus}
+                    onTogglePictures={togglePictures}
                     onContact={(r) => setContactId(r._id)}
                   />
                 ))
@@ -1152,7 +1203,7 @@ export default function CleaningScheduleBoard({
 }
 
 // One month block — the band, then its rows, as the sheet prints it.
-function FragmentGroup({ group, onView, onEdit, onDelete, onToggle, onContact }) {
+function FragmentGroup({ group, onView, onEdit, onDelete, onToggle, onTogglePictures, onContact }) {
   const done = group.rows.filter((r) => r.status === "DONE").length;
   return (
     <>
@@ -1174,6 +1225,19 @@ function FragmentGroup({ group, onView, onEdit, onDelete, onToggle, onContact })
             {r.room && <p className="text-[11px] font-bold text-gray-500">{r.room}</p>}
             {r.inspectorName && (
               <p className="text-[11px] font-bold text-[#F47C3C]">{r.inspectorName}</p>
+            )}
+            {categoryOf(r) === NAMED_CATEGORY && (
+              <button
+                type="button"
+                onClick={() => onTogglePictures(r)}
+                title={r.picturesTaken ? "Mark pictures as not taken" : "Mark pictures as taken"}
+                className={`flex items-center gap-1 text-[11px] font-bold ${
+                  r.picturesTaken ? "text-emerald-600" : "text-gray-300 hover:text-gray-400"
+                }`}
+              >
+                {r.picturesTaken ? <CheckCircle2 size={12} /> : <Circle size={12} />}
+                Pictures
+              </button>
             )}
             {r.notes && <p className="text-[11px] font-medium text-gray-400 truncate max-w-md">{r.notes}</p>}
           </td>
