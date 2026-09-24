@@ -25,6 +25,7 @@ const EDITABLE_KEYS = [
   "phone",
   "gender",
   "nationality",
+  "isExTenant",
   "roomType",
   "rent",
   "deposit",
@@ -167,7 +168,7 @@ export const getCheckIns = async (req, res) => {
       return res.status(401).json({ success: false, message: "Organization ID required" });
     }
 
-    const { year, month, propertyId, agent, bank, status, search } = req.query;
+    const { year, month, propertyId, agent, bank, status, isExTenant, search } = req.query;
 
     const filter = { organizationId, isDeleted: false };
 
@@ -200,6 +201,7 @@ export const getCheckIns = async (req, res) => {
     if (agent) filter.agent = agent;
     if (bank) filter.bank = bank;
     if (status) filter.status = status;
+    if (isExTenant) filter.isExTenant = isExTenant === "true";
 
     if (search) {
       clauses.push({

@@ -128,14 +128,16 @@ cron.schedule("0 * * * *", async () => {
   }
 });
 
-// Early every morning, top up every organization's automatic cleaning schedule
-// — the rotation, the monthly fridge / washing machine cleans and the quarterly
-// self inspections — so the board is already current when the office opens.
+// Once a month, early on the 24th, plan every organization's automatic cleaning
+// schedule for the month ahead (the 25th through the next 24th) — the rotation,
+// the monthly fridge / washing machine cleans and the quarterly self
+// inspections. The day MUST match PLAN_DAY in utils/cleaningPlan.js. Marking a
+// task done still tops the schedule up straight away between runs.
 // Pinned to Europe/London regardless of the server's own timezone: the
 // properties are all UK addresses, and "today"/"this month" for the schedule
 // must match the office's calendar day, not the host's.
 cron.schedule(
-  "30 5 * * *",
+  "30 5 24 * *",
   async () => {
     const result = await generateAllSchedules();
     console.log(

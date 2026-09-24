@@ -33,6 +33,7 @@ const COLUMNS = [
   { header: "Contact", value: (r) => r.phone },
   { header: "Gender", value: (r) => r.gender },
   { header: "Nationality", value: (r) => r.nationality },
+  { header: "Ex-Tenant", value: (r) => (r.isExTenant ? "Yes" : "No") },
   { header: "Room Type", value: (r) => r.roomType },
   { header: "Rent", value: (r) => r.rent },
   { header: "Deposit", value: (r) => r.deposit },
@@ -92,6 +93,7 @@ export default function AdminCheckIn() {
     agent: "",
     bank: "",
     status: "ACTIVE",
+    isExTenant: "",
     search: "",
   });
 
@@ -169,6 +171,7 @@ export default function AdminCheckIn() {
         { label: "Contact", value: r.phone },
         { label: "Gender", value: GENDER_LABEL[r.gender] },
         { label: "Nationality", value: r.nationality },
+        { label: "Ex-Tenant", value: r.isExTenant ? "Yes" : "No" },
         {
           label: "Status",
           value: r.status === "CHECKED_OUT" ? "Checked out" : "Still in",
@@ -304,6 +307,12 @@ export default function AdminCheckIn() {
           <option value="CHECKED_OUT">Checked out</option>
           <option value="">Everyone</option>
         </select>
+
+        <select value={f.isExTenant} onChange={set("isExTenant")} className={CONTROL}>
+          <option value="">Ex-tenant: all</option>
+          <option value="true">Ex-tenants only</option>
+          <option value="false">New tenants only</option>
+        </select>
       </div>
 
       {/* Table */}
@@ -340,6 +349,7 @@ export default function AdminCheckIn() {
                     <td className="px-5 py-3">
                       <p className="font-semibold text-[#0F253B] flex items-center gap-2">
                         {r.tenant}
+                        {r.isExTenant && <Badge tone="blue">ex-tenant</Badge>}
                         {r.status === "CHECKED_OUT" && <Badge tone="gray">out</Badge>}
                       </p>
                       <p className="text-[11px] text-gray-400">{r.email || r.phone || "—"}</p>

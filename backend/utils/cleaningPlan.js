@@ -9,6 +9,13 @@
 //   - Washing Machine Descaling: once a month, per property.
 //   - Self Inspection:           every 3 months, for every room.
 //
+// On top of those frequencies, two rules shape which day a task lands on:
+//
+//   - One task type per day: a date holds at most two properties, and both are
+//     the same category. A due task that doesn't fit waits for a later day.
+//   - A 10-day cooldown per property, across every category: once a property
+//     has any task, it gets no other within 10 days either side of it.
+//
 // Dates are UTC midnights throughout, matching how the board stores them (an
 // <input type="date"> value becomes a UTC-midnight Date) and how the month
 // filter in the controller reads them.
@@ -28,13 +35,21 @@ export const RECURRING = {
 
 const ROTATION = "Cleaning Schedule";
 const FRIDGE = "Fridge Cleaning";
+const WASHER = "Washing Machine Descaling";
 const INSPECTION = "Self Inspection";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// How far a Self Inspection is allowed to be nudged to dodge a same-day
-// Fridge Cleaning for the same property. Generous, but bounded so a data
-// oddity can never spin the shift into an infinite loop.
-const CONFLICT_MAX_SHIFT_DAYS = 60;
+// Calendar days a property must go between any two tasks, whatever their
+// category: a task on 25 Sep means the next can be 5 Oct at the earliest.
+export const COOLDOWN_DAYS = 10;
+
+// Nothing is planned before this date. 24 Sep 2026's tasks were settled by
+// hand before the one-type-per-day / cooldown rules came in, so the first date
+// those rules plan is the 25th. Harmless once that date has passed.
+export const SCHEDULE_FLOOR = new Date(Date.UTC(2026, 8, 25));
+
+// Tie-break between categories that are equally overdue on the same day.
+const CATEGORY_ORDER = [ROTATION, FRIDGE, WASHER, INSPECTION];
 
 /* ------------------------------------------------------------------ *
  * Date helpers
@@ -78,6 +93,22 @@ export const endOfMonth = (date) => {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
 };
 
+// The schedule is planned a month at a time, from one PLAN_DAY to the next:
+// the run on the 24th covers the 25th through the 24th of the next month.
+// MUST match the day in the cleaning-schedule cron in index.js.
+export const PLAN_DAY = 24;
+
+// The last day a run starting on `start` plans to: the first PLAN_DAY on or
+// after it. So a top-up mid-cycle (a task marked done on 10 Oct) only fills
+// the current cycle, up to 24 Oct, and never reaches into the next one.
+export const planPeriodEnd = (start) => {
+  const d = utcDay(start);
+  const thisMonth = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), PLAN_DAY));
+  return d <= thisMonth
+    ? thisMonth
+    : new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, PLAN_DAY));
+};
+
 // 1970-01-05 was a Monday. Working days are numbered from there with Sundays
 // skipped, so the gap between two dates in working days is a subtraction.
 const MONDAY_EPOCH = Date.UTC(1970, 0, 5);
@@ -107,6 +138,9 @@ const workingDaysBetween = (from, to) => {
 
 const dayKey = (date) => utcDay(date).toISOString().slice(0, 10);
 
+// Whole days since the epoch — the cooldown is a plain subtraction on these.
+const dayNum = (date) => Math.round(utcDay(date).getTime() / DAY_MS);
+
 /* ------------------------------------------------------------------ *
  * Next due date
  * ------------------------------------------------------------------ */
@@ -133,12 +167,11 @@ export const computeNextDue = (category, date, cycleDays) => {
  * Generation
  * ------------------------------------------------------------------ */
 
-// Assigns rotation cleans to working days across the horizon, two a day. A
-// property becomes eligible again once a full turn of working days has passed
-// since its last clean; each day takes the properties that have waited longest.
-// Existing rows — done, pending or hand-entered — count both as slots already
-// taken and as the property's last clean, so re-running never doubles anything.
-export const planRotation = async ({ organizationId, properties, start, horizon, cycle }) => {
+// Where every property stands in the rotation: the working-day index of its
+// latest clean. A property is due again once a full turn of working days has
+// passed since then. Existing rows — done, pending or hand-entered — all count,
+// so re-running never doubles anything.
+export const rotationState = async ({ organizationId, start }) => {
   const existing = await CleaningSchedule.find({
     organizationId,
     isDeleted: false,
@@ -148,87 +181,29 @@ export const planRotation = async ({ organizationId, properties, start, horizon,
     .select("propertyId date")
     .lean();
 
-  const perDay = new Map();
   const lastIdx = new Map();
   for (const row of existing) {
-    const key = dayKey(row.date);
-    perDay.set(key, (perDay.get(key) || 0) + 1);
-    if (row.propertyId) {
-      const id = String(row.propertyId);
-      lastIdx.set(id, Math.max(lastIdx.get(id) ?? -Infinity, workIndex(row.date)));
-    }
+    if (!row.propertyId) continue;
+    const id = String(row.propertyId);
+    lastIdx.set(id, Math.max(lastIdx.get(id) ?? -Infinity, workIndex(row.date)));
   }
-
-  const docs = [];
-  for (const day of workingDaysBetween(start, horizon)) {
-    const key = dayKey(day);
-    const free = PROPERTIES_PER_DAY - (perDay.get(key) || 0);
-    if (free <= 0) continue;
-
-    const idx = workIndex(day);
-    const due = properties
-      .filter((p) => {
-        const last = lastIdx.get(String(p._id));
-        return last === undefined || idx - last >= cycle;
-      })
-      .sort(
-        (a, b) =>
-          (lastIdx.get(String(a._id)) ?? -Infinity) - (lastIdx.get(String(b._id)) ?? -Infinity) ||
-          a.name.localeCompare(b.name)
-      )
-      .slice(0, free);
-
-    for (const p of due) {
-      lastIdx.set(String(p._id), idx);
-      perDay.set(key, (perDay.get(key) || 0) + 1);
-      docs.push({
-        propertyId: p._id,
-        property: p.name,
-        category: ROTATION,
-        date: day,
-        nextDueDate: addWorkingDays(day, cycle),
-      });
-    }
-  }
-  return docs;
-};
-
-// Every date already on record for a category, per property — used to keep
-// Fridge Cleaning and Self Inspection off each other's day for the same
-// property (see below). Keyed by day string rather than by Date object so a
-// lookup is a Set.has rather than a date comparison.
-const datesByProperty = (rows) => {
-  const map = new Map();
-  for (const row of rows) {
-    const key = String(row.propertyId);
-    if (!map.has(key)) map.set(key, new Set());
-    map.get(key).add(dayKey(row.date));
-  }
-  return map;
-};
-
-// Nudges `date` forward, working day by working day, until it lands somewhere
-// not already in `takenDates` for this property. A no-op when there is
-// nothing to dodge.
-const shiftAwayFromDates = (date, takenDates) => {
-  let candidate = utcDay(date);
-  if (!takenDates || !takenDates.size) return candidate;
-  let guard = 0;
-  while (takenDates.has(dayKey(candidate)) && guard < CONFLICT_MAX_SHIFT_DAYS) {
-    candidate = nextWorkingDay(addDays(candidate, 1));
-    guard++;
-  }
-  return candidate;
+  return lastIdx;
 };
 
 // Fridge, washing machine and self-inspection. Each *subject* (a property, or a
 // room for inspections) keeps exactly one open task: when its latest one is
-// finished, the next is put on the board at latest date + interval.
+// finished, the next falls due at latest date + interval.
 //
-// Bounded to the current month: a subject that isn't due until next month is
-// left for next month's run to add, rather than pre-planned now. That keeps a
-// single run from ever flooding the board with weeks of lookahead.
-export const planRecurring = async ({ organizationId, properties, start, monthEnd }) => {
+// Returns each subject that is due this period with the earliest date it may
+// go on — not the date itself. The allocator below picks the actual day, which
+// may be later when the property is cooling down or the days are taken.
+//
+// Bounded to the current period (to the next 24th): a subject that isn't due
+// until after it is left for the next period's run to add, rather than pre-planned now. That keeps a
+// single run from ever flooding the board with weeks of lookahead. The one
+// exception, as before, is a first-ever Self Inspection, which is placed on
+// its spot in the quarter straight away.
+export const recurringDue = async ({ organizationId, properties, start, monthEnd }) => {
   const propIds = properties.map((p) => p._id);
   const rooms = await Room.find({ organizationId, propertyId: { $in: propIds } })
     .select("propertyId title roomName")
@@ -257,22 +232,7 @@ export const planRecurring = async ({ organizationId, properties, start, monthEn
     latest.map((l) => [`${l._id.c}|${l._id.p}|${l._id.r || ""}`, l])
   );
 
-  // Fridge/Inspection dates already on record, so a newly computed date for
-  // one never lands on the other's day for the same property — checked (and
-  // updated) as this run goes, so two subjects colliding within the same run
-  // are caught too, not just against history.
-  const [existingFridge, existingInspection] = await Promise.all([
-    CleaningSchedule.find({ organizationId, isDeleted: false, category: FRIDGE, propertyId: { $in: propIds } })
-      .select("propertyId date")
-      .lean(),
-    CleaningSchedule.find({ organizationId, isDeleted: false, category: INSPECTION, propertyId: { $in: propIds } })
-      .select("propertyId date")
-      .lean(),
-  ]);
-  const fridgeDatesByProperty = datesByProperty(existingFridge);
-  const inspectionDatesByProperty = datesByProperty(existingInspection);
-
-  // This month's remaining working days: spreads a never-scheduled Fridge
+  // This period's remaining working days: spreads a never-scheduled Fridge
   // Cleaning / Washing Machine Descaling across the month (their cycle IS a
   // month, so that's the whole window), and is the cutoff for any recomputed
   // due date regardless of category.
@@ -286,7 +246,7 @@ export const planRecurring = async ({ organizationId, properties, start, monthEn
   const spread = (days, index, total, shift = 0) =>
     days.length ? days[(Math.floor((index * days.length) / total) + shift) % days.length] : null;
 
-  const docs = [];
+  const due = [];
   const consider = ({ category, property, index, room }) => {
     const { months } = RECURRING[category];
     const key = `${category}|${property._id}|${room?._id || ""}`;
@@ -294,61 +254,235 @@ export const planRecurring = async ({ organizationId, properties, start, monthEn
     // tracked, still counts as this room's latest.
     const last = latestBy.get(key) || (room ? latestBy.get(`${category}|${property._id}|`) : null);
 
-    let date;
+    let earliest;
     if (!last) {
       // Never scheduled: spread the portfolio over its natural cycle rather
       // than stacking everything on the first day — a month for Fridge and
       // Washing Machine, a full quarter for a first-ever Self Inspection.
       const days = category === INSPECTION ? quarterDays : monthDays;
-      const shift = category === "Washing Machine Descaling" ? Math.floor(days.length / 2) : 0;
-      date = spread(days, index, properties.length, shift);
-      if (!date) return; // no working days available to place it
+      const shift = category === WASHER ? Math.floor(days.length / 2) : 0;
+      earliest = spread(days, index, properties.length, shift);
+      if (!earliest) return; // no working days available to place it
     } else if (last.status === "DONE") {
-      let due = addMonths(last.date, months);
-      if (due < start) due = start;
-      due = nextWorkingDay(due);
-      // Due next month or later: that month's own run will add it when it
+      let at = addMonths(last.date, months);
+      if (at < start) at = start;
+      at = nextWorkingDay(at);
+      // Due after this period: the next period's own run will add it when it
       // comes round, rather than this run reaching ahead for it.
-      if (due > monthEnd) return;
-      date = due;
+      if (at > monthEnd) return;
+      earliest = at;
     } else {
       return; // still open — nothing to add
     }
 
-    const propKey = String(property._id);
-    if (category === FRIDGE) {
-      date = shiftAwayFromDates(date, inspectionDatesByProperty.get(propKey));
-    } else if (category === INSPECTION) {
-      date = shiftAwayFromDates(date, fridgeDatesByProperty.get(propKey));
-    }
-
-    docs.push({
-      propertyId: property._id,
-      property: property.name,
-      ...(room ? { roomId: room._id, room: room.title || room.roomName || "" } : {}),
-      category,
-      date,
-      nextDueDate: addMonths(date, months),
-    });
-
-    if (category === FRIDGE) {
-      if (!fridgeDatesByProperty.has(propKey)) fridgeDatesByProperty.set(propKey, new Set());
-      fridgeDatesByProperty.get(propKey).add(dayKey(date));
-    } else if (category === INSPECTION) {
-      if (!inspectionDatesByProperty.has(propKey)) inspectionDatesByProperty.set(propKey, new Set());
-      inspectionDatesByProperty.get(propKey).add(dayKey(date));
-    }
+    due.push({ category, property, index, room, earliest });
   };
 
   properties.forEach((property, index) => {
     consider({ category: FRIDGE, property, index });
-    consider({ category: "Washing Machine Descaling", property, index });
+    consider({ category: WASHER, property, index });
 
     const own = rooms.filter((r) => String(r.propertyId) === String(property._id));
     if (own.length) own.forEach((room) => consider({ category: INSPECTION, property, index, room }));
     else consider({ category: INSPECTION, property, index });
   });
 
+  return due;
+};
+
+// What is already on the board around the planning window, from every
+// category and every source (auto or by hand, done or pending):
+//   - byDay:     per date, the categories and properties it already holds;
+//   - taskDays:  per property, every day it has a task — the cooldown's input.
+// Reaches COOLDOWN_DAYS either side of the window, so a task just before it
+// (e.g. today's) or just after it blocks the days it should.
+export const boardState = async ({ organizationId, start, horizon }) => {
+  const rows = await CleaningSchedule.find({
+    organizationId,
+    isDeleted: false,
+    date: {
+      $gt: addDays(start, -COOLDOWN_DAYS),
+      $lt: addDays(horizon, COOLDOWN_DAYS),
+    },
+  })
+    .select("propertyId property category date")
+    .lean();
+
+  const byDay = new Map();
+  const taskDays = new Map();
+  for (const row of rows) {
+    const key = dayKey(row.date);
+    if (!byDay.has(key)) byDay.set(key, { categories: new Set(), properties: new Set() });
+    const slot = byDay.get(key);
+    slot.categories.add(row.category || ROTATION);
+    // A row for an address not in the portfolio has no id; its text still
+    // takes one of the day's places.
+    slot.properties.add(row.propertyId ? String(row.propertyId) : `name:${row.property}`);
+
+    if (row.propertyId) {
+      const id = String(row.propertyId);
+      if (!taskDays.has(id)) taskDays.set(id, []);
+      taskDays.get(id).push(dayNum(row.date));
+    }
+  }
+  return { byDay, taskDays };
+};
+
+// Orders candidates longest-waiting first. Ranks are working-day indexes, and
+// -Infinity (never done) sorts ahead of everything.
+const byRank = (a, b) => (a.rank === b.rank ? 0 : a.rank < b.rank ? -1 : 1);
+
+/**
+ * The last day a run may place anything: the end of the month, or further on
+ * when a first-ever Self Inspection's spot in its quarter lies beyond it — with
+ * a month's slack after that spot, so one landing on a busy stretch still finds
+ * a day rather than being re-spread (and pushed on again) by the next run.
+ */
+export const planUntil = (recurring, horizon) =>
+  recurring.reduce(
+    (until, s) => (s.earliest > horizon ? new Date(Math.max(until, addDays(s.earliest, 31))) : until),
+    utcDay(horizon)
+  );
+
+/**
+ * Places due work on the working days `start`..`until`, one day at a time:
+ *
+ *   1. A day already holding two categories (from before these rules), or two
+ *      properties, is left alone. A day holding one category only ever takes
+ *      more of that category.
+ *   2. For each category the day may take, the candidates are the properties
+ *      due by that day that are not in their cooldown.
+ *   3. The day goes to the category whose longest-waiting candidate has
+ *      waited longest; ties go to the category that fills more of the day,
+ *      then to CATEGORY_ORDER.
+ *   4. Up to the day's free places are filled from that category only.
+ *
+ * Anything due but not placed simply stays due and is looked at again the
+ * next day, and the next run after that — it is never dropped or forced.
+ * Past `horizon` (the period's last day) only those early first inspections
+ * are placed; the rotation and everything else wait for their own period's run.
+ *
+ * Pure: takes the state loaded above, returns the rows to insert.
+ */
+export const allocate = ({
+  properties,
+  start,
+  horizon,
+  until = horizon,
+  cycle,
+  lastIdx,
+  recurring,
+  byDay,
+  taskDays,
+}) => {
+  // A property's inspection covers all its rooms due this month in one visit
+  // — one place on the day, one cooldown — so recurring subjects are grouped
+  // per (category, property). The group is due from its earliest room.
+  const jobs = new Map();
+  for (const s of recurring) {
+    const key = `${s.category}|${s.property._id}`;
+    if (!jobs.has(key)) {
+      jobs.set(key, { category: s.category, property: s.property, index: s.index, rooms: [], earliest: s.earliest });
+    }
+    const job = jobs.get(key);
+    job.rooms.push(s.room || null);
+    if (s.earliest < job.earliest) job.earliest = s.earliest;
+  }
+  const open = [...jobs.values()];
+
+  // The cooldown. Both ways: a task already on the board a few days *after*
+  // this one blocks it just as one before does.
+  const coolingDown = (id, n) =>
+    (taskDays.get(id) || []).some((t) => Math.abs(t - n) < COOLDOWN_DAYS);
+
+  const docs = [];
+  for (const day of workingDaysBetween(start, until)) {
+    const key = dayKey(day);
+    const n = dayNum(day);
+    const idx = workIndex(day);
+    const inMonth = day <= horizon;
+    if (!inMonth && !open.some((j) => j.earliest > horizon)) break;
+    if (!byDay.has(key)) byDay.set(key, { categories: new Set(), properties: new Set() });
+    const slot = byDay.get(key);
+
+    if (slot.categories.size > 1) continue;
+    const free = PROPERTIES_PER_DAY - slot.properties.size;
+    if (free <= 0) continue;
+
+    const available = (id) => !slot.properties.has(id) && !coolingDown(id, n);
+    const allowed = slot.categories.size ? [...slot.categories] : CATEGORY_ORDER;
+
+    const options = [];
+    for (const category of allowed) {
+      let candidates;
+      if (category === ROTATION) {
+        if (!inMonth) continue;
+        candidates = properties
+          .filter((p) => {
+            const last = lastIdx.get(String(p._id));
+            return (last === undefined || idx - last >= cycle) && available(String(p._id));
+          })
+          .map((p) => {
+            const last = lastIdx.get(String(p._id));
+            return { property: p, rank: last === undefined ? -Infinity : last + cycle };
+          })
+          .sort((a, b) => byRank(a, b) || a.property.name.localeCompare(b.property.name));
+      } else if (RECURRING[category]) {
+        candidates = open
+          .filter(
+            (j) =>
+              j.category === category &&
+              j.earliest <= day &&
+              (inMonth || j.earliest > horizon) &&
+              available(String(j.property._id))
+          )
+          .map((j) => ({ property: j.property, job: j, rank: workIndex(j.earliest) }))
+          .sort((a, b) => byRank(a, b) || a.job.index - b.job.index);
+      } else {
+        continue; // a hand-entered category the plan doesn't generate
+      }
+      if (candidates.length) options.push({ category, picks: candidates.slice(0, free) });
+    }
+    if (!options.length) continue;
+
+    options.sort(
+      (a, b) =>
+        byRank(a.picks[0], b.picks[0]) ||
+        b.picks.length - a.picks.length ||
+        CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category)
+    );
+    const { category, picks } = options[0];
+
+    for (const { property, job } of picks) {
+      const id = String(property._id);
+      if (category === ROTATION) {
+        lastIdx.set(id, idx);
+        docs.push({
+          propertyId: property._id,
+          property: property.name,
+          category,
+          date: day,
+          nextDueDate: addWorkingDays(day, cycle),
+        });
+      } else {
+        open.splice(open.indexOf(job), 1);
+        for (const room of job.rooms) {
+          docs.push({
+            propertyId: property._id,
+            property: property.name,
+            ...(room ? { roomId: room._id, room: room.title || room.roomName || "" } : {}),
+            category,
+            date: day,
+            nextDueDate: addMonths(day, RECURRING[category].months),
+          });
+        }
+      }
+      slot.categories.add(category);
+      slot.properties.add(id);
+      if (!taskDays.has(id)) taskDays.set(id, []);
+      taskDays.get(id).push(n);
+    }
+  }
   return docs;
 };
 
@@ -378,11 +512,11 @@ const backfillNextDue = async (organizationId, cycle) => {
  * Bring one organization's schedule up to date. Safe to run as often as you
  * like — it only ever adds what is missing.
  *
- * Bounded to the calendar month `start` falls in: a run never plans past the
- * end of its own month, so it can never flood the board with weeks of
- * lookahead. The next month's own run (the nightly sweep, or this same
- * function called again on/after the 1st) picks up from there — nothing
- * needs to be pre-planned for it now.
+ * Bounded to one planning period (see planPeriodEnd): the run on the 24th
+ * plans the 25th through the next 24th, and never past it. The next period's
+ * own run (the monthly sweep on the 24th) picks up from there. In between,
+ * this is still called when a task is marked done, so its successor is added
+ * straight away within the current period rather than a month later.
  *
  * @returns {{ created: number }}
  */
@@ -405,17 +539,33 @@ export const generateSchedule = async ({
   if (!properties.length) return { created: 0 };
 
   // Today is never scheduled — whatever is happening today was settled before
-  // it began — so by default the schedule picks up from tomorrow.
-  const start = utcDay(startDate || addDays(today, 1));
-  const horizon = endOfMonth(start);
+  // it began — so by default the schedule picks up from tomorrow — and never
+  // before SCHEDULE_FLOOR.
+  const requested = utcDay(startDate || addDays(today, 1));
+  const start = requested < SCHEDULE_FLOOR ? SCHEDULE_FLOOR : requested;
+  const horizon = planPeriodEnd(start);
   const cycle = cycleWorkingDays(properties.length);
 
   await backfillNextDue(organizationId, cycle);
 
-  const planned = [
-    ...(await planRotation({ organizationId, properties, start, horizon, cycle })),
-    ...(await planRecurring({ organizationId, properties, start, monthEnd: horizon })),
-  ];
+  const [lastIdx, recurring] = await Promise.all([
+    rotationState({ organizationId, start }),
+    recurringDue({ organizationId, properties, start, monthEnd: horizon }),
+  ]);
+  const until = planUntil(recurring, horizon);
+  const { byDay, taskDays } = await boardState({ organizationId, start, horizon: until });
+
+  const planned = allocate({
+    properties,
+    start,
+    horizon,
+    until,
+    cycle,
+    lastIdx,
+    recurring,
+    byDay,
+    taskDays,
+  });
   if (!planned.length) return { created: 0 };
   if (dryRun) return { created: 0, planned: planned.length, start };
 
