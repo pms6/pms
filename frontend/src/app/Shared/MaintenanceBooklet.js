@@ -37,9 +37,10 @@ import { guardModalClose } from "@/app/Shared/modalGuard";
  * ------------------------------------------------------------------ */
 
 // The statuses an operator can pick. "open" and "closed" were dropped from the
-// vocabulary — "pending" covers a request not yet started and "sorted" covers
-// one that is done.
-export const STATUSES = ["pending", "assigned", "in_progress", "sorted"];
+// vocabulary — "pending" covers a request not yet started, "on_hold" covers
+// one paused waiting on something (parts, access, a tenant reply), and
+// "sorted" covers one that is done.
+export const STATUSES = ["pending", "assigned", "in_progress", "on_hold", "sorted"];
 // Still counts a legacy "closed" row as resolved so old data reads correctly.
 export const RESOLVED_STATUSES = ["sorted", "closed"];
 const PRIORITIES = ["urgent", "high", "med", "low"];
@@ -51,6 +52,7 @@ const STATUS_TONE = {
   open: "blue",
   assigned: "blue",
   in_progress: "orange",
+  on_hold: "red",
   sorted: "green",
   closed: "gray",
 };
@@ -1145,6 +1147,7 @@ const SECTION_PILL = {
   amber: "bg-amber-50 text-amber-700",
   blue: "bg-blue-50 text-blue-700",
   orange: "bg-orange-50 text-orange-700",
+  red: "bg-red-50 text-red-700",
   green: "bg-emerald-50 text-emerald-700",
   gray: "bg-gray-100 text-gray-600",
 };

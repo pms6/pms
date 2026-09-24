@@ -5,15 +5,16 @@ import mongoose from "mongoose";
 // frontend/src/app/admin/maintenance/page.js.
 export const MAINTENANCE_PRIORITIES = ["urgent", "high", "med", "low"];
 
-// The picker offers "pending", "assigned", "in_progress" and "sorted" (see
-// STATUSES in frontend/src/app/Shared/MaintenanceBooklet.js). "open" and
-// "closed" were retired from the vocabulary but stay in the enum so rows saved
-// under the old scheme keep validating on edit.
+// The picker offers "pending", "assigned", "in_progress", "on_hold" and
+// "sorted" (see STATUSES in frontend/src/app/Shared/MaintenanceBooklet.js).
+// "open" and "closed" were retired from the vocabulary but stay in the enum so
+// rows saved under the old scheme keep validating on edit.
 export const MAINTENANCE_STATUSES = [
   "pending",
   "open",
   "assigned",
   "in_progress",
+  "on_hold",
   "sorted",
   "closed",
 ];
