@@ -46,8 +46,14 @@ function RoomCard({ room }) {
         </p>
         <p className="mt-3 font-extrabold text-[#0F253B]">
           {formatMoney(room.monthlyRent)}
-          <span className="text-[11px] font-medium text-gray-400">/mo</span>
+          <span className="text-[11px] font-medium text-gray-400">/mo{room.doubleOccupancyRent > 0 ? " single" : ""}</span>
         </p>
+        {room.doubleOccupancyRent > 0 && (
+          <p className="text-sm font-bold text-[#0F253B]">
+            {formatMoney(room.doubleOccupancyRent)}
+            <span className="text-[11px] font-medium text-gray-400">/mo couple</span>
+          </p>
+        )}
       </div>
     </Link>
   );

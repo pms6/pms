@@ -421,10 +421,18 @@ export default function PropertyDetailPage() {
                             <Bed size={13} /> {titleCase(r.roomType || "Room")} · {titleCase(r.occupancy || "")}
                           </p>
                         </div>
-                        <p className="font-extrabold text-[#0F253B] whitespace-nowrap">
-                          {formatMoney(r.monthlyRent)}
-                          <span className="text-[11px] text-gray-400">/mo</span>
-                        </p>
+                        <div className="text-right">
+                          <p className="font-extrabold text-[#0F253B] whitespace-nowrap">
+                            {formatMoney(r.monthlyRent)}
+                            <span className="text-[11px] text-gray-400">/mo{r.doubleOccupancyRent > 0 ? " single" : ""}</span>
+                          </p>
+                          {r.doubleOccupancyRent > 0 && (
+                            <p className="text-sm font-bold text-[#0F253B] whitespace-nowrap">
+                              {formatMoney(r.doubleOccupancyRent)}
+                              <span className="text-[11px] text-gray-400">/mo couple</span>
+                            </p>
+                          )}
+                        </div>
                       </div>
                       <button
                         onClick={() => setEnquiry({ room: r })}
