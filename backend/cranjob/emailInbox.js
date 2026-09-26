@@ -159,14 +159,22 @@ const findRecordFor = async ({ fromAddr, parsed }) => {
   }
 
   // Mail clients that drop the headers still keep "Re: <subject>". Only
-  // records we have written to this address are considered.
+  // records already in conversation with this address are considered — ones
+  // we wrote to, or ones they wrote in to start — so the whole back-and-forth
+  // stays on the one record.
   const subject = baseSubject(parsed.subject);
   if (!subject || !fromAddr) return null;
   const addr = new RegExp(`(^|[\\s,;<])${escapeRegex(fromAddr)}($|[\\s,;>])`, "i");
   return EmailRecord.findOne({
     isDeleted: false,
-    subject: new RegExp(`^(re:\\s*)?${escapeRegex(subject)}$`, "i"),
-    $or: [{ emailTo: addr }, { tenantEmail: fromAddr }, { "history.to": addr }],
+    subject: new RegExp(`^((re|fw|fwd)\\s*:\\s*)*${escapeRegex(subject)}$`, "i"),
+    $or: [
+      { emailTo: addr },
+      { emailFrom: addr },
+      { tenantEmail: fromAddr },
+      { "history.to": addr },
+      { "history.from": addr },
+    ],
   }).sort({ updatedAt: -1 });
 };
 

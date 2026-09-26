@@ -42,6 +42,9 @@ const pickCouncilTax = (body) => {
   for (const key of ["firstInstallment", "secondInstallment"]) {
     if (body[key] !== undefined) payload[key] = moneyOrNull(body[key]);
   }
+  if (body.status !== undefined) payload.status = text(body.status);
+  if (body.paidAt !== undefined) payload.paidAt = dateOrNull(body.paidAt);
+  if (body.files !== undefined) payload.files = cleanAttachments(body.files);
   return payload;
 };
 

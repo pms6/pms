@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { attachmentSchema } from "../utils/attachments.js";
 
 // The office's "Council Tax" sheet: one row per property, saying who the
 // council tax account is registered to and what the instalments are.
@@ -10,6 +11,14 @@ import mongoose from "mongoose";
 //
 // MUST stay in sync with the council tax columns in
 // frontend/src/app/Shared/CouncilTaxBillsBoard.js.
+
+// Whether the council tax has been paid. "" = not recorded, which is how every
+// row entered before payment tracking existed reads.
+//
+// MUST stay in sync with COUNCIL_TAX_STATUSES in
+// frontend/src/app/Shared/CouncilTaxBillsBoard.js.
+export const COUNCIL_TAX_STATUSES = ["", "Pending", "Paid"];
+
 const councilTaxSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -50,6 +59,13 @@ const councilTaxSchema = new mongoose.Schema(
     firstInstallment: { type: Number, default: null, min: 0 },
     secondInstallment: { type: Number, default: null, min: 0 },
 
+    status: { type: String, enum: COUNCIL_TAX_STATUSES, default: "" },
+    // Stamped when the status turns Paid, cleared when it turns back.
+    paidAt: { type: Date, default: null },
+
+    // The council's bill, payment receipts, discount letters.
+    files: { type: [attachmentSchema], default: [] },
+
     isDeleted: { type: Boolean, default: false },
     deletedAt: Date,
   },
@@ -57,5 +73,15 @@ const councilTaxSchema = new mongoose.Schema(
 );
 
 councilTaxSchema.index({ organizationId: 1, isDeleted: 1, property: 1 });
+
+// Paid rows always carry the day they were paid (today unless one was given);
+// any other status has none.
+councilTaxSchema.pre("save", function () {
+  if (this.status === "Paid") {
+    if (!this.paidAt) this.paidAt = new Date();
+  } else {
+    this.paidAt = null;
+  }
+});
 
 export default mongoose.model("CouncilTax", councilTaxSchema);

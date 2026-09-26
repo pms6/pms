@@ -134,6 +134,14 @@ const CATEGORY_SHORT = {
 // Only Self Inspection entries record the name of the person who did it.
 const NAMED_CATEGORY = "Self Inspection";
 
+// Descaling is proven by pictures of the machine, so its uploader asks for
+// pictures.
+const PICTURE_CATEGORY = "Washing Machine Descaling";
+
+// The sections that track a "Pictures taken" tick on each visit.
+const PICTURE_TICK_CATEGORIES = [NAMED_CATEGORY, PICTURE_CATEGORY];
+const tracksPictures = (category) => PICTURE_TICK_CATEGORIES.includes(category);
+
 const filesOf = (row) => (Array.isArray(row?.files) ? row.files : []);
 
 // One row against the search box. Pulled out of the filter chain because the
@@ -223,9 +231,8 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
         callMade: form.callMade,
         emailSent: form.emailSent,
         notes: form.notes.trim(),
-        ...(form.category === NAMED_CATEGORY
-          ? { inspectorName: form.inspectorName.trim(), picturesTaken: form.picturesTaken }
-          : {}),
+        ...(form.category === NAMED_CATEGORY ? { inspectorName: form.inspectorName.trim() } : {}),
+        ...(tracksPictures(form.category) ? { picturesTaken: form.picturesTaken } : {}),
         files,
       });
     } catch (err) {
@@ -289,7 +296,7 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
             </div>
           )}
 
-          {form.category === NAMED_CATEGORY && (
+          {tracksPictures(form.category) && (
             <div>
               <label className={LABEL}>Pictures</label>
               <button
@@ -401,13 +408,24 @@ function EntryModal({ initial, properties, defaultCategory, onClose, onSave }) {
 
           {/* The proof the visit happened: photos of the cleaned fridge, a clip
               of the machine on its descale cycle, a signed inspection sheet. */}
-          <MediaUploader
-            files={files}
-            onChange={setFiles}
-            onUploadingChange={setUploadingCount}
-            label="Photos, video & documents"
-            hint="Drop files here, or click to choose — photos, video, PDFs, any file type"
-          />
+          {form.category === PICTURE_CATEGORY ? (
+            <MediaUploader
+              files={files}
+              onChange={setFiles}
+              onUploadingChange={setUploadingCount}
+              accept="image/*,video/*"
+              label="Descaling pictures"
+              hint="Drop pictures of the machine here, or click to take / choose them"
+            />
+          ) : (
+            <MediaUploader
+              files={files}
+              onChange={setFiles}
+              onUploadingChange={setUploadingCount}
+              label="Photos, video & documents"
+              hint="Drop files here, or click to choose — photos, video, PDFs, any file type"
+            />
+          )}
 
           <button
             type="submit"
@@ -460,8 +478,10 @@ function ViewModal({ row, onClose, onEdit, onViewFiles, onContact }) {
           <ViewRow label="Month">{monthLabel(monthKey(row.date))}</ViewRow>
           <ViewRow label="Next due">{fmtDate(row.nextDueDate)}</ViewRow>
           {categoryOf(row) === NAMED_CATEGORY && (
+            <ViewRow label="Name">{row.inspectorName}</ViewRow>
+          )}
+          {tracksPictures(categoryOf(row)) && (
             <>
-              <ViewRow label="Name">{row.inspectorName}</ViewRow>
               <ViewRow label="Pictures">
                 <span className="flex items-center gap-1.5">
                   {row.picturesTaken ? (
@@ -920,6 +940,7 @@ export default function CleaningScheduleBoard({
     }
   };
 
+
   // Pictures, like Done, is a flag the office flips all day from the row
   // itself — opening the edit form just to tick one box would be the same
   // friction the Done toggle was built to avoid.
@@ -1226,7 +1247,7 @@ function FragmentGroup({ group, onView, onEdit, onDelete, onToggle, onTogglePict
             {r.inspectorName && (
               <p className="text-[11px] font-bold text-[#F47C3C]">{r.inspectorName}</p>
             )}
-            {categoryOf(r) === NAMED_CATEGORY && (
+            {tracksPictures(categoryOf(r)) && (
               <button
                 type="button"
                 onClick={() => onTogglePictures(r)}

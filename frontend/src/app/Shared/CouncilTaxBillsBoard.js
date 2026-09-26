@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Plus, X, Pencil, Search, Landmark, Zap, Printer } from "lucide-react";
+import { Plus, X, Pencil, Search, Landmark, Zap, Printer, CheckCircle2, Circle } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import { MediaUploader, MediaViewerModal } from "./MediaAttachments";
 import api from "@/app/api/api";
@@ -50,7 +50,11 @@ export const BILL_TYPES = ["Octopus Energy", "Gas", "Water", "Electricity"];
 // MUST stay in sync with BILL_STATUSES in backend/models/BillRecord.js.
 export const BILL_STATUSES = ["Pending", "Done"];
 
-const STATUS_TONE = { Done: "green", Pending: "amber" };
+// MUST stay in sync with COUNCIL_TAX_STATUSES in backend/models/CouncilTax.js
+// ("" there is "not recorded").
+export const COUNCIL_TAX_STATUSES = ["Pending", "Paid"];
+
+const STATUS_TONE = { Done: "green", Paid: "green", Pending: "amber" };
 
 const TABS = [
   { key: "council-tax", label: "Council Tax", icon: Landmark },
@@ -80,7 +84,13 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
     details: initial?.details || "",
     firstInstallment: initial?.firstInstallment ?? "",
     secondInstallment: initial?.secondInstallment ?? "",
+    status: initial?.status || "",
+    paidAt: toInputDate(initial?.paidAt),
   });
+
+  // Kept out of `form` because the uploader appends asynchronously.
+  const [files, setFiles] = useState(() => filesOf(initial?.files));
+  const [uploading, setUploading] = useState(0);
 
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -90,6 +100,8 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!form.property.trim()) { setError("Property is required"); return; }
+    // Saving mid-upload would drop whatever has not landed yet.
+    if (uploading) { setError("Wait for the uploads to finish"); return; }
 
     setSaving(true);
     setError("");
@@ -104,6 +116,9 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
         details: form.details.trim(),
         firstInstallment: numOrNull(form.firstInstallment),
         secondInstallment: numOrNull(form.secondInstallment),
+        status: form.status,
+        paidAt: form.status === "Paid" ? form.paidAt || null : null,
+        files,
       });
     } catch (err) {
       setError(err.response?.data?.message || "Failed to save entry");
@@ -163,6 +178,30 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
             <input type="number" min="0" step="0.01" className={FIELD} value={form.secondInstallment} onChange={set("secondInstallment")} placeholder="0.00" />
           </div>
         </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={LABEL}>Payment status</label>
+            <select className={FIELD} value={form.status} onChange={set("status")}>
+              <option value="">—</option>
+              {COUNCIL_TAX_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          {form.status === "Paid" && (
+            <div>
+              <label className={LABEL}>Paid on</label>
+              <input type="date" className={FIELD} value={form.paidAt} onChange={set("paidAt")} title="Leave blank for today" />
+            </div>
+          )}
+        </div>
+
+        <MediaUploader
+          files={files}
+          onChange={setFiles}
+          onUploadingChange={setUploading}
+          label="Attachments"
+          hint="Drop the council tax bill, receipts or letters here — PDF, photo, any file type"
+        />
 
         <SubmitButton saving={saving} isEdit={isEdit} />
       </form>
@@ -333,6 +372,8 @@ function ViewModal({ kind, row, onClose, onEdit, onOpenFiles }) {
               <ViewRow label="Email">{row.email}</ViewRow>
               <ViewRow label="1st installment">{moneyOrBlank(row.firstInstallment)}</ViewRow>
               <ViewRow label="2nd installment">{moneyOrBlank(row.secondInstallment)}</ViewRow>
+              <ViewRow label="Payment status">{row.status}</ViewRow>
+              <ViewRow label="Paid on">{row.paidAt ? fmtDate(row.paidAt) : ""}</ViewRow>
             </div>
             <div>
               <p className={LABEL}>Details</p>
@@ -340,6 +381,12 @@ function ViewModal({ kind, row, onClose, onEdit, onOpenFiles }) {
                 {row.details || "—"}
               </p>
             </div>
+
+            <FilesBlock
+              label="Attachments"
+              files={filesOf(row.files)}
+              onOpen={() => onOpenFiles(row, filesOf(row.files), "Council tax")}
+            />
           </div>
         ) : (
           <div className="space-y-5">
@@ -485,8 +532,25 @@ export default function CouncilTaxBillsBoard({
     }
   };
 
-  const openViewer = (row, files) =>
-    setViewer({ key: `${row._id}-bill`, title: row.property, subtitle: "Bill copy", files });
+  const openViewer = (row, files, subtitle = "Bill copy") =>
+    setViewer({ key: `${row._id}-${subtitle}`, title: row.property, subtitle, files });
+
+  // Paid is ticked from the row itself, like the Done tick on the cleaning
+  // board, rather than by opening the form.
+  const togglePaid = async (row) => {
+    const status = row.status === "Paid" ? "Pending" : "Paid";
+    const snapshot = councilTax;
+    setCouncilTax((prev) =>
+      prev.map((r) => (r._id === row._id ? { ...r, status, paidAt: status === "Paid" ? new Date().toISOString() : null } : r))
+    );
+    try {
+      const res = await api.put(`/council-tax-bills/council-tax/${row._id}`, { status, paidAt: null });
+      setCouncilTax((prev) => prev.map((r) => (r._id === row._id ? res.data.data : r)));
+    } catch (err) {
+      setCouncilTax(snapshot);
+      alert(err.response?.data?.message || "Failed to update status");
+    }
+  };
 
   const printPdf = () => {
     const company = organization?.name || "";
@@ -510,6 +574,7 @@ export default function CouncilTaxBillsBoard({
           { label: "Properties", value: visibleTax.length },
           { label: "1st installments", value: money(firstTotal) },
           { label: "2nd installments", value: money(secondTotal) },
+          { label: "Paid", value: visibleTax.filter((r) => r.status === "Paid").length },
         ]
       : [
           { label: "Bills", value: visibleBills.length },
@@ -583,7 +648,7 @@ export default function CouncilTaxBillsBoard({
         })}
       </div>
 
-      <div className="grid gap-4 grid-cols-2 sm:grid-cols-3">
+      <div className={`grid gap-4 grid-cols-2 ${cards.length > 3 ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
         {cards.map((s) => (
           <div key={s.label} className="bg-white border border-gray-100 rounded-2xl p-4">
             <p className="text-2xl font-bold text-[#0F253B]">{loading ? "—" : s.value}</p>
@@ -642,13 +707,15 @@ export default function CouncilTaxBillsBoard({
                   <th className={thClass}>Details</th>
                   <th className={`${thClass} whitespace-nowrap`}>1st Installment</th>
                   <th className={`${thClass} whitespace-nowrap`}>2nd Installment</th>
+                  <th className={thClass}>Status</th>
+                  <th className={thClass}>Attachments</th>
                   <th className={`${thClass} w-32 text-right`}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleTax.length === 0 ? (
                   <EmptyRow
-                    colSpan={10}
+                    colSpan={12}
                     loading={loading}
                     anyRows={councilTax.length > 0}
                     emptyText="No council tax entries recorded yet"
@@ -668,6 +735,26 @@ export default function CouncilTaxBillsBoard({
                       <td className="px-4 py-3 text-[#0F253B] font-bold whitespace-nowrap">{moneyOrBlank(r.firstInstallment) || <Dash />}</td>
                       <td className="px-4 py-3 text-[#0F253B] font-bold whitespace-nowrap">{moneyOrBlank(r.secondInstallment) || <Dash />}</td>
                       <td className="px-4 py-3">
+                        <button
+                          onClick={() => togglePaid(r)}
+                          title={r.status === "Paid" ? "Mark as pending" : "Mark as paid"}
+                          className="flex items-center gap-1.5 whitespace-nowrap"
+                        >
+                          {r.status === "Paid" ? (
+                            <CheckCircle2 size={15} className="text-emerald-600" />
+                          ) : (
+                            <Circle size={15} className="text-gray-300" />
+                          )}
+                          {r.status ? <Badge tone={STATUS_TONE[r.status] || "gray"}>{r.status}</Badge> : <Dash />}
+                        </button>
+                        {r.paidAt && <p className="text-[10px] font-medium text-gray-400 mt-1">{fmtDate(r.paidAt)}</p>}
+                      </td>
+                      <td className="px-4 py-3">
+                        {filesOf(r.files).length > 0 ? (
+                          <FileStrip files={filesOf(r.files)} onOpen={() => openViewer(r, filesOf(r.files), "Council tax")} />
+                        ) : <Dash />}
+                      </td>
+                      <td className="px-4 py-3">
                         <RowActions
                           onView={() => setViewing({ kind: "council-tax", row: r })}
                           onEdit={() => setModal({ kind: "council-tax", row: r })}
@@ -684,7 +771,7 @@ export default function CouncilTaxBillsBoard({
                     <td colSpan={7} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-gray-400">Total</td>
                     <td className="px-4 py-3 font-bold text-[#0F253B] whitespace-nowrap">{money(firstTotal)}</td>
                     <td className="px-4 py-3 font-bold text-[#0F253B] whitespace-nowrap">{money(secondTotal)}</td>
-                    <td />
+                    <td colSpan={3} />
                   </tr>
                 </tfoot>
               )}

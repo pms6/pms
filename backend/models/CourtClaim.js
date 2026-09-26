@@ -5,6 +5,14 @@ import { attachmentSchema } from "../utils/attachments.js";
 // from whom, how much, when a response is due, and the paperwork behind it.
 //
 // The sheet's "sr" column is the row number and is not stored.
+
+// Where the claim stands. Rows written before this existed read as
+// "In Progress" — every claim is, until it is settled and paid.
+//
+// MUST stay in sync with CLAIM_STATUSES in
+// frontend/src/app/Shared/CourtClaimsBoard.js.
+export const CLAIM_STATUSES = ["In Progress", "Paid"];
+
 const courtClaimSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -45,6 +53,14 @@ const courtClaimSchema = new mongoose.Schema(
     rent: { type: Number, default: 0, min: 0 },
     deposit: { type: Number, default: 0, min: 0 },
 
+    // What the claim was actually settled for — often less than `amount`.
+    // null until it is settled, so "not settled yet" reads differently from £0.
+    settlementAmount: { type: Number, default: null, min: 0 },
+
+    status: { type: String, enum: CLAIM_STATUSES, default: "In Progress", index: true },
+    // Stamped when the status turns Paid, cleared when it turns back.
+    paidAt: { type: Date, default: null },
+
     // "Deadline to Respond" — null when no response date has been set.
     deadlineToRespond: { type: Date, default: null },
 
@@ -62,5 +78,15 @@ const courtClaimSchema = new mongoose.Schema(
 );
 
 courtClaimSchema.index({ organizationId: 1, isDeleted: 1, claimDate: -1 });
+
+// Paid claims always carry the day they were paid (today unless one was
+// given); an in-progress claim has none.
+courtClaimSchema.pre("save", function () {
+  if (this.status === "Paid") {
+    if (!this.paidAt) this.paidAt = new Date();
+  } else {
+    this.paidAt = null;
+  }
+});
 
 export default mongoose.model("CourtClaim", courtClaimSchema);

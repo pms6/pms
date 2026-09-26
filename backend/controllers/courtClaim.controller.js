@@ -22,6 +22,16 @@ const pickPayload = (body) => {
   if (body.amount !== undefined) payload.amount = money(body.amount);
   if (body.rent !== undefined) payload.rent = money(body.rent);
   if (body.deposit !== undefined) payload.deposit = money(body.deposit);
+  // Blank means "not settled yet", so it stays null rather than becoming £0.
+  if (body.settlementAmount !== undefined) {
+    const n = Number(body.settlementAmount);
+    payload.settlementAmount =
+      body.settlementAmount === "" || body.settlementAmount === null || !Number.isFinite(n) || n < 0
+        ? null
+        : n;
+  }
+  if (body.status !== undefined) payload.status = text(body.status);
+  if (body.paidAt !== undefined) payload.paidAt = body.paidAt || null;
   // An emptied date picker sends "" — that means "no deadline", not an invalid date.
   if (body.deadlineToRespond !== undefined) {
     payload.deadlineToRespond = body.deadlineToRespond || null;

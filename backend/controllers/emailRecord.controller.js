@@ -108,7 +108,43 @@ const escapeHtml = (value) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
-const buildMessage = ({ body, files = [] }) => {
+const fmtWhen = (d) =>
+  new Date(d).toLocaleString("en-GB", {
+    timeZone: "Europe/London",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+// The earlier messages of the conversation, newest first, quoted under the new
+// one the way a mail client quotes a reply — so whoever receives it reads the
+// whole chain in one email. The "On … wrote:" line is also where the inbox
+// reader (stripQuoted) cuts an answer off, so the quote never comes back into
+// the record twice.
+const quoteChain = (chain = []) => {
+  if (!chain.length) return { html: "", text: "" };
+  const ordered = [...chain].reverse();
+  const html = ordered
+    .map(
+      (m) => `<p style="margin:16px 0 4px;color:#6b7280;">On ${escapeHtml(fmtWhen(m.date))}, ${escapeHtml(m.from || "PMS")} wrote:</p>
+    <blockquote style="margin:0 0 0 6px;padding-left:10px;border-left:2px solid #d1d5db;color:#4b5563;">${escapeHtml(m.body).replace(/\r?\n/g, "<br>")}</blockquote>`
+    )
+    .join("");
+  const text = ordered
+    .map(
+      (m) =>
+        `On ${fmtWhen(m.date)}, ${m.from || "PMS"} wrote:\n${String(m.body || "")
+          .split(/\r?\n/)
+          .map((line) => `> ${line}`)
+          .join("\n")}`
+    )
+    .join("\n\n");
+  return { html: `<div style="margin-top:24px;">${html}</div>`, text: `\n\n${text}` };
+};
+
+const buildMessage = ({ body, files = [], chain = [] }) => {
   const attachments = [];
   const linked = [];
   let total = 0;
@@ -130,18 +166,21 @@ const buildMessage = ({ body, files = [] }) => {
         .join("<br>")}</p>`
     : "";
 
+  const quoted = quoteChain(chain);
+
   const html = `<div style="font-family: Arial, sans-serif; font-size: 14px; color: #0F253B; white-space: normal;">
     ${escapeHtml(body).replace(/\r?\n/g, "<br>")}
     ${links}
+    ${quoted.html}
   </div>`;
 
-  return { html, text: body, attachments };
+  return { html, text: `${body}${quoted.text}`, attachments };
 };
 
 // Emails one message and writes the outcome onto `target` (the record or a
 // thread entry). Never throws: a failed send is stored as "Failed" with the
 // reason, so the message is still in the history and can be resent.
-const deliver = async (target, { to, subject, body, files, replyTo }) => {
+const deliver = async (target, { to, subject, body, files, replyTo, chain = [] }) => {
   const addresses = parseAddresses(to);
   if (!addresses) {
     target.emailStatus = "Failed";
@@ -149,8 +188,11 @@ const deliver = async (target, { to, subject, body, files, replyTo }) => {
     return false;
   }
   try {
-    const { html, text: plain, attachments } = buildMessage({ body, files });
+    const { html, text: plain, attachments } = buildMessage({ body, files, chain });
     const replyAddr = parseAddresses(replyTo);
+    // Every Message-ID already in the conversation, oldest first — the last
+    // one is what this message answers.
+    const references = chain.map((m) => m.messageId).filter(Boolean);
     const info = await sendEmail({
       email: addresses,
       subject: subject || "(no subject)",
@@ -158,6 +200,8 @@ const deliver = async (target, { to, subject, body, files, replyTo }) => {
       text: plain,
       attachments,
       replyTo: replyAddr ? replyAddr[0] : undefined,
+      inReplyTo: references[references.length - 1],
+      references,
     });
     target.emailStatus = "Sent";
     target.emailSentAt = new Date();
@@ -185,12 +229,43 @@ const recordMail = (row) => ({
   replyTo: row.emailFrom,
 });
 
+// The emails that came before `entry` in the record's conversation, oldest
+// first: the original email, then every email in the thread dated before it.
+// Calls, texts and internal notes are left out — they were never in anyone's
+// mailbox.
+const emailChainBefore = (row, entry) => {
+  const chain = [];
+  if ((row.channel || "Email") === "Email") {
+    chain.push({
+      date: row.date,
+      from: row.emailFrom,
+      body: row.issue,
+      messageId: row.emailMessageId,
+    });
+  }
+  const cutoff = new Date(entry.date).getTime();
+  const earlier = row.history
+    .filter(
+      (h) =>
+        String(h._id) !== String(entry._id) &&
+        h.channel === "Email" &&
+        h.direction !== "Internal" &&
+        new Date(h.date).getTime() <= cutoff
+    )
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+  for (const h of earlier) {
+    chain.push({ date: h.date, from: h.from, body: h.summary, messageId: h.emailMessageId });
+  }
+  return chain;
+};
+
 const entryMail = (row, entry, subject) => ({
   to: entry.to,
   subject: subject || replySubject(row),
   body: entry.summary,
   files: entry.files,
   replyTo: entry.from,
+  chain: emailChainBefore(row, entry),
 });
 
 const sentMessage = (target, what) =>
@@ -264,6 +339,48 @@ const autoLog = (row, previous, actor) => {
       summary: `Status changed from ${previous.status} to ${row.status}.`,
     });
   }
+};
+
+// Replies typed into the record form — any number of them, each with its own
+// date and text — go into the thread as separate incoming replies. The
+// latest one becomes what the "Reply" column shows. Returns how many were
+// added; blank rows are skipped, a bad date is a 400-worthy error.
+const addFormReplies = (row, list, actor) => {
+  if (!Array.isArray(list)) return 0;
+  const replies = [];
+  for (const r of list) {
+    const summary = text(r?.summary);
+    if (!summary) continue;
+    const date = r?.date ? new Date(r.date) : new Date();
+    if (Number.isNaN(date.getTime())) throw new Error("A reply has an invalid date.");
+    replies.push({ summary, date });
+  }
+  if (!replies.length) return 0;
+
+  replies.sort((a, b) => a.date - b.date);
+  const isEmail = (row.channel || "Email") === "Email";
+  for (const { summary, date } of replies) {
+    row.history.push({
+      channel: row.channel || "Email",
+      direction: "Incoming",
+      date,
+      from: isEmail ? row.emailTo : "",
+      to: isEmail ? row.emailFrom : "",
+      summary,
+      isReply: true,
+      createdBy: actor._id,
+      createdByEmail: actor.email || "",
+    });
+  }
+
+  const latest = replies[replies.length - 1];
+  if (!row.replyDate || latest.date >= new Date(row.replyDate)) {
+    row.replyDate = latest.date;
+    row.replySummary = latest.summary;
+  }
+  row.replyReceived = true;
+  if (row.status === "Awaiting Reply") row.status = "Open";
+  return replies.length;
 };
 
 // Keeps the derived stamps honest whenever a record is saved: when it was
@@ -407,8 +524,15 @@ export const createEmailRecord = async (req, res) => {
       organizationId: req.user.organizationId,
       createdBy: req.user._id,
     });
+    let added;
+    try {
+      added = addFormReplies(row, req.body.newReplies, req.user);
+    } catch (e) {
+      return res.status(400).json({ success: false, message: e.message });
+    }
     applyDerived(row);
-    autoLog(row, {}, req.user);
+    // The replies are already in the thread — autoLog only needs to note the rest.
+    autoLog(row, added ? { replyReceived: true, replySummary: row.replySummary } : {}, req.user);
     // Validated before sending, so a bad record never emails anyone.
     await row.validate();
     if (sendNow) await deliver(row, recordMail(row));
@@ -477,8 +601,19 @@ export const updateEmailRecord = async (req, res) => {
     }
 
     Object.assign(row, payload);
+    let added;
+    try {
+      added = addFormReplies(row, req.body.newReplies, req.user);
+    } catch (e) {
+      return res.status(400).json({ success: false, message: e.message });
+    }
     applyDerived(row, previous);
-    autoLog(row, previous, req.user);
+    // The replies are already in the thread — autoLog only needs to note the rest.
+    autoLog(
+      row,
+      added ? { ...previous, replyReceived: true, replySummary: row.replySummary } : previous,
+      req.user
+    );
     const updated = await row.save();
 
     if (updated.assignedTo && String(updated.assignedTo) !== previous.assignedTo) {
@@ -540,7 +675,8 @@ export const addHistoryEntry = async (req, res) => {
     const channel = pick(b.channel, CHANNELS, "Email");
     const direction = pick(b.direction, ["Incoming", "Outgoing", "Internal"], "Outgoing");
 
-    const sendNow = Boolean(b.sendNow);
+    // A reply is only recorded on the record — it is never emailed out.
+    const sendNow = Boolean(b.sendNow) && !isReply;
     if (sendNow) {
       if (channel !== "Email" || direction !== "Outgoing") {
         return res.status(400).json({ success: false, message: "Only an outgoing Email can be sent." });

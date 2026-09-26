@@ -21,6 +21,7 @@ import {
   XCircle,
   RotateCw,
   Inbox,
+  Reply,
 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import { MediaUploader, MediaViewerModal } from "./MediaAttachments";
@@ -202,9 +203,6 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
     priority: initial?.priority || "Medium",
     status: initial?.status || "Open",
     assignedTo: initial?.assignedTo ? String(initial.assignedTo) : "",
-    replyReceived: Boolean(initial?.replyReceived),
-    replyDate: toInputDate(initial?.replyDate),
-    replySummary: initial?.replySummary || "",
     followUpDate: toInputDate(initial?.followUpDate),
     followUpNotes: initial?.followUpNotes || "",
     tenancyId: initial?.tenancyId ? String(initial.tenancyId) : "",
@@ -215,6 +213,26 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [sendNow, setSendNow] = useState(false);
+
+  // Replies already on the record, oldest first. Records from before the
+  // thread existed may only carry the single reply summary.
+  const existingReplies = useMemo(() => {
+    const fromThread = (initial?.history || [])
+      .filter((h) => h.isReply)
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+    if (fromThread.length) return fromThread;
+    return initial?.replySummary
+      ? [{ _id: "legacy", date: initial.replyDate, summary: initial.replySummary }]
+      : [];
+  }, [initial]);
+
+  // New replies to add on save — as many as the conversation had.
+  const blankReply = () => ({ key: Math.random().toString(36).slice(2), date: toInputDate(new Date()), summary: "" });
+  const [newReplies, setNewReplies] = useState([]);
+  const addReply = () => setNewReplies((list) => [...list, blankReply()]);
+  const setReply = (key, field) => (e) =>
+    setNewReplies((list) => list.map((r) => (r.key === key ? { ...r, [field]: e.target.value } : r)));
+  const removeReply = (key) => setNewReplies((list) => list.filter((r) => r.key !== key));
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const isEmail = form.channel === "Email";
@@ -244,9 +262,13 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
         property: form.property.trim(),
         issue: form.issue.trim(),
         assignedTo: form.assignedTo || null,
-        replyDate: form.replyReceived ? form.replyDate || null : null,
         followUpDate: form.followUpDate || null,
         files,
+        // Blank rows are dropped; each date is sent as noon so it cannot slip
+        // to the previous day in the server's timezone.
+        newReplies: newReplies
+          .filter((r) => r.summary.trim())
+          .map((r) => ({ summary: r.summary.trim(), date: r.date ? `${r.date}T12:00:00` : null })),
       });
     } catch (err) {
       setError(err.response?.data?.message || "Failed to save record");
@@ -389,26 +411,57 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
         </div>
 
         <div className="rounded-2xl bg-gray-50 p-4 space-y-3">
-          <label className="flex items-center gap-2 text-sm font-bold text-[#0F253B]">
-            <input
-              type="checkbox"
-              checked={form.replyReceived}
-              onChange={(e) => setForm((f) => ({ ...f, replyReceived: e.target.checked }))}
-              className="accent-[#F47C3C] w-4 h-4"
-            />
-            Reply received
-          </label>
-          {form.replyReceived && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className={LABEL}>Reply date</label>
-                <input type="date" className={FIELD} value={form.replyDate} onChange={set("replyDate")} />
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-bold text-[#0F253B]">
+              Replies <span className="text-gray-400 font-medium">({existingReplies.length + newReplies.length})</span>
+            </p>
+            <button
+              type="button"
+              onClick={addReply}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-100 hover:bg-orange-50 text-[#F47C3C] text-xs font-bold rounded-lg transition-all"
+            >
+              <Plus size={14} /> Add reply
+            </button>
+          </div>
+
+          {existingReplies.length === 0 && newReplies.length === 0 && (
+            <p className="text-xs font-medium text-gray-400">No replies yet. Click &quot;Add reply&quot; for each reply received.</p>
+          )}
+
+          {existingReplies.map((r, i) => (
+            <div key={r._id || i} className="rounded-xl bg-white border border-gray-100 px-3 py-2">
+              <p className="text-[11px] font-bold text-gray-400">
+                Reply {i + 1} · {fmtDate(r.date) || "—"}
+              </p>
+              <p className="text-sm font-medium text-gray-600 whitespace-pre-line">{r.summary}</p>
+            </div>
+          ))}
+
+          {newReplies.map((r, i) => (
+            <div key={r.key} className="rounded-xl bg-white border border-orange-100 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-bold text-[#F47C3C]">Reply {existingReplies.length + i + 1} · new</p>
+                <button type="button" onClick={() => removeReply(r.key)} title="Remove" className="text-gray-300 hover:text-red-600">
+                  <Trash2 size={14} />
+                </button>
               </div>
-              <div className="sm:col-span-2">
-                <label className={LABEL}>Reply summary</label>
-                <input className={FIELD} value={form.replySummary} onChange={set("replySummary")} placeholder="What they said" />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={LABEL}>Reply date</label>
+                  <input type="date" className={FIELD} value={r.date} onChange={setReply(r.key, "date")} />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className={LABEL}>Reply message</label>
+                  <textarea rows={2} className={FIELD} value={r.summary} onChange={setReply(r.key, "summary")} placeholder="What they said" />
+                </div>
               </div>
             </div>
+          ))}
+
+          {existingReplies.length > 0 && (
+            <p className="text-[11px] font-medium text-gray-400">
+              Saved replies can be removed from the email chain in the record&apos;s view.
+            </p>
           )}
         </div>
 
@@ -467,16 +520,22 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
 /* ------------------------------------------------------------------ *
  * One step in the thread
  * ------------------------------------------------------------------ */
-function HistoryItem({ entry, onDelete, onOpenFiles, onResend }) {
+function HistoryItem({ entry, isOriginal, onDelete, onOpenFiles, onResend, onReply }) {
   const Icon = CHANNEL_ICON[entry.channel] || Mail;
+  const incoming = entry.direction === "Incoming";
   return (
-    <div className="flex gap-3">
+    <div className={`flex gap-3 ${incoming ? "" : "sm:pl-8"}`}>
       <div className="w-8 h-8 rounded-full bg-orange-50 text-[#F47C3C] flex items-center justify-center shrink-0">
         <Icon size={15} />
       </div>
-      <div className="min-w-0 flex-1 rounded-xl border border-gray-100 p-3">
+      <div
+        className={`min-w-0 flex-1 rounded-xl border p-3 ${
+          incoming ? "border-gray-100 bg-white" : "border-orange-100 bg-orange-50/30"
+        }`}
+      >
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <p className="text-xs font-bold text-[#0F253B]">
+            {isOriginal && <span className="mr-2 text-[#F47C3C]">Original</span>}
             {entry.channel} · {entry.direction}
             {entry.isReply && <span className="ml-2 text-emerald-600">Reply</span>}
             {entry.isFollowUp && <span className="ml-2 text-[#F47C3C]">Follow-up</span>}
@@ -505,21 +564,35 @@ function HistoryItem({ entry, onDelete, onOpenFiles, onResend }) {
           </div>
         )}
         <DeliveryStatus item={entry} onResend={onResend} />
-        {entry.createdByEmail && (
-          <p className="text-[10px] text-gray-300 font-medium mt-1">Logged by {entry.createdByEmail}</p>
-        )}
+        <div className="flex items-center justify-between gap-2 mt-1">
+          {entry.createdByEmail ? (
+            <p className="text-[10px] text-gray-300 font-medium">Logged by {entry.createdByEmail}</p>
+          ) : <span />}
+          {onReply && (
+            <button
+              type="button"
+              onClick={onReply}
+              className="inline-flex items-center gap-1 text-[11px] font-bold text-[#F47C3C] hover:underline"
+            >
+              <Reply size={12} /> Reply
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function AddHistoryForm({ row, options, onAdded }) {
+// `draft` pre-fills a reply to one message in the chain — who it goes to and
+// from which mailbox — with "send" already ticked. The form is remounted (by
+// key) for each new draft, so it only seeds the initial state.
+function AddHistoryForm({ row, options, onAdded, draft }) {
   const [form, setForm] = useState({
     channel: "Email",
     direction: "Outgoing",
     date: toInputDateTime(new Date()),
-    from: "",
-    to: "",
+    from: draft?.from || "",
+    to: draft?.to || "",
     summary: "",
     isReply: false,
     isFollowUp: false,
@@ -527,6 +600,8 @@ function AddHistoryForm({ row, options, onAdded }) {
     status: "",
     subject: "",
   });
+  // Never pre-ticked — adding a reply only saves it unless someone chooses
+  // to send an email.
   const [sendNow, setSendNow] = useState(false);
   const [files, setFiles] = useState([]);
   const [uploadingCount, setUploadingCount] = useState(0);
@@ -537,7 +612,8 @@ function AddHistoryForm({ row, options, onAdded }) {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const tick = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.checked }));
-  const canSend = form.channel === "Email" && form.direction === "Outgoing";
+  // A reply is only ever recorded, never emailed out.
+  const canSend = form.channel === "Email" && form.direction === "Outgoing" && !form.isReply;
 
   // Ticking "send" fills in the obvious addresses: to the tenant (or whoever
   // wrote in), from the mailbox the conversation is running on.
@@ -640,7 +716,13 @@ function AddHistoryForm({ row, options, onAdded }) {
         value={form.summary}
         onChange={set("summary")}
         placeholder={canSend && sendNow ? "The email to send" : "What was said"}
+        autoFocus={Boolean(draft)}
       />
+      {canSend && sendNow && (
+        <p className="text-[11px] font-medium text-gray-400 -mt-1">
+          Sent as a reply in the same email thread, with the earlier messages quoted underneath.
+        </p>
+      )}
       <MediaUploader
         key={uploaderKey}
         files={files}
@@ -690,6 +772,43 @@ function ViewModal({ row, options, onClose, onEdit, onOpenFiles, onChanged, onPr
   const overdue = isOverdue(row);
   const Icon = CHANNEL_ICON[row.channel] || Mail;
   const thread = [...(row.history || [])].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  // Which side of a message is the company. Used to point a reply back at the
+  // other party, from the mailbox the conversation is running on.
+  const isCompany = (a) =>
+    DEFAULT_OPTIONS.accounts.concat(options.accounts).some((x) => x.email === String(a || "").trim().toLowerCase());
+
+  // The original email opens the chain, so the record reads top to bottom as
+  // one conversation: what was sent or received first, then every reply.
+  const original = {
+    _id: "original",
+    channel: row.channel,
+    direction: row.channel === "Email" && isCompany(row.emailFrom) ? "Outgoing" : "Incoming",
+    date: row.date,
+    from: row.emailFrom,
+    to: row.emailTo,
+    summary: row.issue,
+    files: row.files,
+  };
+
+  // Remounting the form with a new key seeds it from `draft`.
+  const [draft, setDraft] = useState(null);
+  const [draftKey, setDraftKey] = useState(0);
+  const formRef = useRef(null);
+
+  const replyTo = (msg) => {
+    const incoming = msg.direction === "Incoming";
+    const other = incoming ? msg.from : msg.to;
+    const ours = incoming ? msg.to : msg.from;
+    setDraft({
+      to: other || row.tenantEmail || "",
+      from: isCompany(ours) ? ours : [row.emailFrom, row.emailTo].find(isCompany) || "",
+    });
+    setDraftKey((k) => k + 1);
+    requestAnimationFrame(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+
+  const canReply = (msg) => msg.channel === "Email" && msg.direction !== "Internal";
 
   const resend = async (entry) => {
     const updated = await resendRequest(row._id, entry?._id);
@@ -748,25 +867,14 @@ function ViewModal({ row, options, onClose, onEdit, onOpenFiles, onChanged, onPr
           </ViewRow>
         </div>
 
-        <div>
-          <p className={LABEL}>Issue</p>
-          <p className="text-sm text-gray-600 font-medium whitespace-pre-line leading-relaxed">{row.issue}</p>
-        </div>
-
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-2xl bg-gray-50 p-4">
-          <ViewRow label="Reply">{replyText(row)}</ViewRow>
+          <ViewRow label="Latest reply">{replyText(row)}</ViewRow>
           <ViewRow label="Follow-up notes">{row.followUpNotes}</ViewRow>
         </div>
 
-        <FilesBlock
-          label="Attachments"
-          files={filesOf(row.files)}
-          onOpen={() => onOpenFiles({ title: row.property, subtitle: `Email record · ${fmtDate(row.date)}`, files: filesOf(row.files) })}
-        />
-
         <div>
           <div className="flex items-center justify-between mb-3">
-            <p className={LABEL}>Thread &amp; history <span className="text-gray-300">({thread.length})</span></p>
+            <p className={LABEL}>Email chain <span className="text-gray-300">({thread.length + 1})</span></p>
             <div className="flex items-center gap-3 flex-wrap justify-end">
               {row.tenantName && (
                 <button
@@ -785,21 +893,30 @@ function ViewModal({ row, options, onClose, onEdit, onOpenFiles, onChanged, onPr
             </div>
           </div>
           <div className="space-y-3">
-            {thread.length === 0 && <p className="text-sm font-medium text-gray-300">Nothing logged after the original email yet.</p>}
+            <HistoryItem
+              entry={original}
+              isOriginal
+              onReply={canReply(original) ? () => replyTo(original) : undefined}
+              onOpenFiles={() =>
+                onOpenFiles({ title: row.property, subtitle: `Email record · ${fmtDate(row.date)}`, files: filesOf(row.files) })
+              }
+            />
+            {thread.length === 0 && <p className="text-sm font-medium text-gray-300 sm:pl-11">No replies yet.</p>}
             {thread.map((h) => (
               <HistoryItem
                 key={h._id}
                 entry={h}
                 onDelete={() => removeEntry(h)}
                 onResend={() => resend(h)}
+                onReply={canReply(h) ? () => replyTo(h) : undefined}
                 onOpenFiles={(entry) =>
                   onOpenFiles({ title: row.property, subtitle: `${entry.channel} · ${fmtDateTime(entry.date)}`, files: filesOf(entry.files) })
                 }
               />
             ))}
           </div>
-          <div className="mt-4">
-            <AddHistoryForm row={row} options={options} onAdded={onChanged} />
+          <div className="mt-4" ref={formRef}>
+            <AddHistoryForm key={draftKey} draft={draft} row={row} options={options} onAdded={onChanged} />
           </div>
         </div>
 
@@ -883,10 +1000,7 @@ const EMPTY_FILTERS = {
   category: "",
   priority: "",
   account: "",
-  assignedTo: "",
   followUp: "",
-  from: "",
-  to: "",
   month: "",
 };
 
@@ -975,8 +1089,6 @@ export default function EmailRecordsBoard({
   const f = filters;
 
   const visible = useMemo(() => {
-    const fromD = f.from ? new Date(f.from) : null;
-    const toD = f.to ? new Date(`${f.to}T23:59:59`) : null;
     return rows.filter((r) => {
       if (f.propertyKey) {
         const key = r.propertyId ? `id:${r.propertyId}` : `txt:${r.property.trim().toLowerCase()}`;
@@ -986,7 +1098,6 @@ export default function EmailRecordsBoard({
       if (f.category && r.category !== f.category) return false;
       if (f.priority && r.priority !== f.priority) return false;
       if (f.account && r.emailTo !== f.account && r.emailFrom !== f.account) return false;
-      if (f.assignedTo && String(r.assignedTo || "") !== f.assignedTo) return false;
       if (f.followUp === "overdue" && !isOverdue(r)) return false;
       if (f.followUp === "today" && !isDueToday(r)) return false;
       if (f.followUp === "set" && (!r.followUpDate || isDone(r))) return false;
@@ -995,8 +1106,6 @@ export default function EmailRecordsBoard({
       if (f.followUp === "urgent" && (r.priority !== "Urgent" || isDone(r))) return false;
       if (f.followUp === "escalated" && !r.escalated) return false;
       if (f.followUp === "recentResolved" && !resolvedRecently(r)) return false;
-      if (fromD && new Date(r.date) < fromD) return false;
-      if (toD && new Date(r.date) > toD) return false;
       if (f.month && !recordInMonth(r, f.month)) return false;
       if (needle && !matchesSearch(r, needle)) return false;
       return true;
@@ -1008,7 +1117,7 @@ export default function EmailRecordsBoard({
 
   // Dashboard — over every record, not just the filtered view. Each card
   // applies its own filter when clicked.
-  const cards = [
+  const statCards = [
     { key: "open", label: "Open emails", value: rows.filter((r) => !isDone(r)).length },
     { key: "awaiting", label: "Awaiting reply", value: rows.filter((r) => !r.replyReceived && !isDone(r)).length },
     { key: "overdue", label: "Overdue follow-ups", value: rows.filter(isOverdue).length, alert: true },
@@ -1019,6 +1128,13 @@ export default function EmailRecordsBoard({
       label: "Resolved (7 days)",
       value: rows.filter((r) => resolvedRecently(r)).length,
     },
+  ];
+  // The sum of every card after it, as the office asked for. One email can
+  // count in several cards (open and awaiting reply, say), so this can be
+  // more than the number of records. Clicking it clears the card filter.
+  const cards = [
+    { key: "", label: "Total", value: statCards.reduce((sum, c) => sum + c.value, 0) },
+    ...statCards,
   ];
 
   const save = async (payload) => {
@@ -1214,13 +1330,13 @@ export default function EmailRecordsBoard({
         </>
       ) : (
       <>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4">
         {cards.map((s) => {
-          const active = filters.followUp === s.key;
+          const active = Boolean(s.key) && filters.followUp === s.key;
           const hot = s.alert && s.value > 0;
           return (
             <button
-              key={s.key}
+              key={s.key || "total"}
               onClick={() => setFilters((prev) => ({ ...prev, followUp: active ? "" : s.key }))}
               className={`text-left bg-white border rounded-2xl p-4 transition-all ${active ? "border-[#F47C3C] ring-2 ring-[#F47C3C]/30" : "border-gray-100 hover:border-gray-200"}`}
             >
@@ -1231,7 +1347,7 @@ export default function EmailRecordsBoard({
         })}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 rounded-2xl bg-white border border-gray-100 p-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 rounded-2xl bg-white border border-gray-100 p-4">
         <div className="relative sm:col-span-2 lg:col-span-2">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
           <input
@@ -1248,10 +1364,6 @@ export default function EmailRecordsBoard({
         <select value={filters.account} onChange={setFilter("account")} className={SELECT}>
           <option value="">All mailboxes</option>
           {options.accounts.map((a) => <option key={a.email} value={a.email}>{a.email}</option>)}
-        </select>
-        <select value={filters.assignedTo} onChange={setFilter("assignedTo")} className={SELECT}>
-          <option value="">All staff</option>
-          {members.map((m) => <option key={String(m.userId)} value={String(m.userId)}>{m.email}</option>)}
         </select>
         <select value={filters.status} onChange={setFilter("status")} className={SELECT}>
           <option value="">All statuses</option>
@@ -1276,10 +1388,6 @@ export default function EmailRecordsBoard({
           <option value="escalated">Escalated</option>
           <option value="recentResolved">Resolved in last 7 days</option>
         </select>
-        <div className="flex items-center gap-2">
-          <input type="date" value={filters.from} onChange={setFilter("from")} className={`${SELECT} w-full`} title="From date" />
-          <input type="date" value={filters.to} onChange={setFilter("to")} className={`${SELECT} w-full`} title="To date" />
-        </div>
         {anyFilter && (
           <button
             onClick={() => { setFilters(EMPTY_FILTERS); setQ(""); }}

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Plus, X, Pencil, Search, Gavel } from "lucide-react";
-import { PageHeader } from "./ui";
+import { Plus, X, Pencil, Search, Gavel, CheckCircle2, Circle } from "lucide-react";
+import { PageHeader, Badge } from "./ui";
 import { MediaUploader, MediaViewerModal } from "./MediaAttachments";
 import api from "@/app/api/api";
 import { fmtDate, monthKey, monthLabel } from "@/app/utils/cleaningSheet";
@@ -33,6 +33,16 @@ import {
  * "sr" is the row number, so it is never stored. MUST stay in sync with
  * backend/models/CourtClaim.js.
  * ------------------------------------------------------------------ */
+
+// MUST stay in sync with CLAIM_STATUSES in backend/models/CourtClaim.js.
+export const CLAIM_STATUSES = ["In Progress", "Paid"];
+const STATUS_TONE = { "In Progress": "amber", Paid: "green" };
+
+// Rows written before the status existed come back without one.
+const statusOf = (row) => (CLAIM_STATUSES.includes(row?.status) ? row.status : "In Progress");
+
+// Blank for a claim not settled yet, rather than a misleading £0.00.
+const hasSettlement = (row) => row?.settlementAmount !== null && row?.settlementAmount !== undefined;
 
 const startOfToday = () => {
   const d = new Date();
@@ -74,6 +84,9 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
     amount: initial?.amount ?? "",
     rent: initial?.rent ?? "",
     deposit: initial?.deposit ?? "",
+    settlementAmount: initial?.settlementAmount ?? "",
+    status: statusOf(initial),
+    paidAt: toInputDate(initial?.paidAt),
     deadlineToRespond: toInputDate(initial?.deadlineToRespond),
     claimReason: initial?.claimReason || "",
     details: initial?.details || "",
@@ -109,6 +122,9 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
         amount: num(form.amount),
         rent: num(form.rent),
         deposit: num(form.deposit),
+        settlementAmount: form.settlementAmount === "" ? null : Number(form.settlementAmount),
+        status: form.status,
+        paidAt: form.status === "Paid" ? form.paidAt || null : null,
         deadlineToRespond: form.deadlineToRespond || null,
         claimReason: form.claimReason.trim(),
         details: form.details.trim(),
@@ -175,6 +191,33 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
           ))}
         </div>
 
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className={LABEL}>Settlement amount (£)</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              className={FIELD}
+              value={form.settlementAmount}
+              onChange={set("settlementAmount")}
+              placeholder="Not settled yet"
+            />
+          </div>
+          <div>
+            <label className={LABEL}>Status</label>
+            <select className={FIELD} value={form.status} onChange={set("status")}>
+              {CLAIM_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          {form.status === "Paid" && (
+            <div>
+              <label className={LABEL}>Paid on</label>
+              <input type="date" className={FIELD} value={form.paidAt} onChange={set("paidAt")} title="Leave blank for today" />
+            </div>
+          )}
+        </div>
+
         <div>
           <label className={LABEL}>Claim reason</label>
           <input className={FIELD} value={form.claimReason} onChange={set("claimReason")} placeholder="e.g. Unpaid rent, damage to property" />
@@ -209,7 +252,8 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
  * Read-only detail — everything on one claim, attachments included
  * ------------------------------------------------------------------ */
 function ViewModal({ row, onClose, onEdit, onOpenFiles }) {
-  const overdue = isOverdue(row.deadlineToRespond);
+  // A paid claim is finished — its response deadline no longer matters.
+  const overdue = statusOf(row) !== "Paid" && isOverdue(row.deadlineToRespond);
 
   return (
     <div
@@ -225,7 +269,10 @@ function ViewModal({ row, onClose, onEdit, onOpenFiles }) {
             <h3 className="text-xl font-bold text-[#0F253B] break-words">{row.property}</h3>
             <p className="text-xs text-gray-400 font-medium">Court claim · {fmtDate(row.claimDate)}</p>
           </div>
-          <button onClick={onClose} className="text-gray-300 hover:text-gray-500 shrink-0"><X size={20} /></button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Badge tone={STATUS_TONE[statusOf(row)]}>{statusOf(row)}</Badge>
+            <button onClick={onClose} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
+          </div>
         </div>
 
         <div className="space-y-5">
@@ -247,6 +294,12 @@ function ViewModal({ row, onClose, onEdit, onOpenFiles }) {
             <ViewRow label="Amount">{money(row.amount)}</ViewRow>
             <ViewRow label="Rent">{money(row.rent)}</ViewRow>
             <ViewRow label="Deposit">{money(row.deposit)}</ViewRow>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <ViewRow label="Settlement amount">{hasSettlement(row) ? money(row.settlementAmount) : ""}</ViewRow>
+            <ViewRow label="Status">{statusOf(row)}</ViewRow>
+            <ViewRow label="Paid on">{row.paidAt ? fmtDate(row.paidAt) : ""}</ViewRow>
           </div>
 
           <ViewRow label="Claim reason">{row.claimReason}</ViewRow>
@@ -299,6 +352,7 @@ export default function CourtClaimsBoard({
 
   const [q, setQ] = useState("");
   const [month, setMonth] = useState("");
+  const [status, setStatus] = useState("");
 
   // {} = create, row = edit, null = closed.
   const [modal, setModal] = useState(null);
@@ -339,9 +393,27 @@ export default function CourtClaimsBoard({
     () =>
       rows
         .filter((r) => (month ? monthKey(r.claimDate) === month : true))
+        .filter((r) => (status ? statusOf(r) === status : true))
         .filter((r) => (needle ? matchesSearch(r, needle) : true)),
-    [rows, month, needle]
+    [rows, month, status, needle]
   );
+
+  // Paid / In Progress is flipped straight from the row, like the Done tick on
+  // the cleaning board — no need to open the whole claim to change it.
+  const toggleStatus = async (row) => {
+    const next = statusOf(row) === "Paid" ? "In Progress" : "Paid";
+    const snapshot = rows;
+    setRows((prev) =>
+      prev.map((r) => (r._id === row._id ? { ...r, status: next, paidAt: next === "Paid" ? new Date().toISOString() : null } : r))
+    );
+    try {
+      const res = await api.put(`/court-claims/${row._id}`, { status: next, paidAt: null });
+      setRows((prev) => prev.map((r) => (r._id === row._id ? res.data.data : r)));
+    } catch (err) {
+      setRows(snapshot);
+      alert(err.response?.data?.message || "Failed to update status");
+    }
+  };
 
   const save = async (payload) => {
     if (modal?._id) await api.put(`/court-claims/${modal._id}`, payload);
@@ -364,10 +436,14 @@ export default function CourtClaimsBoard({
   };
 
   const totalClaimed = visible.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+  const totalSettled = visible.reduce((sum, r) => sum + Number(r.settlementAmount || 0), 0);
   const cards = [
     { label: "Claims", value: visible.length },
     { label: "Total claimed", value: money(totalClaimed) },
-    { label: "Awaiting response", value: visible.filter((r) => isUpcoming(r.deadlineToRespond)).length },
+    { label: "Total settlement", value: money(totalSettled) },
+    { label: "In progress", value: visible.filter((r) => statusOf(r) === "In Progress").length },
+    { label: "Paid", value: visible.filter((r) => statusOf(r) === "Paid").length },
+    { label: "Awaiting response", value: visible.filter((r) => statusOf(r) !== "Paid" && isUpcoming(r.deadlineToRespond)).length },
   ];
 
   const thClass = "px-4 py-3 whitespace-nowrap";
@@ -394,7 +470,7 @@ export default function CourtClaimsBoard({
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         {cards.map((s) => (
           <div key={s.label} className="bg-white border border-gray-100 rounded-2xl p-4">
             <p className="text-2xl font-bold text-[#0F253B]">{loading ? "—" : s.value}</p>
@@ -424,6 +500,17 @@ export default function CourtClaimsBoard({
             <option key={m} value={m}>{monthLabel(m)}</option>
           ))}
         </select>
+
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          className="px-3 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]"
+        >
+          <option value="">All statuses</option>
+          {CLAIM_STATUSES.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
@@ -438,13 +525,15 @@ export default function CourtClaimsBoard({
             <thead>
               <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
                 <th className={`${thClass} w-10`}>Sr</th>
-                <th className={thClass}>Claim date</th>
                 <th className={thClass}>Property</th>
+                <th className={thClass}>Claim date</th>
                 <th className={thClass}>Claim by</th>
                 <th className={thClass}>Claim to</th>
                 <th className={thClass}>Amount</th>
                 <th className={thClass}>Rent</th>
                 <th className={thClass}>Deposit</th>
+                <th className={thClass}>Settlement</th>
+                <th className={thClass}>Status</th>
                 <th className={thClass}>Deadline to respond</th>
                 <th className={thClass}>Claim reason</th>
                 <th className={thClass}>Attachments</th>
@@ -454,24 +543,42 @@ export default function CourtClaimsBoard({
             <tbody>
               {visible.length === 0 ? (
                 <EmptyRow
-                  colSpan={12}
+                  colSpan={14}
                   loading={loading}
                   anyRows={rows.length > 0}
                   emptyText="No court claims recorded yet"
                 />
               ) : (
                 visible.map((r, i) => {
-                  const overdue = isOverdue(r.deadlineToRespond);
+                  const overdue = statusOf(r) !== "Paid" && isOverdue(r.deadlineToRespond);
                   return (
                     <tr key={r._id} className="border-b border-gray-50 hover:bg-gray-50/50 align-top">
                       <td className="px-4 py-3 text-gray-400 font-medium">{i + 1}</td>
-                      <td className="px-4 py-3 text-gray-500 font-medium whitespace-nowrap">{fmtDate(r.claimDate)}</td>
                       <td className="px-4 py-3 font-semibold text-[#0F253B]">{r.property}</td>
+                      <td className="px-4 py-3 text-gray-500 font-medium whitespace-nowrap">{fmtDate(r.claimDate)}</td>
                       <td className="px-4 py-3 text-[#0F253B] font-medium">{r.claimBy || "—"}</td>
                       <td className="px-4 py-3 text-[#0F253B] font-medium">{r.claimTo || "—"}</td>
                       <td className="px-4 py-3 text-[#0F253B] font-bold whitespace-nowrap">{money(r.amount)}</td>
                       <td className="px-4 py-3 text-gray-500 font-medium whitespace-nowrap">{money(r.rent)}</td>
                       <td className="px-4 py-3 text-gray-500 font-medium whitespace-nowrap">{money(r.deposit)}</td>
+                      <td className="px-4 py-3 text-[#0F253B] font-bold whitespace-nowrap">
+                        {hasSettlement(r) ? money(r.settlementAmount) : "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => toggleStatus(r)}
+                          title={statusOf(r) === "Paid" ? "Mark as in progress" : "Mark as paid"}
+                          className="flex items-center gap-1.5 whitespace-nowrap"
+                        >
+                          {statusOf(r) === "Paid" ? (
+                            <CheckCircle2 size={15} className="text-emerald-600" />
+                          ) : (
+                            <Circle size={15} className="text-gray-300" />
+                          )}
+                          <Badge tone={STATUS_TONE[statusOf(r)]}>{statusOf(r)}</Badge>
+                        </button>
+                        {r.paidAt && <p className="text-[10px] font-medium text-gray-400 mt-1">{fmtDate(r.paidAt)}</p>}
+                      </td>
                       <td className={`px-4 py-3 font-medium whitespace-nowrap ${overdue ? "text-red-600" : "text-gray-500"}`}>
                         {r.deadlineToRespond ? fmtDate(r.deadlineToRespond) : "—"}
                         {overdue && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider">Overdue</span>}

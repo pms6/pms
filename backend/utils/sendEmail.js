@@ -42,7 +42,20 @@ const addressList = (value) =>
 // `attachments` takes nodemailer's own shape — { filename, path } with `path`
 // a URL is fetched and attached at send time. `replyTo` sends the recipient's
 // answer to a different mailbox than the SMTP account the mail goes out from.
-export const sendEmail = async ({ email, cc, subject, html, text, attachments, replyTo }) => {
+// `inReplyTo` / `references` are the Message-IDs of the earlier mail in a
+// conversation, so the recipient's mail client files this one in the same
+// thread instead of starting a new one.
+export const sendEmail = async ({
+  email,
+  cc,
+  subject,
+  html,
+  text,
+  attachments,
+  replyTo,
+  inReplyTo,
+  references,
+}) => {
   try {
     const to = addressList(email);
     if (!to) throw new Error("No recipient address");
@@ -54,6 +67,8 @@ export const sendEmail = async ({ email, cc, subject, html, text, attachments, r
       to,
       ...(ccList ? { cc: ccList } : {}),
       ...(replyTo ? { replyTo } : {}),
+      ...(inReplyTo ? { inReplyTo } : {}),
+      ...(references?.length ? { references } : {}),
       subject,
       html,
       ...(text ? { text } : {}),
