@@ -84,6 +84,23 @@ const env = {
     password: process.env.MAIL_PASSWORD || "",
     from: process.env.MAIL_FROM || "PMS <no-reply@example.com>",
   },
+
+  // The inbox Email Records reads tenant replies from (cranjob/emailInbox.js).
+  // Defaults to the same Gmail account and app password as sending; Gmail's
+  // IMAP must be switched on for that account.
+  imap: {
+    enabled: process.env.IMAP_ENABLED !== "false",
+    host:
+      process.env.IMAP_HOST ||
+      (/gmail/i.test(process.env.MAIL_HOST || "smtp.gmail.com") ? "imap.gmail.com" : ""),
+    port: Number(process.env.IMAP_PORT || 993),
+    user: process.env.IMAP_USER || process.env.MAIL_USER || "",
+    password: process.env.IMAP_PASSWORD || process.env.MAIL_PASSWORD || "",
+    mailbox: process.env.IMAP_MAILBOX || "INBOX",
+    // How far back the very first check looks, so switching this on does not
+    // import years of old mail.
+    initialDays: Number(process.env.IMAP_INITIAL_DAYS || 7),
+  },
 };
 
 export default env;

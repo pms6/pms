@@ -7,6 +7,8 @@ import api from "../../api/api";
 import CheckInFormModal from "../_components/CheckInFormModal";
 import RecordDetail from "../_components/RecordDetail";
 import RowActions from "../_components/RowActions";
+import { RegisterMediaCell, RegisterMediaSection } from "../_components/RegisterMedia";
+import { MediaViewerModal } from "../../Shared/MediaAttachments";
 import {
   money,
   date,
@@ -85,6 +87,8 @@ export default function AdminCheckIn() {
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null);
   const [viewing, setViewing] = useState(null);
+  // { title, subtitle, files } — the photos or videos open in the viewer.
+  const [media, setMedia] = useState(null);
 
   const [f, setF] = useState({
     year: "",
@@ -331,14 +335,15 @@ export default function AdminCheckIn() {
                 <th className="px-5 py-3">Contract</th>
                 <th className="px-5 py-3">Agent</th>
                 <th className="px-5 py-3">Bank</th>
+                <th className="px-5 py-3">Photos &amp; videos</th>
                 <th className="px-5 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={11} className="px-5 py-10 text-center text-gray-400">Loading check-ins…</td></tr>
+                <tr><td colSpan={12} className="px-5 py-10 text-center text-gray-400">Loading check-ins…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={11} className="px-5 py-10 text-center text-gray-400">No check-ins match these filters</td></tr>
+                <tr><td colSpan={12} className="px-5 py-10 text-center text-gray-400">No check-ins match these filters</td></tr>
               ) : (
                 rows.map((r) => (
                   <tr key={r._id} className="border-b border-gray-50 hover:bg-gray-50/50">
@@ -366,6 +371,18 @@ export default function AdminCheckIn() {
                     </td>
                     <td className="px-5 py-3 text-gray-500">{r.agent || "—"}</td>
                     <td className="px-5 py-3 text-gray-500">{r.bank || "—"}</td>
+                    <td className="px-5 py-3">
+                      <RegisterMediaCell
+                        row={r}
+                        onOpen={() =>
+                          setMedia({
+                            title: r.tenant,
+                            subtitle: `Check-in photos & videos · ${r.property}${r.room ? ` · ${r.room}` : ""}`,
+                            files: [...(r.photoFiles || []), ...(r.videoFiles || [])],
+                          })
+                        }
+                      />
+                    </td>
                     <td className="px-5 py-3">
                       <RowActions
                         onView={() => setViewing(r)}
@@ -408,7 +425,27 @@ export default function AdminCheckIn() {
               </button>
             </>
           }
-        />
+        >
+          <RegisterMediaSection
+            row={viewing}
+            stage="check-in"
+            onOpen={(files, label) =>
+              setMedia({ title: viewing.tenant, subtitle: `Check-in · ${label} · ${viewing.property}`, files })
+            }
+          />
+        </RecordDetail>
+      )}
+
+      {media && (
+        // Above the record view it was opened from, so closing it returns there.
+        <div className="relative z-[60]">
+          <MediaViewerModal
+            title={media.title}
+            subtitle={media.subtitle}
+            files={media.files}
+            onClose={() => setMedia(null)}
+          />
+        </div>
       )}
 
       {modal !== null && (

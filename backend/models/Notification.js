@@ -20,6 +20,8 @@ export const NOTIFICATION_TYPES = [
   "email_assigned",
   "email_followup",
   "email_escalated",
+  // A tenant's reply (or new email) read from the inbox by cranjob/emailInbox.js.
+  "email_reply",
 ];
 
 const notificationSchema = new mongoose.Schema(

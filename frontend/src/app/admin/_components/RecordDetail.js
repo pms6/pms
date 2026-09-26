@@ -14,7 +14,7 @@ import { Badge } from "../../Shared/ui";
  * these records most fields are optional, and a detail view that is nine tenths
  * em dashes hides the handful of fields that were actually filled in.
  */
-export default function RecordDetail({ title, subtitle, sections = [], footer, onClose }) {
+export default function RecordDetail({ title, subtitle, sections = [], children, footer, onClose }) {
   const isEmpty = (v) => v === null || v === undefined || v === "" || v === "—";
 
   const visible = sections
@@ -69,6 +69,9 @@ export default function RecordDetail({ title, subtitle, sections = [], footer, o
             ))}
           </div>
         )}
+
+        {/* Anything a screen shows beyond label/value rows, e.g. a gallery. */}
+        {children}
 
         {footer && <div className="mt-5 flex flex-wrap justify-end gap-2">{footer}</div>}
       </div>

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { attachmentSchema } from "../utils/attachments.js";
 
 // Check-out register — one row per tenant moving OUT of a room.
 //
@@ -131,6 +132,12 @@ const checkOutSchema = new mongoose.Schema(
     },
 
     notes: { type: String, trim: true, default: "" },
+
+    // Photos of the room / property and videos taken at check-out. The
+    // "pictures" / "videos" checklist answers above say whether they were
+    // taken; these are the files themselves.
+    photoFiles: { type: [attachmentSchema], default: [] },
+    videoFiles: { type: [attachmentSchema], default: [] },
 
     // ============================
     // Soft delete

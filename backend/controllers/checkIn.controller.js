@@ -5,6 +5,7 @@
 // "Database Template .xlsx".
 
 import CheckIn from "../models/CheckIn.js";
+import { cleanAttachments } from "../utils/attachments.js";
 import Property from "../models/Property.js";
 import Room from "../models/room.js";
 
@@ -81,6 +82,10 @@ const pickPayload = (body) => {
   for (const key of EDITABLE_KEYS) {
     if (body[key] !== undefined) payload[key] = body[key];
   }
+  // Room photos and videos straight from the uploader; entries without a URL
+  // are dropped.
+  if (body.photoFiles !== undefined) payload.photoFiles = cleanAttachments(body.photoFiles);
+  if (body.videoFiles !== undefined) payload.videoFiles = cleanAttachments(body.videoFiles);
   return payload;
 };
 

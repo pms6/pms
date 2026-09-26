@@ -5,6 +5,7 @@
 // in, and how their deposit was settled.
 
 import CheckOut, { DEPOSIT_STATUS } from "../models/CheckOut.js";
+import { cleanAttachments } from "../utils/attachments.js";
 import CheckIn from "../models/CheckIn.js";
 import Property from "../models/Property.js";
 import Room from "../models/room.js";
@@ -61,6 +62,14 @@ const pickPayload = (body) => {
   for (const key of EDITABLE_KEYS) {
     if (body[key] !== undefined) payload[key] = body[key];
   }
+  // Room photos and videos straight from the uploader; entries without a URL
+  // are dropped.
+  if (body.photoFiles !== undefined) payload.photoFiles = cleanAttachments(body.photoFiles);
+  if (body.videoFiles !== undefined) payload.videoFiles = cleanAttachments(body.videoFiles);
+  // Uploading them answers the "Pictures" / "Videos" checklist questions,
+  // unless someone has already answered them.
+  if (payload.photoFiles?.length && !body.pictures) payload.pictures = "YES";
+  if (payload.videoFiles?.length && !body.videos) payload.videos = "YES";
   return payload;
 };
 

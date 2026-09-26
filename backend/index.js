@@ -14,6 +14,7 @@ import { sendAllContractReminders } from "./cranjob/contractReminder.js";
 import { sendAllLocationDigests } from "./cranjob/locationDigest.js";
 import { generateAllSchedules } from "./cranjob/cleaningSchedule.js";
 import { sweepEmailFollowUps } from "./cranjob/emailFollowUp.js";
+import { syncInbox } from "./cranjob/emailInbox.js";
 import { purgeExpiredCaptures, closeAbandonedSessions } from "./controllers/screenMonitor.controller.js";
 import CleaningSchedule from "./models/CleaningSchedule.js";
 
@@ -99,6 +100,17 @@ cron.schedule("0 8 * * *", async () => {
     `Screenshots removed: ${purged.capturesRemoved}, Empty sessions removed: ${purged.sessionsRemoved}` +
       (purged.imagesFailed ? `, FAILED to delete from storage: ${purged.imagesFailed}` : "")
   );
+});
+
+// Every 5 minutes, file tenant replies (and new tenant emails) from the
+// company inbox into Email Records.
+cron.schedule("*/5 * * * *", async () => {
+  const r = await syncInbox();
+  if (r.replies || r.newConversations || r.errors.length) {
+    console.log(
+      `Inbox: ${r.replies} replies filed, ${r.newConversations} new tenant conversations, Errors: ${r.errors.length}`
+    );
+  }
 });
 
 // A monitored shift whose browser went away - a reload, a crash, a closed lid -

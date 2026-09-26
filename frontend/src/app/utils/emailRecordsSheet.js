@@ -73,9 +73,131 @@ export const replyText = (row) =>
 export const followUpText = (row) =>
   [row.followUpDate ? fmtDate(row.followUpDate) : "", row.followUpNotes].filter(Boolean).join(" — ");
 
+// "25/09/2026, 14:30" — thread entries carry a time as well as a date.
+export const fmtDateTime = (value) => {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.toLocaleDateString("en-GB")}, ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+};
+
+// The value a <input type="datetime-local"> wants, in local time.
+export const toInputDateTime = (value) => {
+  const d = value ? new Date(value) : new Date();
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+// "YYYY-MM" for the current month, the <input type="month"> format.
+export const currentMonth = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+
+// "September 2026" for "2026-09".
+export const monthLabel = (month) => {
+  const [y, m] = String(month || "").split("-").map(Number);
+  if (!y || !m) return "";
+  return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+};
+
+// Whether a date falls in a "YYYY-MM" month (local time). An empty month
+// matches everything.
+export const inMonth = (value, month) => {
+  if (!month) return true;
+  if (!value) return false;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return false;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` === month;
+};
+
+// A record belongs to a month when anything in its conversation happened
+// then — the original message or any later reply or message.
+export const recordInMonth = (row, month) =>
+  !month || inMonth(row.date, month) || (row.history || []).some((h) => inMonth(h.date, month));
+
+// Every message in one record, oldest first: the original email / call /
+// message, then everything in its thread.
+export const recordEvents = (row) => {
+  const list = [
+    {
+      key: `${row._id}-root`,
+      date: row.date,
+      record: row,
+      original: true,
+      entry: {
+        channel: row.channel,
+        direction: "Original",
+        from: row.emailFrom,
+        to: row.emailTo,
+        summary: [row.subject, row.issue].filter(Boolean).join(" — "),
+        files: row.files || [],
+        createdByEmail: "",
+        emailStatus: row.emailStatus || "",
+        emailSentAt: row.emailSentAt,
+        emailError: row.emailError || "",
+      },
+    },
+    ...(row.history || []).map((h) => ({ key: h._id, date: h.date, record: row, entry: h })),
+  ];
+  return list.sort((a, b) => new Date(a.date) - new Date(b.date));
+};
+
+const lower = (v) => String(v || "").trim().toLowerCase();
+
+// Groups the log into one conversation per tenant. A record belongs to a
+// tenant when it is linked to their tenancy, or — so nothing slips through
+// unlinked — when the tenant's email address is on its To / From line.
+//
+// `tenancies` is GET /tenancies; ended tenancies are no longer in it, so
+// their conversations are still found through the name and email the record
+// copied in when it was linked.
+export const groupByTenant = (rows = [], tenancies = []) => {
+  const byId = new Map(tenancies.map((t) => [String(t._id), t]));
+  const byEmail = new Map();
+  for (const t of tenancies) if (t.tenantEmail) byEmail.set(lower(t.tenantEmail), t);
+
+  const groups = new Map();
+  const add = (key, info, row) => {
+    if (!groups.has(key)) groups.set(key, { key, ...info, records: [] });
+    groups.get(key).records.push(row);
+  };
+
+  for (const r of rows) {
+    if (r.tenancyId) {
+      const t = byId.get(String(r.tenancyId));
+      add(`t:${r.tenancyId}`, {
+        tenancyId: String(r.tenancyId),
+        name: t?.tenant || r.tenantName || "Tenant",
+        email: t?.tenantEmail || r.tenantEmail || "",
+        property: t?.property || r.property || "",
+        current: Boolean(t),
+      }, r);
+      continue;
+    }
+    const match = byEmail.get(lower(r.emailFrom)) || byEmail.get(lower(r.emailTo));
+    if (match) {
+      add(`t:${match._id}`, {
+        tenancyId: String(match._id),
+        name: match.tenant,
+        email: match.tenantEmail,
+        property: match.property || "",
+        current: true,
+      }, r);
+    }
+  }
+
+  return [...groups.values()].map((g) => ({
+    ...g,
+    events: g.records.flatMap(recordEvents).sort((a, b) => new Date(a.date) - new Date(b.date)),
+  }));
+};
+
 const SHEET_COLUMNS = [
   "Sr#",
   "Property",
+  "Tenant",
   "Date",
   "Channel",
   "Email To",
@@ -96,6 +218,7 @@ const SHEET_COLUMNS = [
 const rowCells = (r, i) => [
   i + 1,
   r.property || "",
+  r.tenantName || "",
   fmtDate(r.date),
   r.channel || "Email",
   r.emailTo || "",
@@ -113,6 +236,71 @@ const rowCells = (r, i) => [
   fmtDate(r.updatedAt),
 ];
 
+const fileLinks = (files) => (files || []).map((f) => f.url).filter(Boolean).join("\n");
+
+const HISTORY_HEADER = [
+  "Property", "Tenant", "Issue", "Date & time", "Channel", "Direction", "From", "To",
+  "Message", "Reply", "Attachments", "Logged by",
+];
+const HISTORY_COLS = [28, 22, 36, 18, 10, 10, 24, 24, 48, 7, 40, 24];
+
+// One row per message — the original and every entry in its thread — with
+// its date, time and attachment links.
+const historyAoa = (rows) => {
+  const aoa = [HISTORY_HEADER];
+  for (const r of rows) {
+    for (const ev of recordEvents(r)) {
+      const h = ev.entry;
+      aoa.push([
+        r.property || "",
+        r.tenantName || "",
+        r.issue || "",
+        fmtDateTime(ev.date),
+        h.channel || "",
+        h.direction || "",
+        h.from || "",
+        h.to || "",
+        h.summary || "",
+        h.isReply ? "Yes" : "",
+        fileLinks(h.files),
+        h.createdByEmail || "",
+      ]);
+    }
+  }
+  return aoa;
+};
+
+// Excel: one tenant's full conversation, message by message.
+export const exportTenantConversationXlsx = async (tenant, events = [], month = "") => {
+  const XLSX = await import("xlsx");
+  const aoa = [
+    [`Tenant conversation — ${tenant.name}${month ? ` — ${monthLabel(month)}` : ""}`],
+    [[tenant.email, tenant.property].filter(Boolean).join(" · ")],
+    [],
+    ["Date & time", "Property", "Issue", "Channel", "Direction", "From", "To", "Message", "Reply", "Status", "Attachments", "Logged by"],
+    ...events.map((ev) => [
+      fmtDateTime(ev.date),
+      ev.record.property || "",
+      ev.record.issue || "",
+      ev.entry.channel || "",
+      ev.entry.direction || "",
+      ev.entry.from || "",
+      ev.entry.to || "",
+      ev.entry.summary || "",
+      ev.entry.isReply ? "Yes" : "",
+      ev.record.status || "",
+      fileLinks(ev.entry.files),
+      ev.entry.createdByEmail || "",
+    ]),
+  ];
+  const sheet = XLSX.utils.aoa_to_sheet(aoa);
+  sheet["!cols"] = [18, 26, 32, 10, 10, 24, 24, 50, 7, 14, 40, 24].map((wch) => ({ wch }));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Conversation");
+  const slug = String(tenant.name || "tenant").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  XLSX.writeFile(workbook, `tenant-conversation-${slug}${month ? `-${month}` : ""}.xlsx`);
+};
+
 // Excel: the log itself, plus a second sheet with every thread entry.
 export const exportEmailRecordsXlsx = async (rows = []) => {
   const XLSX = await import("xlsx");
@@ -123,27 +311,10 @@ export const exportEmailRecordsXlsx = async (rows = []) => {
     SHEET_COLUMNS,
     ...rows.map(rowCells),
   ]);
-  log["!cols"] = [5, 28, 12, 10, 26, 26, 24, 40, 14, 10, 18, 32, 28, 26, 10, 12, 12].map((wch) => ({ wch }));
+  log["!cols"] = [5, 28, 22, 12, 10, 26, 26, 24, 40, 14, 10, 18, 32, 28, 26, 10, 12, 12].map((wch) => ({ wch }));
 
-  const historyAoa = [["Property", "Record date", "Issue", "Entry date", "Channel", "Direction", "From", "To", "Summary", "Logged by"]];
-  for (const r of rows) {
-    for (const h of r.history || []) {
-      historyAoa.push([
-        r.property || "",
-        fmtDate(r.date),
-        r.issue || "",
-        fmtDate(h.date),
-        h.channel || "",
-        h.direction || "",
-        h.from || "",
-        h.to || "",
-        h.summary || "",
-        h.createdByEmail || "",
-      ]);
-    }
-  }
-  const history = XLSX.utils.aoa_to_sheet(historyAoa);
-  history["!cols"] = [28, 12, 36, 12, 10, 10, 24, 24, 48, 24].map((wch) => ({ wch }));
+  const history = XLSX.utils.aoa_to_sheet(historyAoa(rows));
+  history["!cols"] = HISTORY_COLS.map((wch) => ({ wch }));
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, log, "Email Records");

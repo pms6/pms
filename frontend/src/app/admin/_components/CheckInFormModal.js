@@ -16,6 +16,7 @@ import {
   BANKS,
 } from "../../utils/registers";
 import { guardModalClose } from "@/app/Shared/modalGuard";
+import { RegisterMediaFields } from "./RegisterMedia";
 
 const FIELD =
   "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
@@ -70,6 +71,13 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
   const [rooms, setRooms] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Room / property photos and videos, kept beside the form so the uploader
+  // owns its own list and the save sends them with the rest.
+  const [photos, setPhotos] = useState(() => (Array.isArray(initial?.photoFiles) ? initial.photoFiles : []));
+  const [videos, setVideos] = useState(() => (Array.isArray(initial?.videoFiles) ? initial.videoFiles : []));
+  const [uploading, setUploading] = useState({ photos: 0, videos: 0 });
+  const trackUploads = (kind, count) => setUploading((u) => (u[kind] === count ? u : { ...u, [kind]: count }));
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -129,10 +137,12 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
     if (!form.tenant.trim()) return setError("A tenant name is required.");
     if (!form.roomRentedDate) return setError("A room rented date is required.");
 
+    if (uploading.photos || uploading.videos) return setError("Wait for the photos and videos to finish uploading.");
+
     setSaving(true);
     setError("");
     try {
-      await onSave(form);
+      await onSave({ ...form, photoFiles: photos, videoFiles: videos });
     } catch (err) {
       setError(err.response?.data?.message || "Failed to save the check-in.");
     } finally {
@@ -312,6 +322,15 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
               <input type="date" className={FIELD} value={form.contractEnd} onChange={set("contractEnd")} />
             </div>
           </div>
+
+          <RegisterMediaFields
+            stage="check-in"
+            photos={photos}
+            onPhotosChange={setPhotos}
+            videos={videos}
+            onVideosChange={setVideos}
+            onUploadingChange={trackUploads}
+          />
 
           <div>
             <label className={LABEL}>Notes</label>

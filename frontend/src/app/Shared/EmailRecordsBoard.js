@@ -7,10 +7,7 @@ import {
   Pencil,
   Search,
   Mail,
-  Phone,
-  MessageSquare,
-  MessageCircle,
-  StickyNote,
+  Users,
   FileSpreadsheet,
   Printer,
   BellRing,
@@ -18,10 +15,17 @@ import {
   History,
   Trash2,
   Loader2,
+  CalendarDays,
+  Send,
+  CheckCircle2,
+  XCircle,
+  RotateCw,
+  Inbox,
 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import { MediaUploader, MediaViewerModal } from "./MediaAttachments";
 import { guardModalClose } from "./modalGuard";
+import { CHANNEL_ICON, TenantConversationsPanel, TenantThreadModal } from "./TenantConversations";
 import api from "@/app/api/api";
 import { fmtDate } from "@/app/utils/cleaningSheet";
 import {
@@ -33,6 +37,13 @@ import {
   isDueToday,
   resolvedRecently,
   replyText,
+  fmtDateTime,
+  toInputDateTime,
+  currentMonth,
+  monthLabel,
+  recordInMonth,
+  recordEvents,
+  groupByTenant,
   exportEmailRecordsXlsx,
   printEmailRecordsPdf,
 } from "@/app/utils/emailRecordsSheet";
@@ -59,17 +70,11 @@ import {
  * MUST stay in sync with backend/models/EmailRecord.js.
  * ------------------------------------------------------------------ */
 
-const CHANNEL_ICON = {
-  Email: Mail,
-  Call: Phone,
-  Text: MessageSquare,
-  WhatsApp: MessageCircle,
-  Note: StickyNote,
-};
-
 const matchesSearch = (row, needle) =>
   [
     row.property,
+    row.tenantName,
+    row.tenantEmail,
     row.emailTo,
     row.emailFrom,
     row.subject,
@@ -84,6 +89,8 @@ const matchesSearch = (row, needle) =>
 const sameProperty = (a, b) =>
   (a.propertyId && b.propertyId && String(a.propertyId) === String(b.propertyId)) ||
   String(a.property || "").trim().toLowerCase() === String(b.property || "").trim().toLowerCase();
+
+const EMAIL_RE = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+(\s*[,;]\s*[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+)*$/;
 
 const SELECT =
   "px-3 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]";
@@ -108,6 +115,58 @@ function AccountInput({ id, value, onChange, accounts, placeholder }) {
   );
 }
 
+// Whether a message was actually emailed from the system, with a resend
+// button when it failed. Nothing is shown for messages that were only logged.
+export function DeliveryStatus({ item, onResend }) {
+  const [sending, setSending] = useState(false);
+  if (!item?.emailStatus) return null;
+
+  const resend = async () => {
+    setSending(true);
+    try {
+      await onResend();
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (item.emailStatus === "Sent") {
+    return (
+      <p className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 mt-1">
+        <CheckCircle2 size={12} /> Emailed {fmtDateTime(item.emailSentAt)}
+      </p>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 flex-wrap mt-1">
+      <p className="inline-flex items-center gap-1 text-[11px] font-bold text-red-600 break-words">
+        <XCircle size={12} className="shrink-0" /> Not sent{item.emailError ? ` — ${item.emailError}` : ""}
+      </p>
+      {onResend && (
+        <button
+          type="button"
+          onClick={resend}
+          disabled={sending}
+          className="inline-flex items-center gap-1 text-[11px] font-bold text-[#F47C3C] hover:underline disabled:opacity-50"
+        >
+          {sending ? <Loader2 size={11} className="animate-spin" /> : <RotateCw size={11} />} Resend
+        </button>
+      )}
+    </div>
+  );
+}
+
+// POST /email-records/:id/send — the record's original email, or one entry.
+const resendRequest = async (recordId, entryId) => {
+  try {
+    const res = await api.post(`/email-records/${recordId}/send`, entryId ? { entryId } : {});
+    return res.data.data;
+  } catch (err) {
+    alert(err.response?.data?.message || "Sending failed");
+    return err.response?.data?.data || null;
+  }
+};
+
 function WideShell({ onClose, children }) {
   return (
     <div
@@ -127,7 +186,7 @@ function WideShell({ onClose, children }) {
 /* ------------------------------------------------------------------ *
  * Add / edit one record
  * ------------------------------------------------------------------ */
-function RecordModal({ initial, properties, members, options, onClose, onSave }) {
+function RecordModal({ initial, properties, members, tenancies, options, onClose, onSave }) {
   const isEdit = Boolean(initial?._id);
 
   const [form, setForm] = useState({
@@ -148,15 +207,20 @@ function RecordModal({ initial, properties, members, options, onClose, onSave })
     replySummary: initial?.replySummary || "",
     followUpDate: toInputDate(initial?.followUpDate),
     followUpNotes: initial?.followUpNotes || "",
+    tenancyId: initial?.tenancyId ? String(initial.tenancyId) : "",
   });
 
   const [files, setFiles] = useState(() => filesOf(initial?.files));
   const [uploadingCount, setUploadingCount] = useState(0);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [sendNow, setSendNow] = useState(false);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const isEmail = form.channel === "Email";
+  // Sending is offered for a new email only; an existing one is resent from
+  // its detail view.
+  const canSend = !isEdit && isEmail;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -164,13 +228,19 @@ function RecordModal({ initial, properties, members, options, onClose, onSave })
     if (!form.date) { setError("Date is required"); return; }
     if (!form.issue.trim()) { setError("Issue is required"); return; }
     if (uploadingCount) { setError("Wait for the uploads to finish"); return; }
+    if (canSend && sendNow && !EMAIL_RE.test(form.emailTo.trim())) {
+      setError("Enter a valid 'Email to' address to send");
+      return;
+    }
 
     setSaving(true);
     setError("");
     try {
       await onSave({
+        sendNow: canSend && sendNow,
         ...form,
         propertyId: form.propertyId || null,
+        tenancyId: form.tenancyId || null,
         property: form.property.trim(),
         issue: form.issue.trim(),
         assignedTo: form.assignedTo || null,
@@ -195,6 +265,40 @@ function RecordModal({ initial, properties, members, options, onClose, onSave })
 
       <form onSubmit={submit} className="space-y-4">
         <PropertyFields form={form} setForm={setForm} properties={properties} />
+
+        <div>
+          <label className={LABEL}>Tenant (optional)</label>
+          <select
+            className={FIELD}
+            value={form.tenancyId}
+            onChange={(e) => {
+              const id = e.target.value;
+              const t = tenancies.find((x) => String(x._id) === id);
+              setForm((f) => ({
+                ...f,
+                tenancyId: id,
+                // Picking a tenant fills in the property when it is still empty.
+                ...(t && !f.property.trim()
+                  ? { property: t.property || "", propertyId: t.propertyId ? String(t.propertyId) : "" }
+                  : {}),
+              }));
+            }}
+          >
+            <option value="">Not a tenant conversation</option>
+            {/* A linked tenant whose tenancy has since ended is kept selectable. */}
+            {form.tenancyId && !tenancies.some((t) => String(t._id) === form.tenancyId) && (
+              <option value={form.tenancyId}>{initial?.tenantName || "Past tenant"} (past tenant)</option>
+            )}
+            {tenancies.map((t) => (
+              <option key={String(t._id)} value={String(t._id)}>
+                {t.tenant}{t.property ? ` — ${t.property}` : ""}{t.unit && t.unit !== "—" ? `, ${t.unit}` : ""}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-gray-400 font-medium mt-1">
+            Linked records, their replies and attachments are kept in the tenant&apos;s conversation history.
+          </p>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -327,7 +431,34 @@ function RecordModal({ initial, properties, members, options, onClose, onSave })
           hint="Photos, invoices, quotations, documents — any file type"
         />
 
-        <SubmitButton saving={saving} isEdit={isEdit} />
+        {canSend && (
+          <label className="flex items-start gap-2 rounded-2xl border border-orange-100 bg-orange-50/60 p-4 text-sm font-bold text-[#0F253B] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={sendNow}
+              onChange={(e) => setSendNow(e.target.checked)}
+              className="accent-[#F47C3C] w-4 h-4 mt-0.5"
+            />
+            <span>
+              <span className="inline-flex items-center gap-1.5"><Send size={14} className="text-[#F47C3C]" /> Send this email now</span>
+              <span className="block text-[11px] font-medium text-gray-500 mt-0.5">
+                Emails the Issue text, with the attachments, to the &quot;Email to&quot; address. Replies go to the &quot;Email from&quot; mailbox.
+              </span>
+            </span>
+          </label>
+        )}
+
+        {canSend && sendNow ? (
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 text-white font-bold rounded-xl transition-all"
+          >
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} {saving ? "Sending…" : "Save & Send Email"}
+          </button>
+        ) : (
+          <SubmitButton saving={saving} isEdit={isEdit} />
+        )}
       </form>
     </ModalShell>
   );
@@ -336,7 +467,7 @@ function RecordModal({ initial, properties, members, options, onClose, onSave })
 /* ------------------------------------------------------------------ *
  * One step in the thread
  * ------------------------------------------------------------------ */
-function HistoryItem({ entry, onDelete }) {
+function HistoryItem({ entry, onDelete, onOpenFiles, onResend }) {
   const Icon = CHANNEL_ICON[entry.channel] || Mail;
   return (
     <div className="flex gap-3">
@@ -349,9 +480,10 @@ function HistoryItem({ entry, onDelete }) {
             {entry.channel} · {entry.direction}
             {entry.isReply && <span className="ml-2 text-emerald-600">Reply</span>}
             {entry.isFollowUp && <span className="ml-2 text-[#F47C3C]">Follow-up</span>}
+            {entry.auto && <span className="ml-2 text-gray-300 font-medium">auto-saved</span>}
           </p>
           <div className="flex items-center gap-2">
-            <p className="text-[11px] font-medium text-gray-400">{fmtDate(entry.date)}</p>
+            <p className="text-[11px] font-medium text-gray-400">{fmtDateTime(entry.date)}</p>
             {onDelete && (
               <button onClick={onDelete} title="Remove" className="text-gray-300 hover:text-red-600">
                 <Trash2 size={13} />
@@ -367,6 +499,12 @@ function HistoryItem({ entry, onDelete }) {
           </p>
         )}
         <p className="text-sm text-gray-600 font-medium whitespace-pre-line mt-1.5">{entry.summary}</p>
+        {filesOf(entry.files).length > 0 && (
+          <div className="mt-2">
+            <FileStrip files={filesOf(entry.files)} onOpen={() => onOpenFiles?.(entry)} />
+          </div>
+        )}
+        <DeliveryStatus item={entry} onResend={onResend} />
         {entry.createdByEmail && (
           <p className="text-[10px] text-gray-300 font-medium mt-1">Logged by {entry.createdByEmail}</p>
         )}
@@ -379,7 +517,7 @@ function AddHistoryForm({ row, options, onAdded }) {
   const [form, setForm] = useState({
     channel: "Email",
     direction: "Outgoing",
-    date: toInputDate(new Date()),
+    date: toInputDateTime(new Date()),
     from: "",
     to: "",
     summary: "",
@@ -387,25 +525,71 @@ function AddHistoryForm({ row, options, onAdded }) {
     isFollowUp: false,
     nextFollowUpDate: "",
     status: "",
+    subject: "",
   });
+  const [sendNow, setSendNow] = useState(false);
+  const [files, setFiles] = useState([]);
+  const [uploadingCount, setUploadingCount] = useState(0);
+  // Remounts the uploader after a save so its own state starts clean.
+  const [uploaderKey, setUploaderKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const tick = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.checked }));
+  const canSend = form.channel === "Email" && form.direction === "Outgoing";
+
+  // Ticking "send" fills in the obvious addresses: to the tenant (or whoever
+  // wrote in), from the mailbox the conversation is running on.
+  const toggleSend = (e) => {
+    const on = e.target.checked;
+    setSendNow(on);
+    if (!on) return;
+    const isCompany = (a) => DEFAULT_OPTIONS.accounts.concat(options.accounts).some((x) => x.email === a);
+    setForm((f) => ({
+      ...f,
+      to: f.to || row.tenantEmail || (isCompany(row.emailFrom) ? row.emailTo : row.emailFrom) || "",
+      from: f.from || (isCompany(row.emailFrom) ? row.emailFrom : isCompany(row.emailTo) ? row.emailTo : ""),
+    }));
+  };
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.summary.trim()) { setError("Write a short summary"); return; }
+    if (!form.summary.trim()) { setError(canSend && sendNow ? "Write the email" : "Write a short summary"); return; }
+    if (uploadingCount) { setError("Wait for the uploads to finish"); return; }
+    if (canSend && sendNow && !EMAIL_RE.test(form.to.trim())) { setError("Enter a valid 'To' address to send"); return; }
     setSaving(true);
     setError("");
     try {
-      const payload = { ...form, summary: form.summary.trim() };
+      // Sent as a full timestamp so the server stores the time the person
+      // picked in their own timezone.
+      const when = form.date ? new Date(form.date) : new Date();
+      const payload = {
+        ...form,
+        summary: form.summary.trim(),
+        date: Number.isNaN(when.getTime()) ? new Date().toISOString() : when.toISOString(),
+        files,
+        sendNow: canSend && sendNow,
+      };
+      if (!payload.subject) delete payload.subject;
       if (!form.nextFollowUpDate) delete payload.nextFollowUpDate;
       if (!form.status) delete payload.status;
       const res = await api.post(`/email-records/${row._id}/history`, payload);
       onAdded(res.data.data);
-      setForm((f) => ({ ...f, summary: "", isReply: false, isFollowUp: false, nextFollowUpDate: "", status: "" }));
+      if (payload.sendNow && res.data.emailStatus !== "Sent") alert(res.data.message);
+      setForm((f) => ({
+        ...f,
+        date: toInputDateTime(new Date()),
+        summary: "",
+        isReply: false,
+        isFollowUp: false,
+        nextFollowUpDate: "",
+        status: "",
+        subject: "",
+      }));
+      setSendNow(false);
+      setFiles([]);
+      setUploaderKey((k) => k + 1);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to add");
     } finally {
@@ -424,18 +608,46 @@ function AddHistoryForm({ row, options, onAdded }) {
         <select className={FIELD} value={form.direction} onChange={set("direction")}>
           {["Outgoing", "Incoming", "Internal"].map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <input type="date" className={`${FIELD} col-span-2 sm:col-span-1`} value={form.date} onChange={set("date")} />
+        <input
+          type="datetime-local"
+          className={`${FIELD} col-span-2 sm:col-span-1`}
+          value={form.date}
+          onChange={set("date")}
+          title="Date and time of the message"
+        />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <AccountInput id="history-from" value={form.from} onChange={set("from")} accounts={options.accounts} placeholder="From" />
         <AccountInput id="history-to" value={form.to} onChange={set("to")} accounts={options.accounts} placeholder="To" />
       </div>
+      {canSend && (
+        <label className="flex items-center gap-2 text-xs font-bold text-[#0F253B] cursor-pointer">
+          <input type="checkbox" checked={sendNow} onChange={toggleSend} className="accent-[#F47C3C]" />
+          <Send size={13} className="text-[#F47C3C]" /> Send this as a real email to the &quot;To&quot; address
+        </label>
+      )}
+      {canSend && sendNow && (
+        <input
+          className={FIELD}
+          value={form.subject}
+          onChange={set("subject")}
+          placeholder={`Subject (default: Re: ${row.subject || row.issue.slice(0, 40)})`}
+        />
+      )}
       <textarea
-        rows={2}
+        rows={canSend && sendNow ? 5 : 2}
         className={FIELD}
         value={form.summary}
         onChange={set("summary")}
-        placeholder="What was said"
+        placeholder={canSend && sendNow ? "The email to send" : "What was said"}
+      />
+      <MediaUploader
+        key={uploaderKey}
+        files={files}
+        onChange={setFiles}
+        onUploadingChange={setUploadingCount}
+        label="Attachments (optional)"
+        hint="Screenshots, photos, PDFs or documents sent in this message"
       />
       <div className="flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-2 text-xs font-bold text-[#0F253B]">
@@ -465,7 +677,7 @@ function AddHistoryForm({ row, options, onAdded }) {
         disabled={saving}
         className="w-full py-3 bg-[#0F253B] hover:bg-[#1a3654] disabled:opacity-50 text-white font-bold rounded-xl text-sm transition-all"
       >
-        {saving ? "Adding…" : "Add to history"}
+        {saving ? (canSend && sendNow ? "Sending…" : "Adding…") : canSend && sendNow ? "Send email & add to history" : "Add to history"}
       </button>
     </form>
   );
@@ -474,10 +686,15 @@ function AddHistoryForm({ row, options, onAdded }) {
 /* ------------------------------------------------------------------ *
  * Full detail — the record, its thread, attachments and timestamps
  * ------------------------------------------------------------------ */
-function ViewModal({ row, options, onClose, onEdit, onOpenFiles, onChanged, onPropertyHistory }) {
+function ViewModal({ row, options, onClose, onEdit, onOpenFiles, onChanged, onPropertyHistory, onTenantHistory }) {
   const overdue = isOverdue(row);
   const Icon = CHANNEL_ICON[row.channel] || Mail;
   const thread = [...(row.history || [])].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const resend = async (entry) => {
+    const updated = await resendRequest(row._id, entry?._id);
+    if (updated) onChanged(updated);
+  };
 
   const removeEntry = async (entry) => {
     if (!confirm("Remove this entry from the history?")) return;
@@ -499,6 +716,7 @@ function ViewModal({ row, options, onClose, onEdit, onOpenFiles, onChanged, onPr
           <p className="text-xs text-gray-400 font-medium">
             {row.channel} · {fmtDate(row.date)}{row.subject ? ` · ${row.subject}` : ""}
           </p>
+          <DeliveryStatus item={row} onResend={() => resend(null)} />
           <div className="flex flex-wrap gap-2 mt-2">
             <Badge tone={STATUS_TONE[row.status]}>{row.status}</Badge>
             <Badge tone={PRIORITY_TONE[row.priority]}>{row.priority}</Badge>
@@ -513,6 +731,13 @@ function ViewModal({ row, options, onClose, onEdit, onOpenFiles, onChanged, onPr
         <div className="grid grid-cols-2 gap-4">
           <ViewRow label="Email to">{row.emailTo}</ViewRow>
           <ViewRow label="Email from">{row.emailFrom}</ViewRow>
+          <ViewRow label="Tenant">
+            {row.tenantName ? (
+              <button onClick={() => onTenantHistory(row)} className="text-left hover:text-[#F47C3C]" title="Full conversation with this tenant">
+                {row.tenantName}{row.tenantEmail ? ` · ${row.tenantEmail}` : ""}
+              </button>
+            ) : null}
+          </ViewRow>
           <ViewRow label="Assigned to">{row.assignedToEmail}</ViewRow>
           <ViewRow label="Follow-up">
             {row.followUpDate ? (
@@ -533,22 +758,44 @@ function ViewModal({ row, options, onClose, onEdit, onOpenFiles, onChanged, onPr
           <ViewRow label="Follow-up notes">{row.followUpNotes}</ViewRow>
         </div>
 
-        <FilesBlock label="Attachments" files={filesOf(row.files)} onOpen={() => onOpenFiles(row)} />
+        <FilesBlock
+          label="Attachments"
+          files={filesOf(row.files)}
+          onOpen={() => onOpenFiles({ title: row.property, subtitle: `Email record · ${fmtDate(row.date)}`, files: filesOf(row.files) })}
+        />
 
         <div>
           <div className="flex items-center justify-between mb-3">
             <p className={LABEL}>Thread &amp; history <span className="text-gray-300">({thread.length})</span></p>
-            <button
-              onClick={() => onPropertyHistory(row)}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-[#F47C3C] hover:underline"
-            >
-              <History size={13} /> All communication for this property
-            </button>
+            <div className="flex items-center gap-3 flex-wrap justify-end">
+              {row.tenantName && (
+                <button
+                  onClick={() => onTenantHistory(row)}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[#F47C3C] hover:underline"
+                >
+                  <Users size={13} /> All chats with this tenant
+                </button>
+              )}
+              <button
+                onClick={() => onPropertyHistory(row)}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#F47C3C] hover:underline"
+              >
+                <History size={13} /> All communication for this property
+              </button>
+            </div>
           </div>
           <div className="space-y-3">
             {thread.length === 0 && <p className="text-sm font-medium text-gray-300">Nothing logged after the original email yet.</p>}
             {thread.map((h) => (
-              <HistoryItem key={h._id} entry={h} onDelete={() => removeEntry(h)} />
+              <HistoryItem
+                key={h._id}
+                entry={h}
+                onDelete={() => removeEntry(h)}
+                onResend={() => resend(h)}
+                onOpenFiles={(entry) =>
+                  onOpenFiles({ title: row.property, subtitle: `${entry.channel} · ${fmtDateTime(entry.date)}`, files: filesOf(entry.files) })
+                }
+              />
             ))}
           </div>
           <div className="mt-4">
@@ -586,26 +833,15 @@ function ViewModal({ row, options, onClose, onEdit, onOpenFiles, onChanged, onPr
  * Everything said about one property — emails, calls and messages —
  * oldest first.
  * ------------------------------------------------------------------ */
-function PropertyHistoryModal({ anchor, rows, onClose, onOpen }) {
-  const events = useMemo(() => {
-    const list = [];
-    for (const r of rows.filter((x) => sameProperty(x, anchor))) {
-      list.push({
-        key: `${r._id}-root`,
-        date: r.date,
-        record: r,
-        entry: {
-          channel: r.channel,
-          direction: "Original",
-          from: r.emailFrom,
-          to: r.emailTo,
-          summary: [r.subject, r.issue].filter(Boolean).join(" — "),
-        },
-      });
-      for (const h of r.history || []) list.push({ key: h._id, date: h.date, record: r, entry: h });
-    }
-    return list.sort((a, b) => new Date(a.date) - new Date(b.date));
-  }, [rows, anchor]);
+function PropertyHistoryModal({ anchor, rows, onClose, onOpen, onOpenFiles }) {
+  const events = useMemo(
+    () =>
+      rows
+        .filter((x) => sameProperty(x, anchor))
+        .flatMap(recordEvents)
+        .sort((a, b) => new Date(a.date) - new Date(b.date)),
+    [rows, anchor]
+  );
 
   return (
     <WideShell onClose={onClose}>
@@ -619,7 +855,12 @@ function PropertyHistoryModal({ anchor, rows, onClose, onOpen }) {
       <div className="space-y-3">
         {events.map((ev) => (
           <div key={ev.key}>
-            <HistoryItem entry={{ ...ev.entry, date: ev.date }} />
+            <HistoryItem
+              entry={{ ...ev.entry, date: ev.date }}
+              onOpenFiles={(entry) =>
+                onOpenFiles({ title: anchor.property, subtitle: `${entry.channel} · ${fmtDateTime(entry.date)}`, files: filesOf(entry.files) })
+              }
+            />
             <button
               onClick={() => onOpen(ev.record)}
               className="ml-11 mt-1 text-[11px] font-bold text-[#F47C3C] hover:underline"
@@ -646,6 +887,7 @@ const EMPTY_FILTERS = {
   followUp: "",
   from: "",
   to: "",
+  month: "",
 };
 
 export default function EmailRecordsBoard({
@@ -654,6 +896,7 @@ export default function EmailRecordsBoard({
   const [rows, setRows] = useState([]);
   const [properties, setProperties] = useState([]);
   const [members, setMembers] = useState([]);
+  const [tenancies, setTenancies] = useState([]);
   const [options, setOptions] = useState(DEFAULT_OPTIONS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -666,7 +909,12 @@ export default function EmailRecordsBoard({
   const [viewingId, setViewingId] = useState(null);
   const [viewingFiles, setViewingFiles] = useState(null);
   const [propertyHistory, setPropertyHistory] = useState(null);
+  // "records" = the log, "tenants" = one conversation per tenant.
+  const [view, setView] = useState("records");
+  const [tenantThreadKey, setTenantThreadKey] = useState(null);
   const [runningReminders, setRunningReminders] = useState(false);
+  const [checkingInbox, setCheckingInbox] = useState(false);
+  const [inbox, setInbox] = useState(null);
   const openedFromUrl = useRef(false);
 
   const viewing = viewingId ? rows.find((r) => r._id === viewingId) || null : null;
@@ -689,6 +937,8 @@ export default function EmailRecordsBoard({
     // Option lists and the staff list are extras — the log works without them.
     api.get("/email-records/options").then((r) => r.data?.data && setOptions(r.data.data)).catch(() => {});
     api.get("/tasks/assignable-members").then((r) => setMembers(r.data?.data || [])).catch(() => {});
+    api.get("/tenancies").then((r) => setTenancies(r.data?.data || [])).catch(() => {});
+    api.get("/email-records/inbox-status").then((r) => setInbox(r.data?.data || null)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -747,6 +997,7 @@ export default function EmailRecordsBoard({
       if (f.followUp === "recentResolved" && !resolvedRecently(r)) return false;
       if (fromD && new Date(r.date) < fromD) return false;
       if (toD && new Date(r.date) > toD) return false;
+      if (f.month && !recordInMonth(r, f.month)) return false;
       if (needle && !matchesSearch(r, needle)) return false;
       return true;
     });
@@ -771,10 +1022,24 @@ export default function EmailRecordsBoard({
   ];
 
   const save = async (payload) => {
-    if (modal?._id) await api.put(`/email-records/${modal._id}`, payload);
-    else await api.post("/email-records", payload);
+    let res;
+    if (modal?._id) res = await api.put(`/email-records/${modal._id}`, payload);
+    else res = await api.post("/email-records", payload);
     setModal(null);
     await load();
+    // The record is saved either way; a failed send is reported, and can be
+    // retried from the record.
+    if (payload.sendNow) alert(res.data.message);
+  };
+
+  // Recomputed from the live rows, so a message added while the thread is
+  // open shows up in it.
+  const tenantGroups = useMemo(() => groupByTenant(rows, tenancies), [rows, tenancies]);
+  const tenantThread = tenantThreadKey ? tenantGroups.find((t) => t.key === tenantThreadKey) || null : null;
+
+  const openTenantFor = (row) => {
+    const g = tenantGroups.find((t) => t.records.some((r) => r._id === row._id));
+    if (g) setTenantThreadKey(g.key);
   };
 
   const replaceRow = (updated) => setRows((prev) => prev.map((r) => (r._id === updated._id ? updated : r)));
@@ -806,8 +1071,28 @@ export default function EmailRecordsBoard({
     }
   };
 
+  // Replies are read from the inbox every five minutes on the server; this
+  // reads it now.
+  const checkInbox = async () => {
+    setCheckingInbox(true);
+    try {
+      const res = await api.post("/email-records/fetch-inbox");
+      const d = res.data.data || {};
+      setInbox(d.status || null);
+      if (d.skipped) alert(d.skipped);
+      else if (d.errors?.length && !d.replies && !d.newConversations) alert(`Could not read the inbox: ${d.errors[0].error}`);
+      else alert(`Replies filed: ${d.replies || 0}. New tenant conversations: ${d.newConversations || 0}.`);
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to check the inbox");
+    } finally {
+      setCheckingInbox(false);
+    }
+  };
+
   const exportPdf = () => {
-    if (!printEmailRecordsPdf(visible)) alert("Allow pop-ups for this site to print or save as PDF.");
+    const title = filters.month ? `Email Records — ${monthLabel(filters.month)}` : "Email Records";
+    if (!printEmailRecordsPdf(visible, { title })) alert("Allow pop-ups for this site to print or save as PDF.");
   };
 
   const thClass = "px-4 py-3 whitespace-nowrap";
@@ -826,6 +1111,9 @@ export default function EmailRecordsBoard({
             </button>
             <button onClick={exportPdf} className={toolBtn} title="Print or save the current view as PDF">
               <Printer size={16} /> PDF
+            </button>
+            <button onClick={checkInbox} disabled={checkingInbox} className={toolBtn} title="Fetch tenant replies from the inbox now">
+              {checkingInbox ? <Loader2 size={16} className="animate-spin" /> : <Inbox size={16} />} Check inbox
             </button>
             <button onClick={runReminders} disabled={runningReminders} className={toolBtn} title="Send follow-up reminders and escalations now">
               {runningReminders ? <Loader2 size={16} className="animate-spin" /> : <BellRing size={16} />} Reminders
@@ -847,6 +1135,85 @@ export default function EmailRecordsBoard({
         </div>
       )}
 
+      {inbox && (
+        <p className={`flex items-center gap-2 text-xs font-medium ${inbox.lastError ? "text-red-600" : "text-gray-400"}`}>
+          <Inbox size={13} />
+          {!inbox.configured
+            ? "Tenant replies are not being fetched — no inbox is configured on the server."
+            : inbox.lastError
+              ? `Could not read ${inbox.mailbox}: ${inbox.lastError}`
+              : `Tenant replies are fetched automatically from ${inbox.mailbox} every 5 minutes${
+                  inbox.lastSuccessAt ? ` · last checked ${fmtDateTime(inbox.lastSuccessAt)}` : ""
+                }`}
+        </p>
+      )}
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="inline-flex rounded-xl bg-white border border-gray-100 p-1">
+          {[
+            { key: "records", label: "Email Log", Icon: Mail },
+            { key: "tenants", label: "Tenant Conversations", Icon: Users },
+          ].map(({ key, label, Icon }) => (
+            <button
+              key={key}
+              onClick={() => setView(key)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                view === key ? "bg-[#0F253B] text-white" : "text-[#0F253B] hover:bg-gray-50"
+              }`}
+            >
+              <Icon size={15} /> {label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <CalendarDays size={16} className="text-gray-400" />
+          <input
+            type="month"
+            value={filters.month}
+            onChange={setFilter("month")}
+            className={SELECT}
+            title="Show one month"
+          />
+          {filters.month ? (
+            <button
+              onClick={() => setFilters((prev) => ({ ...prev, month: "" }))}
+              className="text-xs font-bold text-[#F47C3C] hover:underline"
+            >
+              All months
+            </button>
+          ) : (
+            <button
+              onClick={() => setFilters((prev) => ({ ...prev, month: currentMonth() }))}
+              className="text-xs font-bold text-[#F47C3C] hover:underline"
+            >
+              This month
+            </button>
+          )}
+        </div>
+      </div>
+
+      {view === "tenants" ? (
+        <>
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search tenant, email, property or message…"
+              className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]"
+            />
+          </div>
+          <TenantConversationsPanel
+            rows={rows}
+            tenancies={tenancies}
+            month={filters.month}
+            needle={needle}
+            loading={loading}
+            onOpenTenant={(t) => setTenantThreadKey(t.key)}
+          />
+        </>
+      ) : (
+      <>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         {cards.map((s) => {
           const active = filters.followUp === s.key;
@@ -965,6 +1332,15 @@ export default function EmailRecordsBoard({
                         <button onClick={() => setPropertyHistory(r)} className="text-left hover:text-[#F47C3C]" title="Communication history for this property">
                           {r.property}
                         </button>
+                        {r.tenantName && (
+                          <button
+                            onClick={() => openTenantFor(r)}
+                            className="flex items-center gap-1 text-[11px] font-medium text-gray-400 hover:text-[#F47C3C] mt-0.5"
+                            title="Full conversation with this tenant"
+                          >
+                            <Users size={11} /> {r.tenantName}
+                          </button>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-500 font-medium whitespace-nowrap">
                         <span className="inline-flex items-center gap-1.5">
@@ -999,7 +1375,10 @@ export default function EmailRecordsBoard({
                       </td>
                       <td className="px-4 py-3 text-gray-500 font-medium">{r.assignedToEmail || "—"}</td>
                       <td className="px-4 py-3">
-                        <FileStrip files={filesOf(r.files)} onOpen={() => setViewingFiles(r)} />
+                        <FileStrip
+                          files={filesOf(r.files)}
+                          onOpen={() => setViewingFiles({ title: r.property, subtitle: `Email record · ${fmtDate(r.date)}`, files: filesOf(r.files) })}
+                        />
                       </td>
                       <td className="px-4 py-3">
                         <RowActions
@@ -1016,6 +1395,8 @@ export default function EmailRecordsBoard({
           </table>
         </div>
       </div>
+      </>
+      )}
 
       {viewing && (
         <ViewModal
@@ -1023,9 +1404,10 @@ export default function EmailRecordsBoard({
           options={options}
           onClose={() => setViewingId(null)}
           onEdit={(row) => { setViewingId(null); setModal(row); }}
-          onOpenFiles={(row) => { setViewingId(null); setViewingFiles(row); }}
+          onOpenFiles={setViewingFiles}
           onChanged={replaceRow}
           onPropertyHistory={(row) => { setViewingId(null); setPropertyHistory(row); }}
+          onTenantHistory={(row) => { setViewingId(null); openTenantFor(row); }}
         />
       )}
 
@@ -1035,17 +1417,31 @@ export default function EmailRecordsBoard({
           rows={rows}
           onClose={() => setPropertyHistory(null)}
           onOpen={(row) => { setPropertyHistory(null); setViewingId(row._id); }}
+          onOpenFiles={setViewingFiles}
+        />
+      )}
+
+      {tenantThread && (
+        <TenantThreadModal
+          key={tenantThread.key}
+          tenant={tenantThread}
+          initialMonth={filters.month}
+          onClose={() => setTenantThreadKey(null)}
+          onOpenRecord={(row) => { setTenantThreadKey(null); setViewingId(row._id); }}
+          onOpenFiles={setViewingFiles}
         />
       )}
 
       {viewingFiles && (
-        <MediaViewerModal
-          key={viewingFiles._id}
-          title={viewingFiles.property}
-          subtitle={`Email record · ${fmtDate(viewingFiles.date)}`}
-          files={filesOf(viewingFiles.files)}
-          onClose={() => setViewingFiles(null)}
-        />
+        // Sits above whichever thread opened it, so closing it returns there.
+        <div className="relative z-[60]">
+          <MediaViewerModal
+            title={viewingFiles.title}
+            subtitle={viewingFiles.subtitle}
+            files={viewingFiles.files}
+            onClose={() => setViewingFiles(null)}
+          />
+        </div>
       )}
 
       {modal !== null && (
@@ -1053,6 +1449,7 @@ export default function EmailRecordsBoard({
           initial={modal._id ? modal : null}
           properties={properties}
           members={members}
+          tenancies={tenancies}
           options={options}
           onClose={() => setModal(null)}
           onSave={save}

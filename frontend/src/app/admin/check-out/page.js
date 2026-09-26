@@ -7,6 +7,8 @@ import api from "../../api/api";
 import CheckOutFormModal from "../_components/CheckOutFormModal";
 import RecordDetail from "../_components/RecordDetail";
 import RowActions from "../_components/RowActions";
+import { RegisterMediaCell, RegisterMediaSection } from "../_components/RegisterMedia";
+import { MediaViewerModal } from "../../Shared/MediaAttachments";
 import {
   money,
   date,
@@ -65,6 +67,8 @@ export default function AdminCheckOut() {
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null);
   const [viewing, setViewing] = useState(null);
+  // { title, subtitle, files } — the photos or videos open in the viewer.
+  const [media, setMedia] = useState(null);
 
   const [f, setF] = useState({
     year: "",
@@ -312,14 +316,15 @@ export default function AdminCheckOut() {
                 <th className="px-5 py-3">Checklist</th>
                 <th className="px-5 py-3">Keys</th>
                 <th className="px-5 py-3">Inspection</th>
+                <th className="px-5 py-3">Photos &amp; videos</th>
                 <th className="px-5 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={13} className="px-5 py-10 text-center text-gray-400">Loading check-outs…</td></tr>
+                <tr><td colSpan={14} className="px-5 py-10 text-center text-gray-400">Loading check-outs…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={13} className="px-5 py-10 text-center text-gray-400">No check-outs match these filters</td></tr>
+                <tr><td colSpan={14} className="px-5 py-10 text-center text-gray-400">No check-outs match these filters</td></tr>
               ) : (
                 rows.map((r) => {
                   const score = checklistScore(r);
@@ -381,6 +386,18 @@ export default function AdminCheckOut() {
                         <Badge tone={INSPECTION_TONE[r.inspection]}>{INSPECTION_LABEL[r.inspection]}</Badge>
                       </td>
                       <td className="px-5 py-3">
+                        <RegisterMediaCell
+                          row={r}
+                          onOpen={() =>
+                            setMedia({
+                              title: r.tenant,
+                              subtitle: `Check-out photos & videos · ${r.property}${r.room ? ` · ${r.room}` : ""}`,
+                              files: [...(r.photoFiles || []), ...(r.videoFiles || [])],
+                            })
+                          }
+                        />
+                      </td>
+                      <td className="px-5 py-3">
                         <RowActions
                           onView={() => setViewing(r)}
                           onDownload={() => downloadRow(r)}
@@ -425,7 +442,27 @@ export default function AdminCheckOut() {
               </button>
             </>
           }
-        />
+        >
+          <RegisterMediaSection
+            row={viewing}
+            stage="check-out"
+            onOpen={(files, label) =>
+              setMedia({ title: viewing.tenant, subtitle: `Check-out · ${label} · ${viewing.property}`, files })
+            }
+          />
+        </RecordDetail>
+      )}
+
+      {media && (
+        // Above the record view it was opened from, so closing it returns there.
+        <div className="relative z-[60]">
+          <MediaViewerModal
+            title={media.title}
+            subtitle={media.subtitle}
+            files={media.files}
+            onClose={() => setMedia(null)}
+          />
+        </div>
       )}
 
       {modal !== null && (

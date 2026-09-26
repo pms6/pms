@@ -45,6 +45,18 @@ export const EMAIL_PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 // calls and texts about the same issue are logged against it too.
 export const CHANNELS = ["Email", "Call", "Text", "WhatsApp", "Note"];
 
+// "" = only logged, never emailed from here.
+export const DELIVERY_STATUSES = ["", "Sent", "Failed"];
+
+// Delivery of a message the system emailed itself. Shared by the record (its
+// original email) and each thread entry.
+const deliveryFields = () => ({
+  emailStatus: { type: String, enum: DELIVERY_STATUSES, default: "" },
+  emailSentAt: { type: Date, default: null },
+  emailError: { type: String, trim: true, default: "" },
+  emailMessageId: { type: String, trim: true, default: "" },
+});
+
 // One step in the conversation after the original email — a reply, a chase,
 // a phone call, a WhatsApp message — kept together as one history.
 const historyEntrySchema = new mongoose.Schema(
@@ -55,9 +67,17 @@ const historyEntrySchema = new mongoose.Schema(
     from: { type: String, trim: true, default: "" },
     to: { type: String, trim: true, default: "" },
     summary: { type: String, trim: true, required: true },
+    // Screenshots, the tenant's photos, PDFs sent in the conversation.
+    files: { type: [attachmentSchema], default: [] },
     // Counts this step as the follow-up / the reply on the parent record.
     isFollowUp: { type: Boolean, default: false },
     isReply: { type: Boolean, default: false },
+    // Written by the system rather than typed in — a reply or status change
+    // made on the record itself, copied into the thread so nothing is lost.
+    auto: { type: Boolean, default: false },
+    // Set when the message was actually emailed from the system, not just
+    // logged: whether it went, when, and why not if it failed.
+    ...deliveryFields(),
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     createdByEmail: { type: String, trim: true, default: "" },
   },
@@ -83,6 +103,19 @@ const emailRecordSchema = new mongoose.Schema(
       index: true,
     },
     property: { type: String, trim: true, required: true },
+
+    // The tenant the conversation is with, when it is with a tenant. Keyed on
+    // the tenancy (the tenant directory's key) with the name and email copied
+    // in, so the tenant's chat history survives the tenancy ending or being
+    // deleted.
+    tenancyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenancy",
+      default: null,
+      index: true,
+    },
+    tenantName: { type: String, trim: true, default: "" },
+    tenantEmail: { type: String, trim: true, lowercase: true, default: "" },
 
     // "Date" on the sheet — when the email was sent or received.
     date: { type: Date, required: true, index: true },
@@ -115,6 +148,9 @@ const emailRecordSchema = new mongoose.Schema(
     files: { type: [attachmentSchema], default: [] },
     history: { type: [historyEntrySchema], default: [] },
 
+    // Set when the original email was sent from the system.
+    ...deliveryFields(),
+
     // Set by the daily sweep. `reminderSentFor` is the follow-up date the last
     // reminder was about, so a changed follow-up date gets its own reminder.
     reminderSentFor: { type: Date, default: null },
@@ -132,5 +168,9 @@ const emailRecordSchema = new mongoose.Schema(
 
 emailRecordSchema.index({ organizationId: 1, isDeleted: 1, date: -1 });
 emailRecordSchema.index({ isDeleted: 1, status: 1, followUpDate: 1 });
+// The inbox reader matches replies to sent mail, and skips mail it has
+// already filed, by Message-ID.
+emailRecordSchema.index({ emailMessageId: 1 });
+emailRecordSchema.index({ "history.emailMessageId": 1 });
 
 export default mongoose.model("EmailRecord", emailRecordSchema);

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { attachmentSchema } from "../utils/attachments.js";
 
 // Check-in register — one row per tenant moving IN to a room.
 //
@@ -129,6 +130,14 @@ const checkInSchema = new mongoose.Schema(
     },
 
     notes: { type: String, trim: true, default: "" },
+
+    // ============================
+    // Media — the condition of the room on check-in day
+    // ============================
+    // Photos of the room / property and walk-round videos, kept against this
+    // client so the check-out can be compared with them.
+    photoFiles: { type: [attachmentSchema], default: [] },
+    videoFiles: { type: [attachmentSchema], default: [] },
 
     // ============================
     // Soft delete
