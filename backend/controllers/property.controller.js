@@ -239,6 +239,7 @@ export const updateProperty = async (req, res) => {
       ownerName,
       address,
       location,
+      companyName,
       zone,
       bank,
       description,
@@ -292,6 +293,7 @@ export const updateProperty = async (req, res) => {
     if (location) property.location = location;
     // Blank is a meaningful value here — it clears the field — so these go by
     // `!== undefined` rather than truthiness.
+    if (companyName !== undefined) property.companyName = companyName;
     if (zone !== undefined) property.zone = zone;
     if (bank !== undefined) property.bank = bank;
     if (description !== undefined) property.description = description;

@@ -18,9 +18,11 @@ import {
   INSPECTION_STATUSES,
   INSPECTION_LABEL,
   CHECKLIST,
+  checklistItemsOf,
 } from "../../utils/registers";
 import { guardModalClose } from "@/app/Shared/modalGuard";
 import { RegisterMediaFields } from "./RegisterMedia";
+import { ChecklistFields } from "./CheckOutChecklist";
 
 const FIELD =
   "w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:ring-2 focus:ring-[#F47C3C] focus:bg-white outline-none transition-all text-sm font-medium text-[#0F253B]";
@@ -149,7 +151,11 @@ export default function CheckOutFormModal({
   // owns its own list and the save sends them with the rest.
   const [photos, setPhotos] = useState(() => (Array.isArray(initial?.photoFiles) ? initial.photoFiles : []));
   const [videos, setVideos] = useState(() => (Array.isArray(initial?.videoFiles) ? initial.videoFiles : []));
-  const [uploading, setUploading] = useState({ photos: 0, videos: 0 });
+  // The inspection checklist — every item with its answer, note and files.
+  // Seeded from the record, which also carries over answers a row saved before
+  // the itemised list existed.
+  const [checklist, setChecklist] = useState(() => checklistItemsOf(initial || {}));
+  const [uploading, setUploading] = useState({ photos: 0, videos: 0, checklist: 0 });
   const trackUploads = (kind, count) => setUploading((u) => (u[kind] === count ? u : { ...u, [kind]: count }));
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -172,12 +178,25 @@ export default function CheckOutFormModal({
     if (!form.property.trim()) return setError("A property is required.");
     if (!form.tenant.trim()) return setError("A tenant name is required.");
 
-    if (uploading.photos || uploading.videos) return setError("Wait for the photos and videos to finish uploading.");
+    if (uploading.photos || uploading.videos || uploading.checklist) {
+      return setError("Wait for the photos and videos to finish uploading.");
+    }
 
     setSaving(true);
     setError("");
     try {
-      await onSave({ ...form, photoFiles: photos, videoFiles: videos });
+      await onSave({
+        ...form,
+        photoFiles: photos,
+        videoFiles: videos,
+        checklist: checklist.map(({ key, answer, note, photos: p, videos: v }) => ({
+          key,
+          answer,
+          note,
+          photos: p,
+          videos: v,
+        })),
+      });
     } catch (err) {
       setError(err.response?.data?.message || "Failed to save the check-out.");
     } finally {
@@ -188,7 +207,7 @@ export default function CheckOutFormModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
-        className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
+        className="w-full max-w-3xl bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-5">
@@ -322,14 +341,20 @@ export default function CheckOutFormModal({
             <input className={FIELD} value={form.depositNote} onChange={set("depositNote")} placeholder="118 deducted — rubbish left by the bins" />
           </div>
 
-          {/* Move-out checklist */}
-          <div>
-            <label className={LABEL}>Move-out checklist</label>
-            <div className="grid sm:grid-cols-2 gap-2">
-              {CHECKLIST.map((c) => (
-                <YesNo key={c.key} label={c.label} value={form[c.key]} onChange={setValue(c.key)} />
-              ))}
-            </div>
+          {/* Inspection checklist — each item with its own photos and videos */}
+          <ChecklistFields
+            items={checklist}
+            onChange={setChecklist}
+            onUploadingChange={(n) => trackUploads("checklist", n)}
+          />
+
+          {/* Whether general photos / videos were taken. The older items the
+              list above replaced (fridge, bedsheets, cupboards, room) are
+              filled in from it on save. */}
+          <div className="grid sm:grid-cols-2 gap-2">
+            {CHECKLIST.filter((c) => c.key === "pictures" || c.key === "videos").map((c) => (
+              <YesNo key={c.key} label={c.label} value={form[c.key]} onChange={setValue(c.key)} />
+            ))}
           </div>
 
           <div className="grid sm:grid-cols-2 gap-3">

@@ -278,8 +278,9 @@ const cleanPropertyInput = (body = {}) => {
         country: str(property.address?.country, 80) || "United Kingdom",
       },
 
-      // The two Available Rooms columns. `bank` here is the property's own
+      // The Available Rooms columns. `bank` here is the property's own
       // rent account, not the owner's payout account above.
+      companyName: str(property.companyName, 160),
       zone: str(property.zone, 60),
       bank: str(property.bank, 120),
 

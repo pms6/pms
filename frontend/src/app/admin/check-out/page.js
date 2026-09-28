@@ -9,6 +9,7 @@ import RecordDetail from "../_components/RecordDetail";
 import RowActions from "../_components/RowActions";
 import { RegisterMediaCell, RegisterMediaSection } from "../_components/RegisterMedia";
 import { MediaViewerModal } from "../../Shared/MediaAttachments";
+import { ChecklistSection, checklistFiles } from "../_components/CheckOutChecklist";
 import {
   money,
   date,
@@ -25,6 +26,8 @@ import {
   INSPECTION_LABEL,
   INSPECTION_TONE,
   CHECKLIST,
+  CHECKOUT_ITEMS,
+  checklistItemsOf,
   checklistScore,
   exportCsv,
   exportRowCsv,
@@ -50,7 +53,17 @@ const COLUMNS = [
   { header: "Actual moved Out date", value: (r) => date(r.actualMovedOutDate) },
   { header: "Rent", value: (r) => r.rent },
   { header: "Advance liscene fee", value: (r) => r.advanceLicenceFee },
-  ...CHECKLIST.map((c) => ({ header: c.label, value: (r) => r[c.key] })),
+  ...CHECKLIST.filter((c) => c.key === "pictures" || c.key === "videos").map((c) => ({
+    header: c.label,
+    value: (r) => r[c.key],
+  })),
+  ...CHECKOUT_ITEMS.map((c, i) => ({
+    header: c.label,
+    value: (r) => {
+      const item = checklistItemsOf(r)[i];
+      return [item.answer, item.note].filter(Boolean).join(" — ");
+    },
+  })),
   { header: "Keys Location", value: (r) => r.keysLocation },
   { header: "Inspection", value: (r) => INSPECTION_LABEL[r.inspection] || r.inspection },
 ];
@@ -194,7 +207,10 @@ export default function AdminCheckOut() {
     {
       title: "Move-out checklist",
       rows: [
-        ...CHECKLIST.map((c) => ({ label: c.label, value: YES_NO[r[c.key]] })),
+        ...CHECKLIST.filter((c) => c.key === "pictures" || c.key === "videos").map((c) => ({
+          label: c.label,
+          value: YES_NO[r[c.key]],
+        })),
         { label: "Keys", value: r.keysLocation },
         {
           label: "Inspection",
@@ -328,6 +344,9 @@ export default function AdminCheckOut() {
               ) : (
                 rows.map((r) => {
                   const score = checklistScore(r);
+                  const itemFiles = checklistFiles(checklistItemsOf(r));
+                  const allPhotos = [...(r.photoFiles || []), ...itemFiles.photos];
+                  const allVideos = [...(r.videoFiles || []), ...itemFiles.videos];
                   // Expected versus actual: an early departure is the thing an
                   // operator scanning this column is looking for.
                   const early =
@@ -387,12 +406,12 @@ export default function AdminCheckOut() {
                       </td>
                       <td className="px-5 py-3">
                         <RegisterMediaCell
-                          row={r}
+                          row={{ photoFiles: allPhotos, videoFiles: allVideos }}
                           onOpen={() =>
                             setMedia({
                               title: r.tenant,
                               subtitle: `Check-out photos & videos · ${r.property}${r.room ? ` · ${r.room}` : ""}`,
-                              files: [...(r.photoFiles || []), ...(r.videoFiles || [])],
+                              files: [...allPhotos, ...allVideos],
                             })
                           }
                         />
@@ -443,6 +462,12 @@ export default function AdminCheckOut() {
             </>
           }
         >
+          <ChecklistSection
+            items={checklistItemsOf(viewing)}
+            onOpen={(files, label) =>
+              setMedia({ title: viewing.tenant, subtitle: `Check-out · ${label} · ${viewing.property}`, files })
+            }
+          />
           <RegisterMediaSection
             row={viewing}
             stage="check-out"

@@ -142,6 +142,7 @@ const EMPTY = {
   area: "",
   city: "",
   postcode: "",
+  companyName: "",
   zone: "",
   bank: "",
   ownerName: "",
@@ -197,6 +198,7 @@ const fromApi = (property) => ({
   area: property.address?.area || "",
   city: property.address?.city || "",
   postcode: property.address?.postcode || "",
+  companyName: property.companyName || "",
   zone: property.zone || "",
   bank: property.bank || "",
   ownerName: property.ownerName || "",
@@ -605,6 +607,7 @@ export default function PropertyForm({ basePath = "/admin/properties" }) {
         },
         // The three Available Rooms columns. Sent even when blank so clearing
         // one in the form actually clears it on the property.
+        companyName: form.companyName.trim(),
         zone: form.zone.trim(),
         bank: form.bank.trim(),
         // The Property schema stores location as plain { lat, lng }.
@@ -802,7 +805,13 @@ export default function PropertyForm({ basePath = "/admin/properties" }) {
           </div>
 
           <div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <TextField
+              label="Company Name"
+              value={form.companyName}
+              onChange={(e) => setField("companyName", e.target.value)}
+              placeholder="e.g., Melrose Lettings Ltd"
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
               <TextField
                 label="Zone"
                 value={form.zone}
@@ -817,8 +826,9 @@ export default function PropertyForm({ basePath = "/admin/properties" }) {
               />
             </div>
             <p className="text-[11px] font-medium text-gray-500 mt-1.5 leading-5">
-              Both show in the Available Rooms list. Ex-tenants are now added
-              on each room, not on the property.
+              All three show in the Available Rooms list, on every room of
+              this property. Ex-tenants are now added on each room, not on the
+              property.
             </p>
           </div>
 

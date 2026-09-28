@@ -78,11 +78,21 @@ const propertySchema = new mongoose.Schema(
     // ============================
     // Available Rooms details
     //
-    // The two columns the office's Available Rooms list carries alongside the
-    // address. Zone and Bank have no other source in the app, so the Property
-    // form is where they are entered. Ex-tenants are recorded per room (see
-    // Room.exTenants) since an HMO's rooms each have their own history.
+    // The columns the office's Available Rooms list carries alongside the
+    // address. Zone, Bank and Company Name have no other source in the app, so
+    // the Property form is where they are entered. Rooms do not keep their own
+    // copy: Available Rooms reads them off the room's property, so setting one
+    // here shows on every room of the property at once. Ex-tenants are
+    // recorded per room (see Room.exTenants) since an HMO's rooms each have
+    // their own history.
     // ============================
+
+    // The company the property is registered under.
+    companyName:{
+        type:String,
+        trim:true,
+        default:""
+    },
 
     zone:{
         type:String,

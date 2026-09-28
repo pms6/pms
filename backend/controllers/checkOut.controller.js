@@ -4,7 +4,11 @@
 // "Check out template.xlsx": who moved out, when, what state the room was left
 // in, and how their deposit was settled.
 
-import CheckOut, { DEPOSIT_STATUS } from "../models/CheckOut.js";
+import CheckOut, {
+  DEPOSIT_STATUS,
+  CHECKOUT_ITEM_KEYS,
+  LEGACY_CHECKLIST_KEY,
+} from "../models/CheckOut.js";
 import { cleanAttachments } from "../utils/attachments.js";
 import CheckIn from "../models/CheckIn.js";
 import Property from "../models/Property.js";
@@ -57,6 +61,30 @@ export const CHECKLIST_KEYS = [
   "roomClean",
 ];
 
+/**
+ * The inspection checklist straight from the form. Unknown keys and repeats are
+ * dropped, and an item with no answer, note or file is not worth a row.
+ */
+const cleanChecklist = (items) => {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    const key = item?.key;
+    if (!CHECKOUT_ITEM_KEYS.includes(key) || seen.has(key)) continue;
+    seen.add(key);
+    const entry = {
+      key,
+      answer: ["YES", "NO"].includes(item.answer) ? item.answer : "",
+      note: String(item.note ?? "").trim(),
+      photos: cleanAttachments(item.photos),
+      videos: cleanAttachments(item.videos),
+    };
+    if (entry.answer || entry.note || entry.photos.length || entry.videos.length) out.push(entry);
+  }
+  return out;
+};
+
 const pickPayload = (body) => {
   const payload = {};
   for (const key of EDITABLE_KEYS) {
@@ -66,10 +94,20 @@ const pickPayload = (body) => {
   // are dropped.
   if (body.photoFiles !== undefined) payload.photoFiles = cleanAttachments(body.photoFiles);
   if (body.videoFiles !== undefined) payload.videoFiles = cleanAttachments(body.videoFiles);
-  // Uploading them answers the "Pictures" / "Videos" checklist questions,
-  // unless someone has already answered them.
-  if (payload.photoFiles?.length && !body.pictures) payload.pictures = "YES";
-  if (payload.videoFiles?.length && !body.videos) payload.videos = "YES";
+  if (body.checklist !== undefined) {
+    payload.checklist = cleanChecklist(body.checklist);
+    // Keep the older flat columns in step with the items that replaced them.
+    for (const [itemKey, legacyKey] of Object.entries(LEGACY_CHECKLIST_KEY)) {
+      const item = payload.checklist.find((c) => c.key === itemKey);
+      payload[legacyKey] = item?.answer || "";
+    }
+  }
+  // Uploading them — generally or against a checklist item — answers the
+  // "Pictures" / "Videos" questions, unless someone has already answered them.
+  const itemPhotos = payload.checklist?.some((c) => c.photos.length);
+  const itemVideos = payload.checklist?.some((c) => c.videos.length);
+  if ((payload.photoFiles?.length || itemPhotos) && !body.pictures) payload.pictures = "YES";
+  if ((payload.videoFiles?.length || itemVideos) && !body.videos) payload.videos = "YES";
   return payload;
 };
 

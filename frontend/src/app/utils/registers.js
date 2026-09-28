@@ -200,11 +200,79 @@ export const CHECKLIST = [
   { key: "roomClean", label: "Room clean" },
 ];
 
-/** How many checklist items are answered YES, out of how many there are. */
-export const checklistScore = (row) => ({
-  done: CHECKLIST.filter((c) => row[c.key] === "YES").length,
-  total: CHECKLIST.length,
-});
+// The checkout inspection checklist. Each item is answered Yes / No and has its
+// own photos, videos and note. Keys MUST stay in sync with CHECKOUT_ITEM_KEYS
+// in backend/models/CheckOut.js.
+export const CHECKOUT_ITEMS = [
+  { key: "curtains", label: "Curtains / Curtain Rod" },
+  { key: "doorLock", label: "Door Lock" },
+  { key: "mattress", label: "Mattress" },
+  { key: "rubbish", label: "Rubbish" },
+  { key: "paintWall", label: "Paint / Wall Condition" },
+  { key: "doorHandle", label: "Door Handle" },
+  { key: "boxesRubbish", label: "Boxes / Rubbish" },
+  { key: "itemsLeftBehind", label: "Clothes / Items Left Behind" },
+  { key: "frontOfHouseRubbish", label: "Front of House Rubbish" },
+  { key: "cupboardHandles", label: "Cupboard Handles" },
+  { key: "windowHandle", label: "Window Handle" },
+  { key: "pestIssue", label: "Pest Issue" },
+  { key: "carpetCleaning", label: "Carpet Cleaning" },
+  { key: "lights", label: "Lights" },
+  { key: "switchBoard", label: "Switch Board" },
+  { key: "bedsheet", label: "Bedsheet" },
+  { key: "fridgeClean", label: "Fridge Clean" },
+  { key: "roomClean", label: "Room Clean" },
+  { key: "cupboardsClean", label: "Cupboards Clean" },
+  { key: "kitchenCabinetsClean", label: "Kitchen Cabinets Clean" },
+  { key: "keysAvailable", label: "Keys Available" },
+];
+
+// Items that replaced one of the older flat CHECKLIST columns. A row saved
+// before the itemised list existed still shows its answer against the new item.
+const LEGACY_ITEM_KEY = {
+  fridgeClean: "fridgeCleaning",
+  bedsheet: "bedsheets",
+  cupboardsClean: "cupboardClean",
+  roomClean: "roomClean",
+};
+
+/**
+ * Every checklist item for a check-out, in order, with whatever was recorded
+ * against it: { key, label, answer, note, photos, videos }.
+ */
+export const checklistItemsOf = (row = {}) => {
+  const saved = Array.isArray(row.checklist) ? row.checklist : [];
+  return CHECKOUT_ITEMS.map(({ key, label }) => {
+    const item = saved.find((c) => c.key === key);
+    return {
+      key,
+      label,
+      answer: item?.answer ?? (LEGACY_ITEM_KEY[key] ? row[LEGACY_ITEM_KEY[key]] || "" : ""),
+      note: item?.note || "",
+      photos: Array.isArray(item?.photos) ? item.photos : [],
+      videos: Array.isArray(item?.videos) ? item.videos : [],
+    };
+  });
+};
+
+/**
+ * How far through the inspection a check-out is: items answered (Yes or No)
+ * out of how many there are. Answered rather than "Yes" because on items like
+ * "Pest Issue" a Yes is the bad outcome. Rows from before the itemised list
+ * are scored on the older columns they were filled in against.
+ */
+export const checklistScore = (row) => {
+  if (Array.isArray(row.checklist) && row.checklist.length) {
+    return {
+      done: checklistItemsOf(row).filter((c) => c.answer).length,
+      total: CHECKOUT_ITEMS.length,
+    };
+  }
+  return {
+    done: CHECKLIST.filter((c) => row[c.key]).length,
+    total: CHECKLIST.length,
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Reference data — ReferenceData.exLandlord / employer / nextOfKin

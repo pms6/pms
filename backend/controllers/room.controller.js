@@ -818,7 +818,7 @@ export const getAvailableRooms = async (req, res) => {
     })
       .populate({
         path: "propertyId",
-        select: "name address zone bank rentalType status isDeleted",
+        select: "name address companyName zone bank rentalType status isDeleted",
         match: { isDeleted: { $ne: true }, status: { $ne: "ARCHIVED" } },
       })
       .populate({
@@ -949,6 +949,9 @@ export const getAvailableRooms = async (req, res) => {
         roomId: room._id,
         propertyName: property.name || property.address?.line1 || "—",
         area: property.address?.area || property.address?.city || "—",
+        // Read off the property, never stored on the room, so a company name
+        // set on the property shows on all of its rooms.
+        companyName: property.companyName || null,
         zone: property.zone || null,
         price: priceStr,
         deposit: depositStr,

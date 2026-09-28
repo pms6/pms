@@ -33,6 +33,56 @@ const yesNo = {
   default: "",
 };
 
+// The checkout inspection checklist. Each item is answered Yes / No and carries
+// its own photos, videos and note, so the evidence for "Keys available" is a
+// picture of the keys filed under that item rather than somewhere in one
+// general pile. Keys MUST stay in sync with CHECKOUT_ITEMS in
+// frontend/src/app/utils/registers.js.
+export const CHECKOUT_ITEM_KEYS = [
+  "curtains",
+  "doorLock",
+  "mattress",
+  "rubbish",
+  "paintWall",
+  "doorHandle",
+  "boxesRubbish",
+  "itemsLeftBehind",
+  "frontOfHouseRubbish",
+  "cupboardHandles",
+  "windowHandle",
+  "pestIssue",
+  "carpetCleaning",
+  "lights",
+  "switchBoard",
+  "bedsheet",
+  "fridgeClean",
+  "roomClean",
+  "cupboardsClean",
+  "kitchenCabinetsClean",
+  "keysAvailable",
+];
+
+// The four older flat checklist columns that the new list replaces. Answering
+// the new item writes the old column too, so rows and exports made before the
+// list existed still line up with ones made after.
+export const LEGACY_CHECKLIST_KEY = {
+  fridgeClean: "fridgeCleaning",
+  bedsheet: "bedsheets",
+  cupboardsClean: "cupboardClean",
+  roomClean: "roomClean",
+};
+
+const checklistItemSchema = new mongoose.Schema(
+  {
+    key: { type: String, enum: CHECKOUT_ITEM_KEYS, required: true },
+    answer: { type: String, enum: ["", "YES", "NO"], default: "" },
+    note: { type: String, trim: true, default: "" },
+    photos: { type: [attachmentSchema], default: [] },
+    videos: { type: [attachmentSchema], default: [] },
+  },
+  { _id: false }
+);
+
 const checkOutSchema = new mongoose.Schema(
   {
     // ============================
@@ -124,6 +174,10 @@ const checkOutSchema = new mongoose.Schema(
     bedsheets: yesNo,
     cupboardClean: yesNo,
     roomClean: yesNo,
+
+    // The inspection checklist, one entry per answered item — see
+    // CHECKOUT_ITEM_KEYS. Items never touched are simply absent.
+    checklist: { type: [checklistItemSchema], default: [] },
 
     inspection: {
       type: String,

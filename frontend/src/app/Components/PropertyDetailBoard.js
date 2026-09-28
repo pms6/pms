@@ -297,6 +297,7 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
         area: propertyData.address?.city || "",
         city: propertyData.address?.city || "",
         postcode: propertyData.address?.postcode || "",
+        companyName: propertyData.companyName || "",
         zone: propertyData.zone || "",
         bank: propertyData.bank || "",
         image: propertyData.coverImage || `https://via.placeholder.com/400x300?text=${encodeURIComponent(propertyData.name)}`,
@@ -594,10 +595,11 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
 
       {/* The three Available Rooms columns, edited on the property form. Shown
           whenever any of them is filled in — an empty card would be noise. */}
-      {(property.zone || property.bank) && (
+      {(property.companyName || property.zone || property.bank) && (
         <div className="bg-white border border-gray-100 rounded-2xl p-6">
           <h2 className="text-lg font-bold text-[#0F253B] mb-4">Available Rooms Details</h2>
           <div className="grid grid-cols-2 gap-4">
+            <Info label="Company Name" value={property.companyName} />
             <Info label="Zone" value={property.zone} />
             <Info label="Bank" value={property.bank} />
           </div>
