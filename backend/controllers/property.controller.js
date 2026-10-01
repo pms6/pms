@@ -199,7 +199,7 @@ export const getPropertyById = async (req, res) => {
     const rooms = await Room.find({
       propertyId: property._id,
     })
-      .select("title roomName roomNumber status monthlyRent roomType occupancy")
+      .select("title roomName roomNumber status monthlyRent doubleOccupancyRent rentPeriod roomType occupancy")
       .lean();
 
     return res.status(200).json({

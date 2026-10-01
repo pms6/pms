@@ -10,6 +10,7 @@ import {
 import { PageHeader, Badge } from "../Shared/ui";
 import { formatMoney } from "@/app/utils/listings";
 import api from "@/app/api/api";
+import TenantProfileTabs from "./TenantProfileTabs";
 
 /**
  * The tenant's overall stay, as the directory hands it over: total days since
@@ -673,7 +674,15 @@ export default function TenantsBoard() {
 
               {/* Detail */}
               {selected ? (
-                <TenantDetail row={selected} onClose={() => setSelectedId(null)} />
+                // The tenant's profile: the details below as "Overview", plus
+                // their timeline, communications, cases, invoices, inventory
+                // and documents in the tabs beside it.
+                <TenantProfileTabs
+                  key={selected._id}
+                  row={selected}
+                  onClose={() => setSelectedId(null)}
+                  overview={<TenantDetail row={selected} onClose={() => setSelectedId(null)} />}
+                />
               ) : (
                 <div className="hidden lg:flex flex-col items-center justify-center text-center bg-gray-50 rounded-3xl py-20 px-6">
                   <div className="w-12 h-12 rounded-2xl bg-white text-[#F47C3C] flex items-center justify-center mb-3">
@@ -681,7 +690,8 @@ export default function TenantsBoard() {
                   </div>
                   <p className="text-gray-500 font-medium">Click a tenant to see all their details</p>
                   <p className="text-sm text-gray-400 mt-1">
-                    Contact, property, room, tenancy terms, employment, checks, guarantor and documents.
+                    Contact, property, room, tenancy terms, employment, checks, guarantor and documents —
+                    plus their full timeline, communications, cases, invoices and inventory reports.
                   </p>
                 </div>
               )}

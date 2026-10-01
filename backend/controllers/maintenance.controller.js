@@ -16,6 +16,7 @@ const EDITABLE_KEYS = [
   "property",
   "roomId",
   "room",
+  "tenancyId",
   "reportedBy",
   "supplierId",
   "supplier",
@@ -72,6 +73,8 @@ const pickPayload = (body) => {
   if (payload.solutionSteps !== undefined) {
     payload.solutionSteps = cleanSteps(payload.solutionSteps);
   }
+  // An emptied tenant picker sends "" — that means "no tenant".
+  if (payload.tenancyId !== undefined && !payload.tenancyId) payload.tenancyId = null;
   if (payload.media !== undefined) {
     payload.media = cleanMedia(payload.media);
     // Mirror the first photo into the legacy `image` field so anything still
@@ -214,6 +217,8 @@ export const createMaintenance = async (req, res) => {
       payload.property = property?.name || tenancy?.property || payload.property || "";
       payload.room = tenancy?.unit && tenancy.unit !== "—" ? tenancy.unit : payload.room || "";
       if (tenancy?.roomId) payload.roomId = tenancy.roomId;
+      // Files the job on the tenant's own timeline and case history.
+      if (tenancy?._id) payload.tenancyId = tenancy._id;
       payload.reportedBy = tenancy?.tenant || req.user.email || "Tenant";
       // Tenants can't self-assign a supplier, cost, solution or a non-default status.
       delete payload.supplierId;

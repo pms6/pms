@@ -6,6 +6,7 @@ import { PageHeader, Badge } from "../../Shared/ui";
 import api from "@/app/api/api";
 import { useAuth } from "@/app/Context/AuthContext";
 import uploadToCloudinary from "@/app/utils/uploadToCloudinary";
+import InvoiceSettingsForm from "@/app/Components/InvoiceSettingsForm";
 
 export default function AdminSettings() {
   const { organization } = useAuth();
@@ -331,6 +332,8 @@ export default function AdminSettings() {
           {loading ? "Saving Changes..." : "Save Changes"}
         </button>
       </form>
+
+      <InvoiceSettingsForm inputClass={inputClass} labelClass={labelClass} />
 
       <ChangePasswordCard inputClass={inputClass} labelClass={labelClass} />
     </div>

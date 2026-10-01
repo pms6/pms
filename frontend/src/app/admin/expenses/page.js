@@ -14,6 +14,7 @@ import {
   Eye,
   Pencil,
   Paperclip,
+  Search,
 } from "lucide-react";
 import { PageHeader } from "../../Shared/ui";
 import { fileKind, kindLabel } from "../../Shared/fileType";
@@ -595,6 +596,8 @@ export default function AdminExpenses() {
   const [monthFilter, setMonthFilter] = useState("");
   const [propertyFilter, setPropertyFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+  // Narrows the entries list by supplier name as you type.
+  const [supplierSearch, setSupplierSearch] = useState("");
 
   const [sheet, setSheet] = useState(null);
   const [rows, setRows] = useState([]);
@@ -684,9 +687,17 @@ export default function AdminExpenses() {
     }
   };
 
+  // The entries on screen: the loaded list, narrowed to the supplier typed in
+  // the search bar. The export follows it, so the CSV is what you see.
+  const supplierNeedle = supplierSearch.trim().toLowerCase();
+  const visibleRows = supplierNeedle
+    ? rows.filter((r) => String(r.supplier || "").toLowerCase().includes(supplierNeedle))
+    : rows;
+  const visibleTotal = visibleRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
   const exportCSV = () => {
     const headers = "Date,Category,Description,Property,Supplier,Reference,Amount\n";
-    const body = rows
+    const body = visibleRows
       .map((r) =>
         [
           new Date(r.date).toLocaleDateString("en-GB"),
@@ -872,11 +883,36 @@ export default function AdminExpenses() {
 
       {/* Individual entries for the current filter */}
       <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
-        <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-bold text-[#0F253B]">
-            Entries{monthFilter ? ` — ${MONTHS[Number(monthFilter) - 1]} ${year}` : ` — ${year}`}
-          </h2>
-          <div className="flex items-center gap-2">
+        <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-[#0F253B]">
+              Entries{monthFilter ? ` — ${MONTHS[Number(monthFilter) - 1]} ${year}` : ` — ${year}`}
+            </h2>
+            {supplierNeedle && !loading && (
+              <p className="text-[11px] font-medium text-gray-400 mt-0.5">
+                {visibleRows.length} {visibleRows.length === 1 ? "entry" : "entries"} for &quot;{supplierSearch.trim()}&quot; · {money(visibleTotal)}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative w-full sm:w-64">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
+              <input
+                value={supplierSearch}
+                onChange={(e) => setSupplierSearch(e.target.value)}
+                placeholder="Search by supplier name…"
+                className="w-full pl-9 pr-8 py-2 bg-gray-50 border border-gray-100 rounded-xl text-xs font-medium text-[#0F253B] outline-none focus:ring-2 focus:ring-[#F47C3C] focus:bg-white"
+              />
+              {supplierSearch && (
+                <button
+                  onClick={() => setSupplierSearch("")}
+                  title="Clear search"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
             {monthFilter && (
               <button
                 onClick={() => setMonthFilter("")}
@@ -887,7 +923,7 @@ export default function AdminExpenses() {
             )}
             <button
               onClick={exportCSV}
-              disabled={rows.length === 0}
+              disabled={visibleRows.length === 0}
               className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 hover:bg-gray-50 rounded-xl text-xs font-bold text-gray-600 transition-all disabled:opacity-40"
             >
               <Download size={14} /> Export (CSV)
@@ -897,9 +933,11 @@ export default function AdminExpenses() {
 
         {loading ? (
           <div className="p-10 text-center text-gray-400">Loading…</div>
-        ) : rows.length === 0 ? (
+        ) : visibleRows.length === 0 ? (
           <div className="p-10 text-center text-gray-400">
-            No expenses recorded for this filter.
+            {supplierNeedle && rows.length > 0
+              ? `No expenses from a supplier matching "${supplierSearch.trim()}".`
+              : "No expenses recorded for this filter."}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -916,7 +954,7 @@ export default function AdminExpenses() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-sm font-medium text-[#0F253B]">
-                {rows.map((r) => {
+                {visibleRows.map((r) => {
                   const fileCount = getExpenseFiles(r).length;
                   return (
                     <tr

@@ -41,6 +41,9 @@ import gardenRoutes from "./garden.route.js"
 import courtClaimRoutes from "./courtClaim.route.js"
 import emailRecordRoutes from "./emailRecord.route.js"
 import councilTaxBillsRoutes from "./councilTaxBills.route.js"
+import inventoryReportRoutes from "./inventoryReport.route.js"
+import tenantCaseRoutes from "./tenantCase.route.js"
+import invoiceRoutes from "./invoice.route.js"
 
 const router = express.Router();
 
@@ -96,6 +99,16 @@ router.use("/stay-duration", stayDurationRoutes);
 // Inventory — the schedule of condition, flattened across every property and
 // room so the whole organisation reads as one sheet.
 router.use("/inventory", inventoryRoutes);
+
+// Inventory Reports — the professional check-in / check-out document, built
+// room by room from templates and generated as a PDF.
+router.use("/inventory-reports", inventoryReportRoutes);
+
+// Tenant Cases — one issue with one tenant, tracked to close.
+router.use("/tenant-cases", tenantCaseRoutes);
+
+// Invoices — customised invoices to tenants, landlords and others.
+router.use("/invoices", invoiceRoutes);
 
 // Cleaning Messages Schedule — the month-by-month sheet of property cleans.
 router.use("/cleaning-schedule", cleaningScheduleRoutes);

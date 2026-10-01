@@ -40,6 +40,8 @@ import {
   Gavel,
   Mail,
   Landmark,
+  Briefcase,
+  FileText,
 } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 import ScreenMonitorToggle from "../Shared/ScreenMonitorToggle";
@@ -72,6 +74,8 @@ const NAV = [
   { href: "/admin/onboarding", label: "Onboarding", icon: ClipboardCheck },
   { href: "/admin/occupancy", label: "Occupancy", icon: DoorOpen },
   { href: "/admin/tenants", label: "Tenants", icon: UserRound },
+  { href: "/admin/cases", label: "Tenant Cases", icon: Briefcase },
+  { href: "/admin/invoices", label: "Invoices", icon: FileText },
   { href: "/admin/welcome-pack", label: "Welcome Pack", icon: Wallet },
   { href: "/admin/rent-collection", label: "Rent Collection", icon: Wallet },
   { href: "/admin/rent-review", label: "Rent Review", icon: TrendingUp },

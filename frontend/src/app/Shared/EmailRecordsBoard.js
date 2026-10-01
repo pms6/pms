@@ -76,6 +76,7 @@ const matchesSearch = (row, needle) =>
     row.property,
     row.tenantName,
     row.tenantEmail,
+    row.room,
     row.emailTo,
     row.emailFrom,
     row.subject,
@@ -330,7 +331,7 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
           <div>
             <label className={LABEL}>Type</label>
             <select className={FIELD} value={form.channel} onChange={set("channel")}>
-              {options.channels.map((c) => <option key={c} value={c}>{c === "Call" ? "Phone call" : c}</option>)}
+              {options.channels.map((c) => <option key={c} value={c}>{c === "Call" ? "Phone call" : c === "Text" ? "SMS" : c}</option>)}
             </select>
           </div>
         </div>
@@ -544,7 +545,7 @@ function HistoryItem({ entry, isOriginal, onDelete, onOpenFiles, onResend, onRep
           <div className="flex items-center gap-2">
             <p className="text-[11px] font-medium text-gray-400">{fmtDateTime(entry.date)}</p>
             {onDelete && (
-              <button onClick={onDelete} title="Remove" className="text-gray-300 hover:text-red-600">
+              <button onClick={onDelete} title="Retract (owner / admin)" className="text-gray-300 hover:text-red-600">
                 <Trash2 size={13} />
               </button>
             )}
@@ -557,7 +558,13 @@ function HistoryItem({ entry, isOriginal, onDelete, onOpenFiles, onResend, onRep
             {entry.to && <>To {entry.to}</>}
           </p>
         )}
-        <p className="text-sm text-gray-600 font-medium whitespace-pre-line mt-1.5">{entry.summary}</p>
+        <p className={`text-sm text-gray-600 font-medium whitespace-pre-line mt-1.5 ${entry.retractedAt ? "line-through opacity-60" : ""}`}>{entry.summary}</p>
+        {entry.retractedAt && (
+          <p className="text-[11px] font-bold text-red-600 mt-1">
+            Retracted {fmtDateTime(entry.retractedAt)}{entry.retractedByEmail ? ` by ${entry.retractedByEmail}` : ""}
+            {entry.retractReason ? ` — ${entry.retractReason}` : ""}
+          </p>
+        )}
         {filesOf(entry.files).length > 0 && (
           <div className="mt-2">
             <FileStrip files={filesOf(entry.files)} onOpen={() => onOpenFiles?.(entry)} />
@@ -679,7 +686,7 @@ function AddHistoryForm({ row, options, onAdded, draft }) {
       <ErrorBanner>{error}</ErrorBanner>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <select className={FIELD} value={form.channel} onChange={set("channel")}>
-          {options.channels.map((c) => <option key={c} value={c}>{c === "Call" ? "Phone call" : c}</option>)}
+          {options.channels.map((c) => <option key={c} value={c}>{c === "Call" ? "Phone call" : c === "Text" ? "SMS" : c}</option>)}
         </select>
         <select className={FIELD} value={form.direction} onChange={set("direction")}>
           {["Outgoing", "Incoming", "Internal"].map((c) => <option key={c} value={c}>{c}</option>)}
@@ -815,13 +822,17 @@ function ViewModal({ row, options, onClose, onEdit, onOpenFiles, onChanged, onPr
     if (updated) onChanged(updated);
   };
 
+  // The conversation log is append-only: an entry logged in error is
+  // retracted — kept, struck through, with who did it and why — by an owner or
+  // admin. The server enforces both.
   const removeEntry = async (entry) => {
-    if (!confirm("Remove this entry from the history?")) return;
+    const reason = prompt("Retract this message? It stays in the history, marked as retracted. Reason:");
+    if (reason === null) return;
     try {
-      const res = await api.delete(`/email-records/${row._id}/history/${entry._id}`);
+      const res = await api.delete(`/email-records/${row._id}/history/${entry._id}`, { params: { reason } });
       onChanged(res.data.data);
     } catch (err) {
-      alert(err.response?.data?.message || "Remove failed");
+      alert(err.response?.data?.message || "Retract failed");
     }
   };
 
@@ -906,7 +917,7 @@ function ViewModal({ row, options, onClose, onEdit, onOpenFiles, onChanged, onPr
               <HistoryItem
                 key={h._id}
                 entry={h}
-                onDelete={() => removeEntry(h)}
+                onDelete={h.retractedAt ? undefined : () => removeEntry(h)}
                 onResend={() => resend(h)}
                 onReply={canReply(h) ? () => replyTo(h) : undefined}
                 onOpenFiles={(entry) =>
@@ -999,6 +1010,7 @@ const EMPTY_FILTERS = {
   status: "",
   category: "",
   priority: "",
+  channel: "",
   account: "",
   followUp: "",
   month: "",
@@ -1097,6 +1109,8 @@ export default function EmailRecordsBoard({
       if (f.status && r.status !== f.status) return false;
       if (f.category && r.category !== f.category) return false;
       if (f.priority && r.priority !== f.priority) return false;
+      // Communication type — the record's own, or any message in its thread.
+      if (f.channel && r.channel !== f.channel && !(r.history || []).some((h) => h.channel === f.channel)) return false;
       if (f.account && r.emailTo !== f.account && r.emailFrom !== f.account) return false;
       if (f.followUp === "overdue" && !isOverdue(r)) return false;
       if (f.followUp === "today" && !isDueToday(r)) return false;
@@ -1376,6 +1390,10 @@ export default function EmailRecordsBoard({
         <select value={filters.priority} onChange={setFilter("priority")} className={SELECT}>
           <option value="">All priorities</option>
           {options.priorities.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={filters.channel} onChange={setFilter("channel")} className={SELECT}>
+          <option value="">All types</option>
+          {options.channels.map((c) => <option key={c} value={c}>{c === "Call" ? "Phone call" : c === "Text" ? "SMS" : c}</option>)}
         </select>
         <select value={filters.followUp} onChange={setFilter("followUp")} className={SELECT}>
           <option value="">Any follow-up</option>

@@ -8,12 +8,10 @@ import EmailRecord, {
   EMAIL_PRIORITIES,
   CHANNELS,
 } from "../models/EmailRecord.js";
-import OrganizationMember from "../models/OrganizationMember.js";
-import User from "../models/User.js";
-import Organization from "../models/Organization.js";
 import Notification from "../models/Notification.js";
 import Tenancy from "../models/Tenancy.js";
 import { cleanAttachments } from "../utils/attachments.js";
+import { resolveAssignee } from "../utils/staff.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { sweepEmailFollowUps } from "../cranjob/emailFollowUp.js";
 import { syncInbox, inboxStatus } from "../cranjob/emailInbox.js";
@@ -61,23 +59,7 @@ const pickPayload = (body) => {
   return payload;
 };
 
-// The assignee must be an active member of the caller's own organization.
-// Returns their email, or throws a 400-worthy message.
-const resolveAssignee = async (organizationId, userId) => {
-  if (!mongoose.isValidObjectId(userId)) throw new Error("Invalid staff member.");
-  const [member, user] = await Promise.all([
-    OrganizationMember.findOne({ organizationId, userId, status: "ACTIVE" }).select("_id").lean(),
-    User.findById(userId).select("email").lean(),
-  ]);
-  if (!user) throw new Error("Staff member not found.");
-  // The owner has no membership row in some organizations, so the owner of
-  // the organization itself is accepted too.
-  if (!member) {
-    const org = await Organization.findOne({ _id: organizationId, userId }).select("_id").lean();
-    if (!org) throw new Error("That person is not an active member of this organization.");
-  }
-  return user.email || "";
-};
+// resolveAssignee lives in utils/staff.js, shared with Tenant Cases.
 
 // ------------------------------------------------------------------ *
 // Sending — a record's original email, or an outgoing message in its thread,
@@ -292,15 +274,19 @@ const resolveTenant = async (organizationId, payload) => {
   if (!payload.tenancyId) {
     payload.tenantName = "";
     payload.tenantEmail = "";
+    payload.roomId = null;
+    payload.room = "";
     return;
   }
   if (!mongoose.isValidObjectId(payload.tenancyId)) throw new Error("Invalid tenant.");
   const tenancy = await Tenancy.findOne({ _id: payload.tenancyId, organizationId })
-    .select("tenant tenantEmail")
+    .select("tenant tenantEmail roomId unit")
     .lean();
   if (!tenancy) throw new Error("Tenant not found in this organization.");
   payload.tenantName = tenancy.tenant || "";
   payload.tenantEmail = tenancy.tenantEmail || "";
+  payload.roomId = tenancy.roomId || null;
+  payload.room = tenancy.unit && tenancy.unit !== "—" ? tenancy.unit : "";
 };
 
 // Anything that changes the conversation on the record itself — a reply typed
@@ -457,7 +443,25 @@ export const getEmailRecords = async (req, res) => {
     if (q.category) filter.category = q.category;
     if (q.priority) filter.priority = q.priority;
     if (q.assignedTo) filter.assignedTo = q.assignedTo;
-    if (q.tenancyId) filter.tenancyId = q.tenancyId;
+    if (q.tenancyIds) {
+      filter.tenancyId = { $in: String(q.tenancyIds).split(",").filter((id) => mongoose.isValidObjectId(id)) };
+    } else if (q.tenancyId) filter.tenancyId = q.tenancyId;
+    if (q.roomId && mongoose.isValidObjectId(q.roomId)) filter.roomId = q.roomId;
+    const and = [];
+    // Communication type — the record's own channel, or any message in its thread.
+    if (q.channel && CHANNELS.includes(q.channel)) {
+      and.push({ $or: [{ channel: q.channel }, { "history.channel": q.channel }] });
+    }
+    // Free text across who, where, what and everything said in the thread.
+    if (q.q) {
+      const rx = new RegExp(String(q.q).slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      and.push({
+        $or: [
+          { subject: rx }, { issue: rx }, { property: rx }, { room: rx }, { tenantName: rx },
+          { tenantEmail: rx }, { emailTo: rx }, { emailFrom: rx }, { "history.summary": rx },
+        ],
+      });
+    }
     if (q.account) filter.$or = [{ emailTo: q.account }, { emailFrom: q.account }];
     if (q.from || q.to) {
       filter.date = {};
@@ -472,8 +476,9 @@ export const getEmailRecords = async (req, res) => {
         return res.status(400).json({ success: false, message: "Month must be YYYY-MM." });
       }
       const inMonth = { $gte: range.start, $lt: range.end };
-      filter.$and = [{ $or: [{ date: inMonth }, { "history.date": inMonth }] }];
+      and.push({ $or: [{ date: inMonth }, { "history.date": inMonth }] });
     }
+    if (and.length) filter.$and = and;
 
     const rows = await EmailRecord.find(filter).sort({ date: -1, createdAt: -1 }).lean();
 
@@ -523,6 +528,7 @@ export const createEmailRecord = async (req, res) => {
       ...payload,
       organizationId: req.user.organizationId,
       createdBy: req.user._id,
+      createdByEmail: req.user.email || "",
     });
     let added;
     try {
@@ -634,6 +640,12 @@ export const updateEmailRecord = async (req, res) => {
 // @route   DELETE /api/v1/email-records/:id
 export const deleteEmailRecord = async (req, res) => {
   try {
+    // The communication log is the office's evidence of what was said, so
+    // only an owner / admin may take a record out of it — and even then it is
+    // only hidden, never erased.
+    if (!isAdmin(req)) {
+      return res.status(403).json({ success: false, message: "Only an owner or admin can delete a communication record." });
+    }
     const row = await EmailRecord.findOne(orgFilter(req, { _id: req.params.id }));
     if (!row) {
       return res.status(404).json({ success: false, message: "Email record not found." });
@@ -786,10 +798,15 @@ export const resendEmail = async (req, res) => {
   }
 };
 
-// @desc    Remove one step from a record's thread
+// @desc    Retract one step from a record's thread. The conversation history
+//          is append-only, so the entry is kept — marked retracted, with who
+//          did it and why — rather than removed. Owner / admin only.
 // @route   DELETE /api/v1/email-records/:id/history/:entryId
 export const deleteHistoryEntry = async (req, res) => {
   try {
+    if (!isAdmin(req)) {
+      return res.status(403).json({ success: false, message: "Only an owner or admin can retract a message." });
+    }
     const row = await EmailRecord.findOne(orgFilter(req, { _id: req.params.id }));
     if (!row) {
       return res.status(404).json({ success: false, message: "Email record not found." });
@@ -799,7 +816,12 @@ export const deleteHistoryEntry = async (req, res) => {
     if (!entry) {
       return res.status(404).json({ success: false, message: "History entry not found." });
     }
-    entry.deleteOne();
+    if (entry.retractedAt) {
+      return res.status(409).json({ success: false, message: "That message is already retracted." });
+    }
+    entry.retractedAt = new Date();
+    entry.retractedByEmail = req.user.email || "";
+    entry.retractReason = text(req.body?.reason || req.query?.reason).slice(0, 500);
     const updated = await row.save();
 
     return res.status(200).json({ success: true, data: updated });

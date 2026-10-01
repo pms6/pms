@@ -4,8 +4,8 @@ import { fmtDate } from "./cleaningSheet";
  * The Council Tax and Bills sheets, printed the way the office's PDFs read:
  *
  *   Council Tax   Sr# | Property | Account Holder Name | Account# |
- *                 Move in Date | Email | Details | 1st Installment |
- *                 2nd Installment
+ *                 Move in Date | Email | Details | Instalments | Paid |
+ *                 Outstanding | Next Due
  *   Bills Record  Sr# | Name of property | Date | Type | Payment name |
  *                 Amount | Status | Bill
  *
@@ -18,6 +18,43 @@ export const moneyOrBlank = (n) =>
   n === null || n === undefined || n === ""
     ? ""
     : `£${Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// A council tax row's instalments. Rows entered before instalments became a
+// list carry two fixed amounts and one status for the whole row instead, so
+// those are read back as a list of up to two.
+export const installmentsOf = (row) => {
+  if (Array.isArray(row?.installments) && row.installments.length) return row.installments;
+  return [row?.firstInstallment, row?.secondInstallment]
+    .filter((amount) => amount !== null && amount !== undefined && amount !== "")
+    .map((amount) => ({
+      amount,
+      dueDate: null,
+      paidAt: row.status === "Paid" ? row.paidAt || null : null,
+    }));
+};
+
+// What a row's instalments add up to. An instalment is paid once it has a
+// paidAt; `nextDue` is the earliest due date still unpaid ("" when none).
+export const installmentSummary = (row) => {
+  const list = installmentsOf(row);
+  const sum = (items) => items.reduce((total, i) => total + Number(i.amount || 0), 0);
+  const unpaid = list.filter((i) => !i.paidAt);
+  const total = sum(list);
+  const outstanding = sum(unpaid);
+  const nextDue = unpaid
+    .map((i) => i.dueDate)
+    .filter(Boolean)
+    .sort((a, b) => new Date(a) - new Date(b))[0];
+
+  return {
+    list,
+    total,
+    paid: total - outstanding,
+    outstanding,
+    paidCount: list.length - unpaid.length,
+    nextDue: nextDue || "",
+  };
+};
 
 const esc = (v) =>
   String(v ?? "")
@@ -36,21 +73,39 @@ const COUNCIL_TAX_COLUMNS = [
   "Move in Date",
   "Email",
   "Details",
-  "1st Installment",
-  "2nd Installment",
+  "Instalments",
+  "Paid",
+  "Outstanding",
+  "Next Due",
 ];
 
-const councilTaxCells = (r, i) => [
-  i + 1,
-  esc(r.property),
-  esc(r.accountHolder),
-  esc(r.accountNumber),
-  esc(fmtDate(r.moveInDate)),
-  esc(r.email),
-  multiline(r.details),
-  esc(moneyOrBlank(r.firstInstallment)),
-  esc(moneyOrBlank(r.secondInstallment)),
-];
+// One line per instalment: "1. £120.00 - due 01/10/2026 - paid 03/10/2026".
+const installmentLine = (inst, i) =>
+  [
+    `${i + 1}. ${moneyOrBlank(inst.amount) || "—"}`,
+    inst.dueDate ? `due ${fmtDate(inst.dueDate)}` : "",
+    inst.paidAt ? `paid ${fmtDate(inst.paidAt)}` : "unpaid",
+  ]
+    .filter(Boolean)
+    .join(" - ");
+
+const councilTaxCells = (r, i) => {
+  const s = installmentSummary(r);
+  const any = s.list.length > 0;
+  return [
+    i + 1,
+    esc(r.property),
+    esc(r.accountHolder),
+    esc(r.accountNumber),
+    esc(fmtDate(r.moveInDate)),
+    esc(r.email),
+    multiline(r.details),
+    multiline(s.list.map(installmentLine).join("\n")),
+    esc(any ? moneyOrBlank(s.paid) : ""),
+    esc(any ? moneyOrBlank(s.outstanding) : ""),
+    esc(fmtDate(s.nextDue)),
+  ];
+};
 
 const BILL_COLUMNS = [
   "Sr#",

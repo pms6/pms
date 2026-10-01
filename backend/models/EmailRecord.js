@@ -42,8 +42,10 @@ export const EMAIL_CATEGORIES = [
 export const EMAIL_PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 
 // How the communication happened. The record itself is usually an email, but
-// calls and texts about the same issue are logged against it too.
-export const CHANNELS = ["Email", "Call", "Text", "WhatsApp", "Note"];
+// calls and texts about the same issue are logged against it too. "Text" is an
+// SMS (the UI labels it so); "Meeting" and "Other" were added for the tenant
+// communication log. Append new values only — old records keep validating.
+export const CHANNELS = ["Email", "Call", "Text", "WhatsApp", "Note", "Meeting", "Other"];
 
 // "" = only logged, never emailed from here.
 export const DELIVERY_STATUSES = ["", "Sent", "Failed"];
@@ -75,6 +77,12 @@ const historyEntrySchema = new mongoose.Schema(
     // Written by the system rather than typed in — a reply or status change
     // made on the record itself, copied into the thread so nothing is lost.
     auto: { type: Boolean, default: false },
+    // The conversation log is append-only: an entry logged in error is
+    // retracted (by an owner / admin), never removed, and still shows in the
+    // thread marked as such with who retracted it and why.
+    retractedAt: { type: Date, default: null },
+    retractedByEmail: { type: String, trim: true, default: "" },
+    retractReason: { type: String, trim: true, default: "" },
     // Set when the message was actually emailed from the system, not just
     // logged: whether it went, when, and why not if it failed.
     ...deliveryFields(),
@@ -94,6 +102,8 @@ const emailRecordSchema = new mongoose.Schema(
     },
 
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    // The staff member who logged it, shown on the record.
+    createdByEmail: { type: String, trim: true, default: "" },
 
     // Optional link to the property record, plus the address as written.
     propertyId: {
@@ -116,6 +126,10 @@ const emailRecordSchema = new mongoose.Schema(
     },
     tenantName: { type: String, trim: true, default: "" },
     tenantEmail: { type: String, trim: true, lowercase: true, default: "" },
+    // The tenant's room, copied off the tenancy, so the log can be filtered by
+    // room as well as by property.
+    roomId: { type: mongoose.Schema.Types.ObjectId, ref: "Room", default: null, index: true },
+    room: { type: String, trim: true, default: "" },
 
     // "Date" on the sheet — when the email was sent or received.
     date: { type: Date, required: true, index: true },

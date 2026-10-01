@@ -144,9 +144,13 @@ export default function NotificationBell() {
     // load (admin/tasks/page.js and Shared/MyTasks.js both read it).
     // Email Records lives in the admin portal only, so its notifications go
     // there for an admin and fall back to the task list for anyone else.
+    // Tenant Cases has a page in the owner and manager portals; staff in the
+    // other portals land on their task list.
     const target =
       n.relatedType === "EmailRecord" && n.relatedId && role === "organization"
         ? `/admin/email-records?open=${n.relatedId}`
+        : n.relatedType === "TenantCase" && n.relatedId && (role === "organization" || role === "manager")
+          ? `/${role === "manager" ? "manager" : "admin"}/cases?open=${n.relatedId}`
         : n.relatedType === "Task" && n.relatedId
           ? `${taskPath}?open=${n.relatedId}`
           : taskPath;

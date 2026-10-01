@@ -22,6 +22,10 @@ export const NOTIFICATION_TYPES = [
   "email_escalated",
   // A tenant's reply (or new email) read from the inbox by cranjob/emailInbox.js.
   "email_reply",
+  // Tenant Cases — a case handed to someone, and a note / status change on a
+  // case they are assigned to.
+  "case_assigned",
+  "case_update",
 ];
 
 const notificationSchema = new mongoose.Schema(

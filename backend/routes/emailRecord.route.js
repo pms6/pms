@@ -13,11 +13,13 @@ import {
   fetchInbox,
   getInboxStatus,
 } from "../controllers/emailRecord.controller.js";
-import { protect } from "../middleware/auth.js";
+import { protect, staffOnly } from "../middleware/auth.js";
 
 const router = express.Router();
 
-router.use(protect);
+// Staff only: protect() also resolves an organizationId for tenant accounts,
+// which would otherwise let a tenant read the whole organisation's records.
+router.use(protect, staffOnly);
 
 // Fixed paths before "/:id" so they are not read as an id.
 router.get("/options", getEmailRecordOptions);

@@ -32,6 +32,21 @@ const pickCommon = (body, payload) => {
 /* ------------------------------------------------------------------ *
  * Council tax
  * ------------------------------------------------------------------ */
+// More than a bill ever lists (councils offer 10 or 12 a year) — a ceiling so a
+// bad request can't store an unbounded array.
+const MAX_INSTALLMENTS = 60;
+
+// Rows left entirely blank in the form are dropped rather than stored.
+const cleanInstallments = (list) =>
+  (Array.isArray(list) ? list : [])
+    .map((i) => ({
+      amount: moneyOrNull(i?.amount ?? null),
+      dueDate: dateOrNull(i?.dueDate ?? null),
+      paidAt: dateOrNull(i?.paidAt ?? null),
+    }))
+    .filter((i) => i.amount !== null || i.dueDate || i.paidAt)
+    .slice(0, MAX_INSTALLMENTS);
+
 const pickCouncilTax = (body) => {
   const payload = {};
   pickCommon(body, payload);
@@ -44,6 +59,17 @@ const pickCouncilTax = (body) => {
   }
   if (body.status !== undefined) payload.status = text(body.status);
   if (body.paidAt !== undefined) payload.paidAt = dateOrNull(body.paidAt);
+  if (body.installments !== undefined) {
+    const list = cleanInstallments(body.installments);
+    payload.installments = list;
+    // The two legacy columns mirror the list, so a row never reads one thing
+    // from them and another from its instalments.
+    payload.firstInstallment = list[0]?.amount ?? null;
+    payload.secondInstallment = list[1]?.amount ?? null;
+    // With instalments the model derives the status; with none there is
+    // nothing to be paid or pending.
+    if (list.length === 0) payload.status = "";
+  }
   if (body.files !== undefined) payload.files = cleanAttachments(body.files);
   return payload;
 };

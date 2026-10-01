@@ -34,8 +34,8 @@ export const protect = async (req, res, next) => {
       const member = await OrganizationMember.findOne({ userId: req.user._id });
       if (member) {
         // Suspension has to bite on every request, not just at login: the
-        // session cookie lives for weeks, so checking only at the door would
-        // leave a suspended member working normally until their token expired.
+        // session cookie lives for 7 days, so checking only at the door would
+        // leave a suspended member working normally for the rest of the week.
         // 401 (rather than 403) is deliberate — the client treats it as "your
         // session is over" and signs them out.
         if (member.status === "SUSPENDED") {
@@ -86,6 +86,24 @@ export const staffOnly = (req, res, next) => {
     req.user?.role === "Organization" && STAFF_ROLES.includes(req.user?.organizationRole);
 
   if (!isStaff) {
+    return res.status(403).json({ success: false, message: "Not authorized." });
+  }
+
+  if (!req.user.organizationId) {
+    return res.status(401).json({ success: false, message: "Organization ID required" });
+  }
+
+  return next();
+};
+
+// Staff, narrowed to the seats named: staffRoles("OWNER", "ADMIN", "MANAGER").
+// For routes only part of the team may use. Tenants are excluded for the same
+// reason as in staffOnly.
+export const staffRoles = (...roles) => (req, res, next) => {
+  const allowed =
+    req.user?.role === "Organization" && roles.includes(req.user?.organizationRole);
+
+  if (!allowed) {
     return res.status(403).json({ success: false, message: "Not authorized." });
   }
 

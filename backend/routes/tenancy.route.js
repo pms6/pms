@@ -12,7 +12,8 @@ import {
   inviteTenant,
   inviteAllTenants,
 } from "../controllers/tenancy.controller.js";
-import { protect } from "../middleware/auth.js";
+import { getTenantTimeline } from "../controllers/tenantTimeline.controller.js";
+import { protect, staffOnly } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -41,6 +42,9 @@ router.get("/", getTenancies);
 router.post("/", createTenancy);
 router.put("/:id", updateTenancy);
 router.delete("/:id", deleteTenancy);
+
+// One tenant's whole history across every record — the Tenants page timeline.
+router.get("/:id/timeline", staffOnly, getTenantTimeline);
 
 // Single onboarding invite
 router.patch("/:id/invite", inviteTenant);

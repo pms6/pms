@@ -716,6 +716,28 @@ export const updateOrganization = async (req, res) => {
     if (type !== undefined) updates.type = type;
     if (businessType !== undefined) updates.businessType = businessType;
 
+    // Invoice / company details — whitelisted field by field so the form can
+    // never write anything else into the sub-document.
+    const inv = req.body.invoiceSettings;
+    if (inv && typeof inv === "object") {
+      const TEXT = [
+        "prefix", "email", "website", "vatNumber", "companyNumber", "bankName",
+        "accountName", "sortCode", "accountNumber", "iban", "swift",
+        "paymentInstructions", "footer",
+      ];
+      for (const k of TEXT) {
+        if (inv[k] !== undefined) updates[`invoiceSettings.${k}`] = String(inv[k] ?? "").trim().slice(0, 2000);
+      }
+      if (inv.defaultVatRate !== undefined) {
+        const n = Number(inv.defaultVatRate);
+        updates["invoiceSettings.defaultVatRate"] = Number.isFinite(n) ? Math.min(Math.max(n, 0), 100) : 0;
+      }
+      if (inv.paymentTermsDays !== undefined) {
+        const n = Number(inv.paymentTermsDays);
+        updates["invoiceSettings.paymentTermsDays"] = Number.isFinite(n) && n >= 0 ? Math.round(n) : 14;
+      }
+    }
+
     // Update the organization
     const updatedOrg = await Organization.findByIdAndUpdate(
       organization._id,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Plus, X, Pencil, Search, Landmark, Zap, Printer, CheckCircle2, Circle } from "lucide-react";
+import { Plus, X, Pencil, Search, Landmark, Zap, Printer, CheckCircle2, Circle, Trash2, BellRing } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import { MediaUploader, MediaViewerModal } from "./MediaAttachments";
 import api from "@/app/api/api";
@@ -9,6 +9,8 @@ import { useAuth } from "@/app/Context/AuthContext";
 import { fmtDate, monthKey, monthLabel } from "@/app/utils/cleaningSheet";
 import {
   moneyOrBlank,
+  installmentsOf,
+  installmentSummary,
   printCouncilTaxPdf,
   printBillsPdf,
 } from "@/app/utils/councilTaxBillsSheet";
@@ -34,10 +36,14 @@ import {
  * page, one card each:
  *
  *   Council Tax   Sr# | Property | Account Holder Name | Account# |
- *                 Move in Date | Email | Details | 1st Installment |
- *                 2nd Installment
+ *                 Move in Date | Email | Details | Instalments | Paid |
+ *                 Outstanding | Next Due
  *   Bills Record  Sr# | Name of property | Date | Type | Payment name |
  *                 Amount | Status | Bill
+ *
+ * A council tax row carries as many instalments as its bill lists — each an
+ * amount, a due date and the day it was paid. The paid total, the outstanding
+ * balance and the next due date are all worked out from them.
  *
  * "Sr#" is the row number, so it is never stored. MUST stay in sync with
  * backend/models/CouncilTax.js and backend/models/BillRecord.js.
@@ -51,8 +57,11 @@ export const BILL_TYPES = ["Octopus Energy", "Gas", "Water", "Electricity"];
 export const BILL_STATUSES = ["Pending", "Done"];
 
 // MUST stay in sync with COUNCIL_TAX_STATUSES in backend/models/CouncilTax.js
-// ("" there is "not recorded").
+// ("" there is "not recorded"). The backend sets it from the instalments.
 export const COUNCIL_TAX_STATUSES = ["Pending", "Paid"];
+
+// An unpaid instalment due within this many days is flagged as a reminder.
+const DUE_SOON_DAYS = 7;
 
 const STATUS_TONE = { Done: "green", Paid: "green", Pending: "amber" };
 
@@ -68,11 +77,82 @@ const numOrNull = (v) => (v === "" || v === null || v === undefined ? null : Num
 
 const Dash = () => <span className="text-gray-300">—</span>;
 
+// How close an unpaid instalment's due date is, counted in whole days from
+// today: { days, tone, label }, or null when there is no date.
+const dueState = (date) => {
+  const due = toInputDate(date);
+  if (!due) return null;
+  const days = Math.round((Date.parse(due) - Date.parse(toInputDate(new Date()))) / 86400000);
+  const plural = (n) => `${n} day${n === 1 ? "" : "s"}`;
+  if (days < 0) return { days, tone: "red", label: `Overdue by ${plural(-days)}` };
+  if (days === 0) return { days, tone: "red", label: "Due today" };
+  if (days <= DUE_SOON_DAYS) return { days, tone: "amber", label: `Due in ${plural(days)}` };
+  return { days, tone: "gray", label: `Due in ${plural(days)}` };
+};
+
+// The instalments as the API takes them — without the form's row keys or a
+// stored row's ids.
+const toInstallmentPayload = (list) =>
+  list.map((i) => ({
+    amount: numOrNull(i.amount),
+    dueDate: toInputDate(i.dueDate) || null,
+    paidAt: toInputDate(i.paidAt) || null,
+  }));
+
+// Total / Paid / Outstanding for one row's instalments.
+function InstallmentTotals({ summary }) {
+  const cells = [
+    { label: "Total", value: money(summary.total), tone: "text-[#0F253B]" },
+    { label: "Paid", value: money(summary.paid), tone: "text-emerald-600" },
+    { label: "Outstanding", value: money(summary.outstanding), tone: summary.outstanding > 0 ? "text-red-600" : "text-[#0F253B]" },
+  ];
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {cells.map((c) => (
+        <div key={c.label} className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2.5">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">{c.label}</p>
+          <p className={`text-sm font-bold mt-0.5 ${c.tone}`}>{c.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const SMALL_FIELD =
+  "w-full px-2.5 py-2 bg-white border border-gray-100 rounded-lg focus:ring-2 focus:ring-[#F47C3C] outline-none transition-all text-xs font-medium text-[#0F253B]";
+const SMALL_LABEL = "block text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1";
+
+const blankInstallment = () => ({
+  key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  amount: "",
+  dueDate: "",
+  paidAt: "",
+});
+
 /* ------------------------------------------------------------------ *
  * Council tax — add / edit
  * ------------------------------------------------------------------ */
 function CouncilTaxModal({ initial, properties, onClose, onSave }) {
   const isEdit = Boolean(initial?._id);
+
+  // The form always opens with one instalment; "+" adds as many more as the
+  // bill lists.
+  const [installments, setInstallments] = useState(() => {
+    const existing = installmentsOf(initial).map((i) => ({
+      ...blankInstallment(),
+      amount: i.amount ?? "",
+      dueDate: toInputDate(i.dueDate),
+      paidAt: toInputDate(i.paidAt),
+    }));
+    return existing.length ? existing : [blankInstallment()];
+  });
+
+  const setInstallment = (key, field) => (e) =>
+    setInstallments((list) => list.map((i) => (i.key === key ? { ...i, [field]: e.target.value } : i)));
+  const addInstallment = () => setInstallments((list) => [...list, blankInstallment()]);
+  const removeInstallment = (key) => setInstallments((list) => list.filter((i) => i.key !== key));
+
+  const summary = installmentSummary({ installments });
 
   const [form, setForm] = useState({
     propertyId: initial?.propertyId || "",
@@ -82,10 +162,6 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
     moveInDate: toInputDate(initial?.moveInDate),
     email: initial?.email || "",
     details: initial?.details || "",
-    firstInstallment: initial?.firstInstallment ?? "",
-    secondInstallment: initial?.secondInstallment ?? "",
-    status: initial?.status || "",
-    paidAt: toInputDate(initial?.paidAt),
   });
 
   // Kept out of `form` because the uploader appends asynchronously.
@@ -114,10 +190,7 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
         moveInDate: form.moveInDate || null,
         email: form.email.trim(),
         details: form.details.trim(),
-        firstInstallment: numOrNull(form.firstInstallment),
-        secondInstallment: numOrNull(form.secondInstallment),
-        status: form.status,
-        paidAt: form.status === "Paid" ? form.paidAt || null : null,
+        installments: toInstallmentPayload(installments),
         files,
       });
     } catch (err) {
@@ -168,31 +241,58 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={LABEL}>1st installment (£)</label>
-            <input type="number" min="0" step="0.01" className={FIELD} value={form.firstInstallment} onChange={set("firstInstallment")} placeholder="0.00" />
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Instalments</p>
+            <button
+              type="button"
+              onClick={addInstallment}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-orange-50 hover:bg-orange-100 text-[#F47C3C] text-xs font-bold rounded-lg transition-all"
+            >
+              <Plus size={14} /> Add instalment
+            </button>
           </div>
-          <div>
-            <label className={LABEL}>2nd installment (£)</label>
-            <input type="number" min="0" step="0.01" className={FIELD} value={form.secondInstallment} onChange={set("secondInstallment")} placeholder="0.00" />
-          </div>
-        </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={LABEL}>Payment status</label>
-            <select className={FIELD} value={form.status} onChange={set("status")}>
-              <option value="">—</option>
-              {COUNCIL_TAX_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+          <div className="space-y-2">
+            {installments.map((inst, i) => (
+              <div key={inst.key} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-bold text-[#0F253B]">
+                    <span className="text-gray-400">Sr# {i + 1}</span> · Instalment {i + 1}
+                  </p>
+                  {installments.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeInstallment(inst.key)}
+                      title="Remove this instalment"
+                      className="text-gray-300 hover:text-red-600"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div>
+                    <label className={SMALL_LABEL}>Amount (£)</label>
+                    <input type="number" min="0" step="0.01" className={SMALL_FIELD} value={inst.amount} onChange={setInstallment(inst.key, "amount")} placeholder="0.00" />
+                  </div>
+                  <div>
+                    <label className={SMALL_LABEL}>Due date</label>
+                    <input type="date" className={SMALL_FIELD} value={inst.dueDate} onChange={setInstallment(inst.key, "dueDate")} />
+                  </div>
+                  <div>
+                    <label className={SMALL_LABEL}>Paid on</label>
+                    <input type="date" className={SMALL_FIELD} value={inst.paidAt} onChange={setInstallment(inst.key, "paidAt")} title="Leave blank until it is paid" />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
-          {form.status === "Paid" && (
-            <div>
-              <label className={LABEL}>Paid on</label>
-              <input type="date" className={FIELD} value={form.paidAt} onChange={set("paidAt")} title="Leave blank for today" />
-            </div>
-          )}
+
+          <p className="mt-1.5 mb-2 text-[11px] text-gray-400 font-medium">
+            Fill in &quot;Paid on&quot; once an instalment is paid — until then it counts as outstanding.
+          </p>
+          <InstallmentTotals summary={summary} />
         </div>
 
         <MediaUploader
@@ -340,6 +440,7 @@ function BillModal({ initial, properties, onClose, onSave }) {
  * ------------------------------------------------------------------ */
 function ViewModal({ kind, row, onClose, onEdit, onOpenFiles }) {
   const isTax = kind === "council-tax";
+  const summary = installmentSummary(row);
 
   return (
     <div
@@ -370,10 +471,51 @@ function ViewModal({ kind, row, onClose, onEdit, onOpenFiles }) {
               <ViewRow label="Account#">{row.accountNumber}</ViewRow>
               <ViewRow label="Move in date">{fmtDate(row.moveInDate)}</ViewRow>
               <ViewRow label="Email">{row.email}</ViewRow>
-              <ViewRow label="1st installment">{moneyOrBlank(row.firstInstallment)}</ViewRow>
-              <ViewRow label="2nd installment">{moneyOrBlank(row.secondInstallment)}</ViewRow>
               <ViewRow label="Payment status">{row.status}</ViewRow>
-              <ViewRow label="Paid on">{row.paidAt ? fmtDate(row.paidAt) : ""}</ViewRow>
+              <ViewRow label="Next due">
+                {summary.nextDue ? `${fmtDate(summary.nextDue)} · ${dueState(summary.nextDue).label}` : ""}
+              </ViewRow>
+            </div>
+
+            <div>
+              <p className={LABEL}>
+                Payment record <span className="text-gray-300">({summary.paidCount} of {summary.list.length} paid)</span>
+              </p>
+              {summary.list.length === 0 ? (
+                <p className="text-sm font-medium text-gray-300">No instalments recorded.</p>
+              ) : (
+                <>
+                  <div className="rounded-xl border border-gray-100 overflow-hidden mb-2">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-[9px] font-bold uppercase tracking-widest text-gray-400 bg-gray-50">
+                          <th className="px-3 py-2 w-10">Sr#</th>
+                          <th className="px-3 py-2">Amount</th>
+                          <th className="px-3 py-2">Due date</th>
+                          <th className="px-3 py-2">Paid on</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {summary.list.map((inst, i) => (
+                          <tr key={inst._id || i} className="border-t border-gray-50">
+                            <td className="px-3 py-2 text-gray-400 font-medium">{i + 1}</td>
+                            <td className="px-3 py-2 font-bold text-[#0F253B]">{moneyOrBlank(inst.amount) || <Dash />}</td>
+                            <td className="px-3 py-2 text-gray-500 font-medium">{inst.dueDate ? fmtDate(inst.dueDate) : <Dash />}</td>
+                            <td className="px-3 py-2">
+                              {inst.paidAt ? (
+                                <span className="font-bold text-emerald-600">{fmtDate(inst.paidAt)}</span>
+                              ) : (
+                                <span className="font-bold text-amber-600">Not paid</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <InstallmentTotals summary={summary} />
+                </>
+              )}
             </div>
             <div>
               <p className={LABEL}>Details</p>
@@ -535,20 +677,21 @@ export default function CouncilTaxBillsBoard({
   const openViewer = (row, files, subtitle = "Bill copy") =>
     setViewer({ key: `${row._id}-${subtitle}`, title: row.property, subtitle, files });
 
-  // Paid is ticked from the row itself, like the Done tick on the cleaning
-  // board, rather than by opening the form.
-  const togglePaid = async (row) => {
-    const status = row.status === "Paid" ? "Pending" : "Paid";
-    const snapshot = councilTax;
-    setCouncilTax((prev) =>
-      prev.map((r) => (r._id === row._id ? { ...r, status, paidAt: status === "Paid" ? new Date().toISOString() : null } : r))
+  // An instalment is ticked paid from the row itself, like the Done tick on
+  // the cleaning board, rather than by opening the form. Ticking stamps today;
+  // a different day is entered in the form.
+  const toggleInstallmentPaid = async (row, index) => {
+    const installments = toInstallmentPayload(installmentsOf(row)).map((inst, i) =>
+      i === index ? { ...inst, paidAt: inst.paidAt ? null : toInputDate(new Date()) } : inst
     );
+    const snapshot = councilTax;
+    setCouncilTax((prev) => prev.map((r) => (r._id === row._id ? { ...r, installments } : r)));
     try {
-      const res = await api.put(`/council-tax-bills/council-tax/${row._id}`, { status, paidAt: null });
+      const res = await api.put(`/council-tax-bills/council-tax/${row._id}`, { installments });
       setCouncilTax((prev) => prev.map((r) => (r._id === row._id ? res.data.data : r)));
     } catch (err) {
       setCouncilTax(snapshot);
-      alert(err.response?.data?.message || "Failed to update status");
+      alert(err.response?.data?.message || "Failed to update the instalment");
     }
   };
 
@@ -564,17 +707,30 @@ export default function CouncilTaxBillsBoard({
     if (!opened) alert("Allow pop-ups for this site to print the PDF.");
   };
 
-  const firstTotal = sumOf(visibleTax, (r) => r.firstInstallment);
-  const secondTotal = sumOf(visibleTax, (r) => r.secondInstallment);
+  const taxRows = visibleTax.map((r) => ({ r, s: installmentSummary(r) }));
+  const taxTotal = sumOf(taxRows, ({ s }) => s.total);
+  const taxPaid = sumOf(taxRows, ({ s }) => s.paid);
+  const taxOutstanding = sumOf(taxRows, ({ s }) => s.outstanding);
   const billsTotal = sumOf(visibleBills, (r) => r.amount);
+
+  // The reminder: every property whose next unpaid instalment is overdue or
+  // falls due soon, soonest first. Read from the whole sheet, not the search.
+  const reminders = councilTax
+    .map((r) => {
+      const s = installmentSummary(r);
+      const next = s.list.find((i) => !i.paidAt && i.dueDate === s.nextDue);
+      return { r, due: dueState(s.nextDue), date: s.nextDue, amount: next?.amount };
+    })
+    .filter((x) => x.due && x.due.days <= DUE_SOON_DAYS)
+    .sort((a, b) => a.due.days - b.due.days);
 
   const cards =
     tab === "council-tax"
       ? [
           { label: "Properties", value: visibleTax.length },
-          { label: "1st installments", value: money(firstTotal) },
-          { label: "2nd installments", value: money(secondTotal) },
-          { label: "Paid", value: visibleTax.filter((r) => r.status === "Paid").length },
+          { label: "Total paid", value: money(taxPaid) },
+          { label: "Outstanding", value: money(taxOutstanding) },
+          { label: `Due in ${DUE_SOON_DAYS} days / overdue`, value: reminders.length },
         ]
       : [
           { label: "Bills", value: visibleBills.length },
@@ -657,6 +813,27 @@ export default function CouncilTaxBillsBoard({
         ))}
       </div>
 
+      {tab === "council-tax" && reminders.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+          <p className="flex items-center gap-2 text-sm font-bold text-amber-800">
+            <BellRing size={16} /> Council tax payments due
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {reminders.map(({ r, due, date, amount }) => (
+              <li key={r._id} className="flex items-center gap-2 flex-wrap text-xs font-medium text-amber-900">
+                <Badge tone={due.tone}>{due.label}</Badge>
+                <button onClick={() => setViewing({ kind: "council-tax", row: r })} className="font-bold hover:underline text-left">
+                  {r.property}
+                </button>
+                <span>
+                  — {moneyOrBlank(amount) || "amount not set"} due {fmtDate(date)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative max-w-xs flex-1 min-w-[200px]">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
@@ -705,8 +882,10 @@ export default function CouncilTaxBillsBoard({
                   <th className={`${thClass} whitespace-nowrap`}>Move in Date</th>
                   <th className={thClass}>Email</th>
                   <th className={thClass}>Details</th>
-                  <th className={`${thClass} whitespace-nowrap`}>1st Installment</th>
-                  <th className={`${thClass} whitespace-nowrap`}>2nd Installment</th>
+                  <th className={thClass}>Instalments</th>
+                  <th className={thClass}>Paid</th>
+                  <th className={thClass}>Outstanding</th>
+                  <th className={`${thClass} whitespace-nowrap`}>Next Due</th>
                   <th className={thClass}>Status</th>
                   <th className={thClass}>Attachments</th>
                   <th className={`${thClass} w-32 text-right`}>Actions</th>
@@ -715,13 +894,13 @@ export default function CouncilTaxBillsBoard({
               <tbody>
                 {visibleTax.length === 0 ? (
                   <EmptyRow
-                    colSpan={12}
+                    colSpan={14}
                     loading={loading}
                     anyRows={councilTax.length > 0}
                     emptyText="No council tax entries recorded yet"
                   />
                 ) : (
-                  visibleTax.map((r, i) => (
+                  taxRows.map(({ r, s }, i) => (
                     <tr key={r._id} className="border-b border-gray-50 hover:bg-gray-50/50 align-top">
                       <td className="px-4 py-3 text-gray-400 font-medium">{i + 1}</td>
                       <td className="px-4 py-3 font-semibold text-[#0F253B] min-w-[180px]">{r.property}</td>
@@ -732,22 +911,58 @@ export default function CouncilTaxBillsBoard({
                       <td className="px-4 py-3 text-gray-500 font-medium text-xs whitespace-pre-line min-w-[200px] max-w-xs">
                         {r.details ? <p className="line-clamp-4">{r.details}</p> : <Dash />}
                       </td>
-                      <td className="px-4 py-3 text-[#0F253B] font-bold whitespace-nowrap">{moneyOrBlank(r.firstInstallment) || <Dash />}</td>
-                      <td className="px-4 py-3 text-[#0F253B] font-bold whitespace-nowrap">{moneyOrBlank(r.secondInstallment) || <Dash />}</td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => togglePaid(r)}
-                          title={r.status === "Paid" ? "Mark as pending" : "Mark as paid"}
-                          className="flex items-center gap-1.5 whitespace-nowrap"
-                        >
-                          {r.status === "Paid" ? (
-                            <CheckCircle2 size={15} className="text-emerald-600" />
-                          ) : (
-                            <Circle size={15} className="text-gray-300" />
-                          )}
-                          {r.status ? <Badge tone={STATUS_TONE[r.status] || "gray"}>{r.status}</Badge> : <Dash />}
-                        </button>
-                        {r.paidAt && <p className="text-[10px] font-medium text-gray-400 mt-1">{fmtDate(r.paidAt)}</p>}
+                      <td className="px-4 py-3 min-w-[230px]">
+                        {s.list.length === 0 ? <Dash /> : (
+                          <ul className="space-y-1.5">
+                            {s.list.map((inst, n) => (
+                              <li key={inst._id || n} className="flex items-start gap-1.5 text-xs">
+                                <button
+                                  onClick={() => toggleInstallmentPaid(r, n)}
+                                  title={inst.paidAt ? "Mark as not paid" : "Mark as paid today"}
+                                  className="mt-0.5 shrink-0"
+                                >
+                                  {inst.paidAt ? (
+                                    <CheckCircle2 size={15} className="text-emerald-600" />
+                                  ) : (
+                                    <Circle size={15} className="text-gray-300 hover:text-emerald-600" />
+                                  )}
+                                </button>
+                                <span className="min-w-0">
+                                  <span className="font-bold text-[#0F253B] whitespace-nowrap">
+                                    <span className="text-gray-400 font-medium">{n + 1}.</span> {moneyOrBlank(inst.amount) || "—"}
+                                  </span>
+                                  <span className="block text-[10px] font-medium text-gray-400 whitespace-nowrap">
+                                    {inst.dueDate ? `Due ${fmtDate(inst.dueDate)}` : "No due date"}
+                                    {" · "}
+                                    {inst.paidAt ? (
+                                      <span className="text-emerald-600 font-bold">Paid {fmtDate(inst.paidAt)}</span>
+                                    ) : (
+                                      <span className="text-amber-600 font-bold">Not paid</span>
+                                    )}
+                                  </span>
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-emerald-600 font-bold whitespace-nowrap">{s.list.length ? money(s.paid) : <Dash />}</td>
+                      <td className={`px-4 py-3 font-bold whitespace-nowrap ${s.outstanding > 0 ? "text-red-600" : "text-[#0F253B]"}`}>
+                        {s.list.length ? money(s.outstanding) : <Dash />}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {s.nextDue ? (
+                          <>
+                            <p className="text-[#0F253B] font-medium">{fmtDate(s.nextDue)}</p>
+                            <p className="mt-1"><Badge tone={dueState(s.nextDue).tone}>{dueState(s.nextDue).label}</Badge></p>
+                          </>
+                        ) : <Dash />}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {r.status ? <Badge tone={STATUS_TONE[r.status] || "gray"}>{r.status}</Badge> : <Dash />}
+                        {s.list.length > 0 && (
+                          <p className="text-[10px] font-medium text-gray-400 mt-1">{s.paidCount} of {s.list.length} paid</p>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {filesOf(r.files).length > 0 ? (
@@ -769,9 +984,10 @@ export default function CouncilTaxBillsBoard({
                 <tfoot>
                   <tr className="bg-gray-50/50 border-t border-gray-100">
                     <td colSpan={7} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-gray-400">Total</td>
-                    <td className="px-4 py-3 font-bold text-[#0F253B] whitespace-nowrap">{money(firstTotal)}</td>
-                    <td className="px-4 py-3 font-bold text-[#0F253B] whitespace-nowrap">{money(secondTotal)}</td>
-                    <td colSpan={3} />
+                    <td className="px-4 py-3 font-bold text-[#0F253B] whitespace-nowrap">{money(taxTotal)}</td>
+                    <td className="px-4 py-3 font-bold text-emerald-600 whitespace-nowrap">{money(taxPaid)}</td>
+                    <td className="px-4 py-3 font-bold text-[#0F253B] whitespace-nowrap">{money(taxOutstanding)}</td>
+                    <td colSpan={4} />
                   </tr>
                 </tfoot>
               )}

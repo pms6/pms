@@ -91,6 +91,52 @@ export const mirrorToCloudinary = async (url, { resourceType = "image" } = {}) =
   }
 };
 
+/**
+ * Upload a file generated here (a finalised inventory report PDF) into the same
+ * Cloudinary account, through the same unsigned preset.
+ *
+ * PDFs go up as `raw`: Cloudinary files an `auto`/`image` PDF under
+ * /image/upload/, and PDF delivery from that path is blocked by default on
+ * every account (see Shared/PdfFrame.js on the frontend) — a raw file is served
+ * as-is.
+ *
+ * @returns {Promise<object|null>} the attachment shape (utils/attachments.js),
+ *          or null if the upload failed. Never throws.
+ */
+export const uploadBufferToCloudinary = async (buffer, { filename = "file.pdf", mime = "application/pdf" } = {}) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const body = new FormData();
+    body.append("file", new Blob([buffer], { type: mime }), filename);
+    body.append("upload_preset", UPLOAD_PRESET);
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/raw/upload`, {
+      method: "POST",
+      body,
+      signal: controller.signal,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.secure_url) {
+      console.error(`Cloudinary upload of ${filename} failed: ${data?.error?.message || response.status}`);
+      return null;
+    }
+    return {
+      name: filename,
+      url: data.secure_url,
+      publicId: data.public_id || "",
+      type: mime === "application/pdf" ? "pdf" : "file",
+      format: (filename.split(".").pop() || "").toLowerCase(),
+      bytes: data.bytes || buffer.length,
+      uploadedAt: new Date(),
+    };
+  } catch (error) {
+    console.error(`Cloudinary upload of ${filename} failed: ${error.message}`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /** Mirror a list of URLs, a few at a time. Order is preserved. */
 export const mirrorMany = async (urls = [], options) => {
   const results = new Array(urls.length);

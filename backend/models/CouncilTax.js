@@ -5,9 +5,10 @@ import { attachmentSchema } from "../utils/attachments.js";
 // council tax account is registered to and what the instalments are.
 //
 //   Sr# | Property | Account Holder Name | Account# | Move in Date | Email |
-//   Details | 1st Installment | 2nd Installment
+//   Details | Instalments (amount, due date, paid on) | Paid | Outstanding
 //
-// The sheet's "Sr#" column is the row number and is not stored.
+// The sheet's "Sr#" column is the row number and is not stored; an
+// instalment's Sr# is likewise its place in the list.
 //
 // MUST stay in sync with the council tax columns in
 // frontend/src/app/Shared/CouncilTaxBillsBoard.js.
@@ -18,6 +19,14 @@ import { attachmentSchema } from "../utils/attachments.js";
 // MUST stay in sync with COUNCIL_TAX_STATUSES in
 // frontend/src/app/Shared/CouncilTaxBillsBoard.js.
 export const COUNCIL_TAX_STATUSES = ["", "Pending", "Paid"];
+
+// One instalment of the year's council tax: what is due, when, and the day it
+// was paid. An instalment with a paidAt is paid; one without is outstanding.
+const installmentSchema = new mongoose.Schema({
+  amount: { type: Number, default: null, min: 0 },
+  dueDate: { type: Date, default: null },
+  paidAt: { type: Date, default: null },
+});
 
 const councilTaxSchema = new mongoose.Schema(
   {
@@ -54,11 +63,18 @@ const councilTaxSchema = new mongoose.Schema(
     // council's web reference, single person discount — whatever was submitted.
     details: { type: String, trim: true, default: "" },
 
-    // null, not 0, when the sheet leaves the cell blank — "not known yet" and
-    // "nothing due" read differently.
+    // As many instalments as the council's bill lists, in order.
+    installments: { type: [installmentSchema], default: [] },
+
+    // The two fixed columns the sheet had before instalments became a list.
+    // Rows entered back then still read from these; the controller keeps them
+    // mirroring the first two instalments. null, not 0, when blank — "not known
+    // yet" and "nothing due" read differently.
     firstInstallment: { type: Number, default: null, min: 0 },
     secondInstallment: { type: Number, default: null, min: 0 },
 
+    // Derived from the instalments once a row has any: Paid when every one is
+    // paid, Pending otherwise.
     status: { type: String, enum: COUNCIL_TAX_STATUSES, default: "" },
     // Stamped when the status turns Paid, cleared when it turns back.
     paidAt: { type: Date, default: null },
@@ -77,6 +93,16 @@ councilTaxSchema.index({ organizationId: 1, isDeleted: 1, property: 1 });
 // Paid rows always carry the day they were paid (today unless one was given);
 // any other status has none.
 councilTaxSchema.pre("save", function () {
+  // With instalments the status is theirs to decide: the row is paid on the
+  // day its last instalment was.
+  if (this.installments.length) {
+    const paidDates = this.installments.map((i) => i.paidAt).filter(Boolean);
+    const allPaid = paidDates.length === this.installments.length;
+    this.status = allPaid ? "Paid" : "Pending";
+    this.paidAt = allPaid ? new Date(Math.max(...paidDates.map((d) => d.getTime()))) : null;
+    return;
+  }
+
   if (this.status === "Paid") {
     if (!this.paidAt) this.paidAt = new Date();
   } else {

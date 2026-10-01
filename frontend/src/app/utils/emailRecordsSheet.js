@@ -20,7 +20,7 @@ export const DEFAULT_OPTIONS = {
   doneStatuses: ["Resolved", "Closed"],
   categories: ["Maintenance", "Tenant Issue", "Inspection", "Compliance", "Contractor", "Payment", "Notice", "General"],
   priorities: ["Low", "Medium", "High", "Urgent"],
-  channels: ["Email", "Call", "Text", "WhatsApp", "Note"],
+  channels: ["Email", "Call", "Text", "WhatsApp", "Note", "Meeting", "Other"],
 };
 
 export const STATUS_TONE = {

@@ -8,6 +8,8 @@ import {
   MessageSquare,
   MessageCircle,
   StickyNote,
+  Users as MeetingIcon,
+  MoreHorizontal,
   Paperclip,
   FileSpreadsheet,
   Users,
@@ -40,6 +42,8 @@ export const CHANNEL_ICON = {
   Text: MessageSquare,
   WhatsApp: MessageCircle,
   Note: StickyNote,
+  Meeting: MeetingIcon,
+  Other: MoreHorizontal,
 };
 
 const MONTH_INPUT =

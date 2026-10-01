@@ -8,6 +8,7 @@ import { Badge } from "../Shared/ui";
 import TenancyPanel from "../admin/_components/TenancyPanel";
 import { ContractSection, ContractModal } from "./PropertyContract";
 import RoomManagementPanel from "../admin/_components/RoomManagementPanel";
+import PropertyRecordsSection from "./PropertyRecordsSection";
 import { RENTAL_TYPES, LETTING_STATUS_TONE, viewings, maintenance, inspections, deposits, reviews, money } from "../admin/_data/dummy";
 import api from "@/app/api/api";
 
@@ -711,6 +712,12 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
             ))}
           </div>
         </div>
+      )}
+
+      {/* Inventory reports and invoices filed against this property — owner
+          and manager portals only (the API refuses the others). */}
+      {(basePath.startsWith("/admin/") || basePath.startsWith("/manager/")) && (
+        <PropertyRecordsSection propertyId={property._id} />
       )}
 
       {tenancy && (

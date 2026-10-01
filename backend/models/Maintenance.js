@@ -98,6 +98,16 @@ const maintenanceSchema = new mongoose.Schema(
     },
     room: { type: String, trim: true, default: "" },
 
+    // The tenant the job concerns, when there is one — set automatically when
+    // a tenant reports it from their portal, or picked by staff. It is what
+    // puts the job on that tenant's timeline and lets a Tenant Case link it.
+    tenancyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenancy",
+      default: null,
+      index: true,
+    },
+
     reportedBy: { type: String, trim: true, default: "" },
 
     supplierId: {

@@ -162,12 +162,25 @@ export function AttachmentRow({ file, onRemove }) {
 }
 
 /**
+ * Resolve what MediaUploader's `onChange` hands over against the current list.
+ * The uploader always passes an updater function (uploads land one at a time,
+ * so each must build on the latest list), which a bare setState takes as-is.
+ * A parent that keeps the list inside a bigger object applies it with this:
+ *   onChange={(u) => setForm((f) => ({ ...f, files: applyFiles(u, f.files) }))}
+ */
+export const applyFiles = (update, prev) =>
+  typeof update === "function" ? update(prev || []) : update || [];
+
+/**
  * Pick, drop and list attachments.
  *
  * `files` and `onChange` are the form's own state — the uploader does not own
  * the list, so a parent can seed it from a record being edited. What it does
  * own is the in-flight set, reported through `onUploadingChange` so the form
  * can refuse to submit mid-upload and lose whatever has not landed yet.
+ *
+ * `onChange` receives an updater function, never the new array — see
+ * applyFiles above.
  */
 export function MediaUploader({
   files = [],
