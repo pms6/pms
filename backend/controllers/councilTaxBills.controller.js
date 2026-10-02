@@ -43,18 +43,19 @@ const cleanInstallments = (list) =>
       amount: moneyOrNull(i?.amount ?? null),
       dueDate: dateOrNull(i?.dueDate ?? null),
       paidAt: dateOrNull(i?.paidAt ?? null),
+      files: cleanAttachments(i?.files),
     }))
-    .filter((i) => i.amount !== null || i.dueDate || i.paidAt)
+    .filter((i) => i.amount !== null || i.dueDate || i.paidAt || i.files.length)
     .slice(0, MAX_INSTALLMENTS);
 
 const pickCouncilTax = (body) => {
   const payload = {};
   pickCommon(body, payload);
-  for (const key of ["accountHolder", "accountNumber", "email", "details"]) {
+  for (const key of ["councilName", "accountHolder", "accountNumber", "email", "details"]) {
     if (body[key] !== undefined) payload[key] = text(body[key]);
   }
   if (body.moveInDate !== undefined) payload.moveInDate = dateOrNull(body.moveInDate);
-  for (const key of ["firstInstallment", "secondInstallment"]) {
+  for (const key of ["totalAmount", "firstInstallment", "secondInstallment"]) {
     if (body[key] !== undefined) payload[key] = moneyOrNull(body[key]);
   }
   if (body.status !== undefined) payload.status = text(body.status);

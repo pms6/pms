@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Plus, X, Pencil, Search, Landmark, Zap, Printer, CheckCircle2, Circle, Trash2, BellRing } from "lucide-react";
+import { Plus, X, Pencil, Search, Landmark, Zap, Printer, CheckCircle2, Circle, Trash2, BellRing, Paperclip } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
-import { MediaUploader, MediaViewerModal } from "./MediaAttachments";
+import { MediaUploader, MediaViewerModal, applyFiles } from "./MediaAttachments";
 import api from "@/app/api/api";
 import { useAuth } from "@/app/Context/AuthContext";
 import { fmtDate, monthKey, monthLabel } from "@/app/utils/cleaningSheet";
@@ -35,15 +35,17 @@ import {
  * The Council Tax and Bills section — two of the office's sheets on one
  * page, one card each:
  *
- *   Council Tax   Sr# | Property | Account Holder Name | Account# |
- *                 Move in Date | Email | Details | Instalments | Paid |
- *                 Outstanding | Next Due
+ *   Council Tax   Sr# | Property | Council | Account Holder Name |
+ *                 Account# | Move in Date | Email | Details | Total |
+ *                 Instalments | Paid | Outstanding | Next Due
  *   Bills Record  Sr# | Name of property | Date | Type | Payment name |
  *                 Amount | Status | Bill
  *
  * A council tax row carries as many instalments as its bill lists — each an
- * amount, a due date and the day it was paid. The paid total, the outstanding
- * balance and the next due date are all worked out from them.
+ * amount, a due date, the day it was paid and its proof of payment. The total
+ * is the one typed in from the bill (or, failing that, the instalments added
+ * up); the paid total, the outstanding balance and the next due date are all
+ * worked out from the instalments.
  *
  * "Sr#" is the row number, so it is never stored. MUST stay in sync with
  * backend/models/CouncilTax.js and backend/models/BillRecord.js.
@@ -97,10 +99,12 @@ const toInstallmentPayload = (list) =>
     amount: numOrNull(i.amount),
     dueDate: toInputDate(i.dueDate) || null,
     paidAt: toInputDate(i.paidAt) || null,
+    files: filesOf(i.files),
   }));
 
 // Total / Paid / Outstanding for one row's instalments.
 function InstallmentTotals({ summary }) {
+  const gap = summary.unscheduled;
   const cells = [
     { label: "Total", value: money(summary.total), tone: "text-[#0F253B]" },
     { label: "Paid", value: money(summary.paid), tone: "text-emerald-600" },
@@ -114,6 +118,13 @@ function InstallmentTotals({ summary }) {
           <p className={`text-sm font-bold mt-0.5 ${c.tone}`}>{c.value}</p>
         </div>
       ))}
+      {Math.abs(gap) >= 0.005 && (
+        <p className="col-span-3 text-[11px] font-medium text-amber-600">
+          {gap > 0
+            ? `The instalments list ${money(gap)} less than the total.`
+            : `The instalments list ${money(-gap)} more than the total.`}
+        </p>
+      )}
     </div>
   );
 }
@@ -127,6 +138,7 @@ const blankInstallment = () => ({
   amount: "",
   dueDate: "",
   paidAt: "",
+  files: [],
 });
 
 /* ------------------------------------------------------------------ *
@@ -143,20 +155,33 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
       amount: i.amount ?? "",
       dueDate: toInputDate(i.dueDate),
       paidAt: toInputDate(i.paidAt),
+      files: filesOf(i.files),
     }));
     return existing.length ? existing : [blankInstallment()];
   });
 
+  // Each instalment's proof uploader reports its own in-flight count.
+  const [proofUploading, setProofUploading] = useState({});
+
   const setInstallment = (key, field) => (e) =>
     setInstallments((list) => list.map((i) => (i.key === key ? { ...i, [field]: e.target.value } : i)));
+  const setInstallmentFiles = (key) => (update) =>
+    setInstallments((list) => list.map((i) => (i.key === key ? { ...i, files: applyFiles(update, i.files) } : i)));
   const addInstallment = () => setInstallments((list) => [...list, blankInstallment()]);
-  const removeInstallment = (key) => setInstallments((list) => list.filter((i) => i.key !== key));
-
-  const summary = installmentSummary({ installments });
+  const removeInstallment = (key) => {
+    setInstallments((list) => list.filter((i) => i.key !== key));
+    setProofUploading((m) => {
+      const rest = { ...m };
+      delete rest[key];
+      return rest;
+    });
+  };
 
   const [form, setForm] = useState({
     propertyId: initial?.propertyId || "",
     property: initial?.property || "",
+    councilName: initial?.councilName || "",
+    totalAmount: initial?.totalAmount ?? "",
     accountHolder: initial?.accountHolder || "",
     accountNumber: initial?.accountNumber || "",
     moveInDate: toInputDate(initial?.moveInDate),
@@ -173,11 +198,14 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const summary = installmentSummary({ installments, totalAmount: form.totalAmount });
+
   const submit = async (e) => {
     e.preventDefault();
     if (!form.property.trim()) { setError("Property is required"); return; }
     // Saving mid-upload would drop whatever has not landed yet.
-    if (uploading) { setError("Wait for the uploads to finish"); return; }
+    const proofsInFlight = Object.values(proofUploading).reduce((a, b) => a + b, 0);
+    if (uploading || proofsInFlight) { setError("Wait for the uploads to finish"); return; }
 
     setSaving(true);
     setError("");
@@ -185,6 +213,8 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
       await onSave({
         propertyId: form.propertyId || null,
         property: form.property.trim(),
+        councilName: form.councilName.trim(),
+        totalAmount: numOrNull(form.totalAmount),
         accountHolder: form.accountHolder.trim(),
         accountNumber: form.accountNumber.trim(),
         moveInDate: form.moveInDate || null,
@@ -212,6 +242,10 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
         <PropertyFields form={form} setForm={setForm} properties={properties} />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="sm:col-span-2">
+            <label className={LABEL}>Council name</label>
+            <input className={FIELD} value={form.councilName} onChange={set("councilName")} placeholder="e.g. Manchester City Council" />
+          </div>
           <div>
             <label className={LABEL}>Account holder name</label>
             <input className={FIELD} value={form.accountHolder} onChange={set("accountHolder")} placeholder="e.g. Hamza Sheikh" />
@@ -239,6 +273,22 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
             onChange={set("details")}
             placeholder={"Tenant name, date of birth, phone,\nweb reference, single person discount…"}
           />
+        </div>
+
+        <div>
+          <label className={LABEL}>Total council tax (£)</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            className={FIELD}
+            value={form.totalAmount}
+            onChange={set("totalAmount")}
+            placeholder="The year's total from the bill"
+          />
+          <p className="mt-1 text-[11px] text-gray-400 font-medium">
+            Leave blank to add up the instalments instead. Paid and outstanding are worked out from the instalments below.
+          </p>
         </div>
 
         <div>
@@ -284,6 +334,15 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
                     <label className={SMALL_LABEL}>Paid on</label>
                     <input type="date" className={SMALL_FIELD} value={inst.paidAt} onChange={setInstallment(inst.key, "paidAt")} title="Leave blank until it is paid" />
                   </div>
+                </div>
+                <div className="mt-2">
+                  <MediaUploader
+                    files={inst.files}
+                    onChange={setInstallmentFiles(inst.key)}
+                    onUploadingChange={(n) => setProofUploading((m) => ({ ...m, [inst.key]: n }))}
+                    label="Proof of payment"
+                    hint="Drop the receipt or bank screenshot here — PDF, photo, any file type"
+                  />
                 </div>
               </div>
             ))}
@@ -467,6 +526,7 @@ function ViewModal({ kind, row, onClose, onEdit, onOpenFiles }) {
         {isTax ? (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-4">
+              <ViewRow label="Council">{row.councilName}</ViewRow>
               <ViewRow label="Account holder">{row.accountHolder}</ViewRow>
               <ViewRow label="Account#">{row.accountNumber}</ViewRow>
               <ViewRow label="Move in date">{fmtDate(row.moveInDate)}</ViewRow>
@@ -482,7 +542,10 @@ function ViewModal({ kind, row, onClose, onEdit, onOpenFiles }) {
                 Payment record <span className="text-gray-300">({summary.paidCount} of {summary.list.length} paid)</span>
               </p>
               {summary.list.length === 0 ? (
-                <p className="text-sm font-medium text-gray-300">No instalments recorded.</p>
+                <>
+                  <p className="text-sm font-medium text-gray-300 mb-2">No instalments recorded.</p>
+                  {summary.manualTotal && <InstallmentTotals summary={summary} />}
+                </>
               ) : (
                 <>
                   <div className="rounded-xl border border-gray-100 overflow-hidden mb-2">
@@ -493,6 +556,7 @@ function ViewModal({ kind, row, onClose, onEdit, onOpenFiles }) {
                           <th className="px-3 py-2">Amount</th>
                           <th className="px-3 py-2">Due date</th>
                           <th className="px-3 py-2">Paid on</th>
+                          <th className="px-3 py-2">Proof</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -507,6 +571,14 @@ function ViewModal({ kind, row, onClose, onEdit, onOpenFiles }) {
                               ) : (
                                 <span className="font-bold text-amber-600">Not paid</span>
                               )}
+                            </td>
+                            <td className="px-3 py-2">
+                              {filesOf(inst.files).length > 0 ? (
+                                <FileStrip
+                                  files={filesOf(inst.files)}
+                                  onOpen={() => onOpenFiles(row, filesOf(inst.files), `Instalment ${i + 1} proof of payment`)}
+                                />
+                              ) : <Dash />}
                             </td>
                           </tr>
                         ))}
@@ -642,7 +714,7 @@ export default function CouncilTaxBillsBoard({
     needle ? values.some((v) => String(v || "").toLowerCase().includes(needle)) : true;
 
   const visibleTax = councilTax.filter((r) =>
-    matches([r.property, r.accountHolder, r.accountNumber, r.email, r.details])
+    matches([r.property, r.councilName, r.accountHolder, r.accountNumber, r.email, r.details])
   );
 
   const visibleBills = bills
@@ -840,7 +912,7 @@ export default function CouncilTaxBillsBoard({
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder={tab === "council-tax" ? "Search property, holder, account…" : "Search property, type, payment…"}
+            placeholder={tab === "council-tax" ? "Search property, council, holder…" : "Search property, type, payment…"}
             className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]"
           />
         </div>
@@ -877,11 +949,13 @@ export default function CouncilTaxBillsBoard({
                 <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
                   <th className={`${thClass} w-10`}>Sr#</th>
                   <th className={thClass}>Property</th>
+                  <th className={thClass}>Council</th>
                   <th className={thClass}>Account Holder Name</th>
                   <th className={thClass}>Account#</th>
                   <th className={`${thClass} whitespace-nowrap`}>Move in Date</th>
                   <th className={thClass}>Email</th>
                   <th className={thClass}>Details</th>
+                  <th className={thClass}>Total</th>
                   <th className={thClass}>Instalments</th>
                   <th className={thClass}>Paid</th>
                   <th className={thClass}>Outstanding</th>
@@ -894,7 +968,7 @@ export default function CouncilTaxBillsBoard({
               <tbody>
                 {visibleTax.length === 0 ? (
                   <EmptyRow
-                    colSpan={14}
+                    colSpan={16}
                     loading={loading}
                     anyRows={councilTax.length > 0}
                     emptyText="No council tax entries recorded yet"
@@ -904,12 +978,19 @@ export default function CouncilTaxBillsBoard({
                     <tr key={r._id} className="border-b border-gray-50 hover:bg-gray-50/50 align-top">
                       <td className="px-4 py-3 text-gray-400 font-medium">{i + 1}</td>
                       <td className="px-4 py-3 font-semibold text-[#0F253B] min-w-[180px]">{r.property}</td>
+                      <td className="px-4 py-3 text-[#0F253B] font-medium min-w-[140px]">{r.councilName || <Dash />}</td>
                       <td className="px-4 py-3 text-[#0F253B] font-medium">{r.accountHolder || <Dash />}</td>
                       <td className="px-4 py-3 text-gray-500 font-medium">{r.accountNumber || <Dash />}</td>
                       <td className="px-4 py-3 text-gray-500 font-medium whitespace-nowrap">{r.moveInDate ? fmtDate(r.moveInDate) : <Dash />}</td>
                       <td className="px-4 py-3 text-gray-500 font-medium">{r.email || <Dash />}</td>
                       <td className="px-4 py-3 text-gray-500 font-medium text-xs whitespace-pre-line min-w-[200px] max-w-xs">
                         {r.details ? <p className="line-clamp-4">{r.details}</p> : <Dash />}
+                      </td>
+                      <td className="px-4 py-3 text-[#0F253B] font-bold whitespace-nowrap">
+                        {s.list.length || s.manualTotal ? money(s.total) : <Dash />}
+                        {s.list.length > 0 && !s.manualTotal && (
+                          <p className="text-[10px] font-medium text-gray-400 mt-1">From instalments</p>
+                        )}
                       </td>
                       <td className="px-4 py-3 min-w-[230px]">
                         {s.list.length === 0 ? <Dash /> : (
@@ -940,15 +1021,23 @@ export default function CouncilTaxBillsBoard({
                                       <span className="text-amber-600 font-bold">Not paid</span>
                                     )}
                                   </span>
+                                  {filesOf(inst.files).length > 0 && (
+                                    <button
+                                      onClick={() => openViewer(r, filesOf(inst.files), `Instalment ${n + 1} proof of payment`)}
+                                      className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-bold text-[#F47C3C] hover:underline"
+                                    >
+                                      <Paperclip size={11} /> Proof ({filesOf(inst.files).length})
+                                    </button>
+                                  )}
                                 </span>
                               </li>
                             ))}
                           </ul>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-emerald-600 font-bold whitespace-nowrap">{s.list.length ? money(s.paid) : <Dash />}</td>
+                      <td className="px-4 py-3 text-emerald-600 font-bold whitespace-nowrap">{s.list.length || s.manualTotal ? money(s.paid) : <Dash />}</td>
                       <td className={`px-4 py-3 font-bold whitespace-nowrap ${s.outstanding > 0 ? "text-red-600" : "text-[#0F253B]"}`}>
-                        {s.list.length ? money(s.outstanding) : <Dash />}
+                        {s.list.length || s.manualTotal ? money(s.outstanding) : <Dash />}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         {s.nextDue ? (
@@ -983,8 +1072,9 @@ export default function CouncilTaxBillsBoard({
               {visibleTax.length > 0 && (
                 <tfoot>
                   <tr className="bg-gray-50/50 border-t border-gray-100">
-                    <td colSpan={7} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-gray-400">Total</td>
+                    <td colSpan={8} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-gray-400">Total</td>
                     <td className="px-4 py-3 font-bold text-[#0F253B] whitespace-nowrap">{money(taxTotal)}</td>
+                    <td />
                     <td className="px-4 py-3 font-bold text-emerald-600 whitespace-nowrap">{money(taxPaid)}</td>
                     <td className="px-4 py-3 font-bold text-[#0F253B] whitespace-nowrap">{money(taxOutstanding)}</td>
                     <td colSpan={4} />

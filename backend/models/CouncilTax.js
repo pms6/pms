@@ -4,8 +4,9 @@ import { attachmentSchema } from "../utils/attachments.js";
 // The office's "Council Tax" sheet: one row per property, saying who the
 // council tax account is registered to and what the instalments are.
 //
-//   Sr# | Property | Account Holder Name | Account# | Move in Date | Email |
-//   Details | Instalments (amount, due date, paid on) | Paid | Outstanding
+//   Sr# | Property | Council | Account Holder Name | Account# | Move in Date |
+//   Email | Details | Total | Instalments (amount, due date, paid on, proof) |
+//   Paid | Outstanding
 //
 // The sheet's "Sr#" column is the row number and is not stored; an
 // instalment's Sr# is likewise its place in the list.
@@ -26,6 +27,8 @@ const installmentSchema = new mongoose.Schema({
   amount: { type: Number, default: null, min: 0 },
   dueDate: { type: Date, default: null },
   paidAt: { type: Date, default: null },
+  // Proof of payment for this instalment — the receipt, a bank screenshot.
+  files: { type: [attachmentSchema], default: [] },
 });
 
 const councilTaxSchema = new mongoose.Schema(
@@ -53,6 +56,9 @@ const councilTaxSchema = new mongoose.Schema(
     },
     property: { type: String, trim: true, required: true },
 
+    // The council the account is with (e.g. "Manchester City Council").
+    councilName: { type: String, trim: true, default: "" },
+
     accountHolder: { type: String, trim: true, default: "" },
     // Council account numbers carry letters too (e.g. "6344193X").
     accountNumber: { type: String, trim: true, default: "" },
@@ -62,6 +68,11 @@ const councilTaxSchema = new mongoose.Schema(
     // Multi-line on the sheet: the tenant's name, date of birth, phone, the
     // council's web reference, single person discount — whatever was submitted.
     details: { type: String, trim: true, default: "" },
+
+    // The year's council tax as the bill states it, entered by hand. null =
+    // not entered, in which case the total is the sum of the instalments.
+    // Paid is always the paid instalments; outstanding is total less paid.
+    totalAmount: { type: Number, default: null, min: 0 },
 
     // As many instalments as the council's bill lists, in order.
     installments: { type: [installmentSchema], default: [] },
@@ -94,10 +105,15 @@ councilTaxSchema.index({ organizationId: 1, isDeleted: 1, property: 1 });
 // any other status has none.
 councilTaxSchema.pre("save", function () {
   // With instalments the status is theirs to decide: the row is paid on the
-  // day its last instalment was.
+  // day its last instalment was — and, when a total was entered, only once the
+  // paid instalments cover it.
   if (this.installments.length) {
     const paidDates = this.installments.map((i) => i.paidAt).filter(Boolean);
-    const allPaid = paidDates.length === this.installments.length;
+    const paidSum = this.installments
+      .filter((i) => i.paidAt)
+      .reduce((sum, i) => sum + Number(i.amount || 0), 0);
+    const coversTotal = this.totalAmount === null || this.totalAmount === undefined || paidSum >= this.totalAmount;
+    const allPaid = paidDates.length === this.installments.length && coversTotal;
     this.status = allPaid ? "Paid" : "Pending";
     this.paidAt = allPaid ? new Date(Math.max(...paidDates.map((d) => d.getTime()))) : null;
     return;

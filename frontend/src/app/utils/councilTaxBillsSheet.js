@@ -3,9 +3,9 @@ import { fmtDate } from "./cleaningSheet";
 /* ------------------------------------------------------------------ *
  * The Council Tax and Bills sheets, printed the way the office's PDFs read:
  *
- *   Council Tax   Sr# | Property | Account Holder Name | Account# |
- *                 Move in Date | Email | Details | Instalments | Paid |
- *                 Outstanding | Next Due
+ *   Council Tax   Sr# | Property | Council | Account Holder Name |
+ *                 Account# | Move in Date | Email | Details | Total |
+ *                 Instalments | Paid | Outstanding | Next Due
  *   Bills Record  Sr# | Name of property | Date | Type | Payment name |
  *                 Amount | Status | Bill
  *
@@ -33,14 +33,26 @@ export const installmentsOf = (row) => {
     }));
 };
 
+// A total typed in by hand, or null when none was entered.
+const enteredTotal = (row) => {
+  const v = row?.totalAmount;
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
 // What a row's instalments add up to. An instalment is paid once it has a
 // paidAt; `nextDue` is the earliest due date still unpaid ("" when none).
+// The total is the one entered by hand when there is one, otherwise the sum of
+// the instalments; outstanding is whatever of it is not yet paid.
 export const installmentSummary = (row) => {
   const list = installmentsOf(row);
   const sum = (items) => items.reduce((total, i) => total + Number(i.amount || 0), 0);
   const unpaid = list.filter((i) => !i.paidAt);
-  const total = sum(list);
-  const outstanding = sum(unpaid);
+  const paid = sum(list.filter((i) => i.paidAt));
+  const manualTotal = enteredTotal(row);
+  const total = manualTotal ?? sum(list);
+  const outstanding = Math.max(0, total - paid);
   const nextDue = unpaid
     .map((i) => i.dueDate)
     .filter(Boolean)
@@ -49,8 +61,13 @@ export const installmentSummary = (row) => {
   return {
     list,
     total,
-    paid: total - outstanding,
+    paid,
     outstanding,
+    // Whether the total came from the bill rather than the instalments.
+    manualTotal: manualTotal !== null,
+    // Entered total minus what the instalments list (negative when they list
+    // more than the bill does) — 0 when there is no entered total.
+    unscheduled: manualTotal === null ? 0 : manualTotal - sum(list),
     paidCount: list.length - unpaid.length,
     nextDue: nextDue || "",
   };
@@ -68,11 +85,13 @@ const multiline = (v) => esc(v).replace(/\n/g, "<br>");
 const COUNCIL_TAX_COLUMNS = [
   "Sr#",
   "Property",
+  "Council",
   "Account Holder Name",
   "Account#",
   "Move in Date",
   "Email",
   "Details",
+  "Total",
   "Instalments",
   "Paid",
   "Outstanding",
@@ -85,21 +104,24 @@ const installmentLine = (inst, i) =>
     `${i + 1}. ${moneyOrBlank(inst.amount) || "—"}`,
     inst.dueDate ? `due ${fmtDate(inst.dueDate)}` : "",
     inst.paidAt ? `paid ${fmtDate(inst.paidAt)}` : "unpaid",
+    Array.isArray(inst.files) && inst.files.length ? `proof attached (${inst.files.length})` : "",
   ]
     .filter(Boolean)
     .join(" - ");
 
 const councilTaxCells = (r, i) => {
   const s = installmentSummary(r);
-  const any = s.list.length > 0;
+  const any = s.list.length > 0 || s.manualTotal;
   return [
     i + 1,
     esc(r.property),
+    esc(r.councilName),
     esc(r.accountHolder),
     esc(r.accountNumber),
     esc(fmtDate(r.moveInDate)),
     esc(r.email),
     multiline(r.details),
+    esc(any ? moneyOrBlank(s.total) : ""),
     multiline(s.list.map(installmentLine).join("\n")),
     esc(any ? moneyOrBlank(s.paid) : ""),
     esc(any ? moneyOrBlank(s.outstanding) : ""),
