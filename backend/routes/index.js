@@ -44,6 +44,8 @@ import councilTaxBillsRoutes from "./councilTaxBills.route.js"
 import inventoryReportRoutes from "./inventoryReport.route.js"
 import tenantCaseRoutes from "./tenantCase.route.js"
 import invoiceRoutes from "./invoice.route.js"
+import tenantMessageRoutes from "./tenantMessage.route.js"
+import accessNoticeRoutes from "./accessNotice.route.js"
 
 const router = express.Router();
 
@@ -109,6 +111,13 @@ router.use("/tenant-cases", tenantCaseRoutes);
 
 // Invoices — customised invoices to tenants, landlords and others.
 router.use("/invoices", invoiceRoutes);
+
+// Tenant Chat — the team and a tenant messaging each other in the PMS.
+router.use("/messages", tenantMessageRoutes);
+
+// Access Notices — formal notice to tenants that the property will be
+// entered, kept as a record of having been given.
+router.use("/access-notices", accessNoticeRoutes);
 
 // Cleaning Messages Schedule — the month-by-month sheet of property cleans.
 router.use("/cleaning-schedule", cleaningScheduleRoutes);

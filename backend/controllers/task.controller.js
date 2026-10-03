@@ -6,6 +6,7 @@ import User from "../models/User.js";
 import Property from "../models/Property.js";
 import Notification from "../models/Notification.js";
 import { sendEmail } from "../utils/sendEmail.js";
+import { orgTeamUserIds } from "../utils/orgTeam.js";
 import env from "../config/env.js";
 
 // ---------------------------------------------------------------------------
@@ -15,17 +16,19 @@ import env from "../config/env.js";
 //          may create, assign, reassign, reschedule, edit or delete a task.
 //          Assignment in particular is admin-only: no other role can put work
 //          on somebody.
-// Member = MANAGER / AGENT / FINANCE / OPERATION. They can READ every task in
-//          their own organization and COMMENT on any of them, so the team has
-//          one shared view of the work. What they cannot do is change a task:
-//          only the owner or an actual assignee may post a status update, and
-//          only the owner may assign.
+// Member = MANAGER / AGENT / FINANCE / OPERATION. They see the tasks assigned
+//          to them, plus every task assigned to OPERATION — the one pool the
+//          whole team reads and comments on. What they cannot do is change a
+//          task that is not theirs: only an admin or an actual assignee may
+//          post a status update, and only an admin may assign.
 //
-// The three tiers, in one place:
+// WHO SEES a task (see canView): its assignees, the person who created it and
+// the organization OWNER. Nobody else — including another ADMIN — unless it
+// has an OPERATION assignee and is not marked private, in which case every
+// staff role does. The table below then applies to the people who can see it:
 //
 //   action              ADMIN   assignee   other staff   tenant
 //   ------------------  -----   --------   -----------   ------
-//   see task detail      yes      yes         yes          no
 //   comment              yes      yes         yes          no
 //   status update        yes      yes         no           no
 //   create / assign      yes      no          no           no
@@ -41,6 +44,8 @@ const isStaff = (req) =>
   req.user?.role === "Organization" && STAFF_ROLES.includes(req.user?.organizationRole);
 
 const ADMIN_ROLES = ["OWNER", "ADMIN"];
+
+const AWAITING_RESPONSE = "Awaiting Response";
 
 const isAdmin = (req) =>
   req.user?.role === "Organization" && ADMIN_ROLES.includes(req.user?.organizationRole);
@@ -92,6 +97,22 @@ const normalizeStatus = (status) => (status === "Completed" ? "Done" : status);
 // time falls due on that start date.
 const dueAt = (task) => task.dueDate || task.startDate || null;
 
+// Lists read in the order the work is scheduled: earliest start first, so
+// overdue work leads and upcoming work follows in time order. A task with no
+// date at all has no place on that line and goes to the end, newest first.
+const scheduledAt = (task) => {
+  const at = task.startDate || task.dueDate;
+  return at ? new Date(at).getTime() : null;
+};
+
+const bySchedule = (a, b) => {
+  const ta = scheduledAt(a);
+  const tb = scheduledAt(b);
+  if (ta !== null && tb !== null && ta !== tb) return ta - tb;
+  if ((ta === null) !== (tb === null)) return ta === null ? 1 : -1;
+  return new Date(b.createdAt) - new Date(a.createdAt);
+};
+
 export const effectiveStatus = (task) => {
   const s = normalizeStatus(task.status);
   if (s === "Done" || s === "Cancelled") return s;
@@ -131,11 +152,28 @@ const decorate = (task, req) => {
   const comments = progress.filter((p) => p.kind === "comment");
   const updates = progress.filter((p) => p.kind !== "comment");
   const mine = req ? isAssignedTo(task, req.user._id) : false;
+  const status = effectiveStatus(task);
+  const open = status !== "Done" && status !== "Cancelled";
+  const owner = actionOwnerOf(task);
 
   return {
     ...task,
+    // Each entry says whether THIS viewer may edit it: only a comment, and
+    // only by the person who wrote it.
+    progress: progress.map((p) => ({
+      ...p,
+      canEdit: Boolean(
+        req && p.kind === "comment" && String(p.authorId || "") === String(req.user._id)
+      ),
+    })),
     status: normalizeStatus(task.status),
-    effectiveStatus: effectiveStatus(task),
+    effectiveStatus: status,
+
+    // Whose move it is. `isShared` is what a list uses to decide whether the
+    // owner is worth showing — on a one-person task it is always that person.
+    isShared: (task.assignees || []).length > 1,
+    actionOwner: owner ? { userId: owner.userId, email: owner.email || "" } : null,
+    isMyAction: Boolean(req && open && owner && String(owner.userId) === String(req.user._id)),
     daysUntilDue: daysUntilDue(dueAt(task)),
     progressCount: updates.length,
     commentCount: comments.length,
@@ -147,7 +185,7 @@ const decorate = (task, req) => {
     isMine: mine,
     canComment: req ? canView(task, req) : false,
     canUpdateStatus: req ? canUpdateStatus(task, req) : false,
-    canManage: req ? isAdmin(req) : false,
+    canManage: req ? isAdmin(req) && canView(task, req) : false,
   };
 };
 
@@ -265,24 +303,58 @@ const isAssignedTo = (task, userId) =>
   (task.assignees || []).some((a) => String(a.userId) === String(userId));
 
 /**
+ * Is this task open to the whole team?
+ *
+ * Only work assigned to somebody in OPERATION is — that is the shared pool
+ * every role can read and comment on. A task marked private is never
+ * team-wide, even with an operation assignee.
+ */
+const isTeamWide = (task) =>
+  !task.isPrivate && (task.assignees || []).some((a) => a.role === "OPERATION");
+
+/**
  * May this caller see this task at all?
  *
- * Yes, for anybody on the staff of the organization the task belongs to. The
- * team shares one view of the work: a member can open a colleague's task, read
- * its history and comment on it, whoever it is assigned to.
+ * A task is seen by the people it is assigned to, by whoever created it, and
+ * by the organization owner — and by nobody else. Assign it to agent Hamza and
+ * only Hamza sees it; assign it to an admin or a manager and only that admin
+ * or manager does. Another ADMIN who neither created it nor is on it does not.
  *
- * `task` is still taken so every call site reads as a question about a specific
- * task, and so a narrower rule can be restored here alone if the organization
- * ever wants one. The tenant boundary is NOT this function's job — every
- * handler queries by organizationId and runs denyNonStaff first, so a tenant
- * account never reaches here.
+ * The exception is a task with an OPERATION assignee, which every staff role
+ * can see (see isTeamWide).
  *
- * This used to open a task organization-wide only when it had an OPERATION
- * assignee, which meant work assigned to, say, an agent was invisible to
- * everyone but that agent and the admins — while the UI offered an "All team
- * tasks" tab that promised the opposite.
+ * The tenant boundary is NOT this function's job — every handler queries by
+ * organizationId and runs denyNonStaff first, so a tenant account never
+ * reaches here.
  */
-const canView = (task, req) => isStaff(req);
+const canView = (task, req) => {
+  if (!isStaff(req)) return false;
+  return (
+    req.user.organizationRole === "OWNER" ||
+    String(task.createdBy) === String(req.user._id) ||
+    isAssignedTo(task, req.user._id) ||
+    isTeamWide(task)
+  );
+};
+
+/**
+ * The assignee whose action is required right now. Falls back to the first
+ * assignee for a task saved before the pointer existed, or whose owner has
+ * since been taken off it.
+ */
+const actionOwnerOf = (task) => {
+  const list = task.assignees || [];
+  if (!list.length) return null;
+  const id = String(task.actionOwnerId || "");
+  return list.find((a) => String(a.userId) === id) || list[0];
+};
+
+// The requested owner if they are on the task, otherwise the first assignee.
+const pickActionOwnerId = (assignees, requestedId) => {
+  const list = assignees || [];
+  const match = list.find((a) => String(a.userId) === String(requestedId || ""));
+  return (match || list[0])?.userId || null;
+};
 
 /**
  * May this caller post a STATUS update on this task?
@@ -291,7 +363,8 @@ const canView = (task, req) => isStaff(req);
  * is limited to comments — which is what lets the whole team read and discuss
  * the work without being able to change the state of somebody else's task.
  */
-const canUpdateStatus = (task, req) => isAdmin(req) || isAssignedTo(task, req.user._id);
+const canUpdateStatus = (task, req) =>
+  canView(task, req) && (isAdmin(req) || isAssignedTo(task, req.user._id));
 
 const applyStatusSideEffects = (task, status, userId) => {
   task.status = status;
@@ -566,13 +639,16 @@ const notifyCommentRecipients = async (task, entry) => {
  * This fills that gap without changing the email behaviour anyone already
  * relies on.
  */
-const notifyProgressUpdate = async (task, entry) => {
+const notifyProgressUpdate = async (task, entry, { awaiting = false, skipUserId = null } = {}) => {
   const actor = String(entry.authorEmail || "").trim().toLowerCase();
 
   const recipients = new Map();
   for (const a of task.assignees || []) {
     const email = String(a.email || "").trim().toLowerCase();
     if (!email || email === actor) continue;
+    // Somebody the task was just handed to gets the "your action is required"
+    // notification instead — one alert for one event.
+    if (skipUserId && String(a.userId) === String(skipUserId)) continue;
     const key = a.userId ? String(a.userId) : email;
     recipients.set(key, { userId: a.userId || null, email, role: a.role || "" });
   }
@@ -585,14 +661,48 @@ const notifyProgressUpdate = async (task, entry) => {
     }
   }
 
+  // A task moved to "Awaiting Response" is stuck on somebody's answer, so every
+  // admin hears about it — not only the one who happened to create the task.
+  if (awaiting) {
+    try {
+      // Not broadcast to admins who cannot open the task — with no roles asked
+      // for, this comes back as the organization owner alone.
+      const adminIds = await orgTeamUserIds(
+        task.organizationId,
+        isTeamWide(task) ? ADMIN_ROLES : []
+      );
+      for (const id of adminIds) {
+        if (id === String(entry.authorId || "") || recipients.has(id)) continue;
+        if (skipUserId && id === String(skipUserId)) continue;
+        recipients.set(id, { userId: id, email: "", role: "ADMIN" });
+      }
+    } catch (err) {
+      console.error("Task admin lookup failed:", err.message);
+    }
+  }
+
   if (!recipients.size) return;
 
   const who = entry.authorEmail || "Someone";
   await writeTaskNotifications(task, [...recipients.values()], {
-    type: "task_update",
-    title: `Task moved to ${entry.status}`,
+    type: awaiting ? "task_awaiting_response" : "task_update",
+    title: awaiting ? "Task awaiting response" : `Task moved to ${entry.status}`,
     message: `${who} updated "${task.title}"${entry.remark ? `: ${entry.remark}` : ""}`,
     actorEmail: entry.authorEmail,
+  });
+};
+
+/**
+ * In-app only. Tells the person a shared task has just been passed to that it
+ * is now waiting on them. Nothing is sent when they passed it to themselves.
+ */
+const notifyActionRequired = async (task, owner, { actorId, actorEmail, remark }) => {
+  if (!owner?.userId || String(owner.userId) === String(actorId || "")) return;
+  await writeTaskNotifications(task, [owner], {
+    type: "task_action_required",
+    title: "Your action is required on a task",
+    message: `${actorEmail || "Someone"} passed "${task.title}" to you${remark ? `: ${remark}` : ""}`,
+    actorEmail,
   });
 };
 
@@ -657,10 +767,10 @@ export const getTasks = async (req, res) => {
       ];
     }
 
-    const tasks = await Task.find(filter).sort({ dueDate: 1, createdAt: -1 }).lean();
+    const tasks = await Task.find(filter).lean();
     // Visibility BEFORE decorating: a task that fails canView must not leak
     // through decorate's flags, counts or last-touched preview.
-    const visible = tasks.filter((t) => canView(t, req));
+    const visible = tasks.filter((t) => canView(t, req)).sort(bySchedule);
     // Not `.map(decorate)` — map would pass the array index as the viewer.
     let data = visible.map((t) => decorate(t, req));
 
@@ -745,12 +855,10 @@ export const getMyTasks = async (req, res) => {
       organizationId: req.user.organizationId,
       "assignees.userId": req.user._id,
       isDeleted: false,
-    })
-      .sort({ dueDate: 1, createdAt: -1 })
-      .lean();
+    }).lean();
 
     const data = await withUnreadNotifications(
-      tasks.map((t) => decorate(t, req)),
+      tasks.sort(bySchedule).map((t) => decorate(t, req)),
       req
     );
 
@@ -786,11 +894,14 @@ export const getTaskStats = async (req, res) => {
       isDeleted: false,
     }).lean();
 
-    const decorated = tasks.map((t) => decorate(t, req));
+    // A private task the caller cannot open must not be counted for them either.
+    const decorated = tasks.filter((t) => canView(t, req)).map((t) => decorate(t, req));
 
     const byStatus = {
       "Not Started": 0,
       "In Progress": 0,
+      "Action Required": 0,
+      "Awaiting Response": 0,
       Done: 0,
       Cancelled: 0,
       Overdue: 0,
@@ -812,6 +923,8 @@ export const getTaskStats = async (req, res) => {
             total: 0,
             "Not Started": 0,
             "In Progress": 0,
+            "Action Required": 0,
+            "Awaiting Response": 0,
             Done: 0,
             Cancelled: 0,
             Overdue: 0,
@@ -920,6 +1033,8 @@ export const createTask = async (req, res) => {
       attachments,
       adminRemarks,
       propertyId,
+      isPrivate,
+      actionOwnerId,
     } = req.body;
 
     if (!title?.trim()) {
@@ -955,6 +1070,8 @@ export const createTask = async (req, res) => {
       propertyId: property.propertyId,
       property: property.property,
       assignees: resolved,
+      actionOwnerId: pickActionOwnerId(resolved, actionOwnerId),
+      isPrivate: Boolean(isPrivate),
       priority: TASK_PRIORITIES.includes(priority) ? priority : "Medium",
       status: normalized,
       startDate: start,
@@ -973,6 +1090,14 @@ export const createTask = async (req, res) => {
       assignedByEmail: req.user.email || "",
       isNew: true,
     });
+
+    if (normalized === AWAITING_RESPONSE) {
+      await notifyProgressUpdate(
+        task,
+        { status: normalized, remark: "", authorId: req.user._id, authorEmail: req.user.email || "" },
+        { awaiting: true }
+      );
+    }
 
     return res.status(201).json({
       success: true,
@@ -1001,7 +1126,9 @@ export const updateTask = async (req, res) => {
       organizationId: req.user.organizationId,
       isDeleted: false,
     });
-    if (!task) return res.status(404).json({ success: false, message: "Task not found." });
+    if (!task || !canView(task, req)) {
+      return res.status(404).json({ success: false, message: "Task not found." });
+    }
 
     const {
       title,
@@ -1014,7 +1141,11 @@ export const updateTask = async (req, res) => {
       attachments,
       adminRemarks,
       propertyId,
+      isPrivate,
+      actionOwnerId,
     } = req.body;
+
+    const ownerBefore = String(actionOwnerOf(task)?.userId || "");
 
     if (propertyId !== undefined) {
       const property = await resolveProperty(propertyId, req.user.organizationId);
@@ -1052,6 +1183,16 @@ export const updateTask = async (req, res) => {
       task.assignees = resolved;
     }
 
+    // Keep the action owner on the task: the one the admin picked, or — if the
+    // person holding it was just unassigned — whoever is now first.
+    if (assignees !== undefined || actionOwnerId !== undefined) {
+      task.actionOwnerId = pickActionOwnerId(
+        task.assignees,
+        actionOwnerId !== undefined ? actionOwnerId : task.actionOwnerId
+      );
+    }
+    if (isPrivate !== undefined) task.isPrivate = Boolean(isPrivate);
+
     if (priority !== undefined && TASK_PRIORITIES.includes(priority)) task.priority = priority;
     if (adminRemarks !== undefined) task.adminRemarks = adminRemarks.trim();
     if (startDate !== undefined) task.startDate = toDateOrNull(startDate);
@@ -1065,6 +1206,8 @@ export const updateTask = async (req, res) => {
     }
 
     const normalized = normalizeIncomingStatus(status);
+    const awaiting =
+      normalized === AWAITING_RESPONSE && normalizeStatus(task.status) !== AWAITING_RESPONSE;
     if (normalized) {
       applyStatusSideEffects(task, normalized, req.user._id);
     }
@@ -1079,6 +1222,31 @@ export const updateTask = async (req, res) => {
       assignedByEmail: req.user.email || "",
       isNew: false,
     });
+
+    // The admin moved the action to somebody else from the edit form. A person
+    // who was only just added has already been told by the assignment alert.
+    const ownerNow = actionOwnerOf(task);
+    if (
+      ownerNow &&
+      task.assignees.length > 1 &&
+      String(ownerNow.userId) !== ownerBefore &&
+      !newlyAssigned.some((a) => String(a.userId) === String(ownerNow.userId))
+    ) {
+      await notifyActionRequired(task, ownerNow, {
+        actorId: req.user._id,
+        actorEmail: req.user.email || "",
+        remark: "",
+      });
+    }
+
+    // The edit form can move the status too, without writing a progress entry.
+    if (awaiting) {
+      await notifyProgressUpdate(
+        task,
+        { status: normalized, remark: "", authorId: req.user._id, authorEmail: req.user.email || "" },
+        { awaiting }
+      );
+    }
 
     return res.status(200).json({
       success: true,
@@ -1107,7 +1275,9 @@ export const rescheduleTask = async (req, res) => {
       organizationId: req.user.organizationId,
       isDeleted: false,
     });
-    if (!task) return res.status(404).json({ success: false, message: "Task not found." });
+    if (!task || !canView(task, req)) {
+      return res.status(404).json({ success: false, message: "Task not found." });
+    }
 
     const { startDate, dueDate, remark } = req.body;
 
@@ -1168,13 +1338,20 @@ export const deleteTask = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid task id." });
     }
 
-    const task = await Task.findOneAndUpdate(
-      { _id: req.params.id, organizationId: req.user.organizationId, isDeleted: false },
-      { $set: { isDeleted: true, deletedAt: new Date() } },
-      { new: true }
-    );
+    const task = await Task.findOne({
+      _id: req.params.id,
+      organizationId: req.user.organizationId,
+      isDeleted: false,
+    });
 
-    if (!task) return res.status(404).json({ success: false, message: "Task not found." });
+    // An admin cannot delete a private task they are not allowed to see.
+    if (!task || !canView(task, req)) {
+      return res.status(404).json({ success: false, message: "Task not found." });
+    }
+
+    task.isDeleted = true;
+    task.deletedAt = new Date();
+    await task.save();
 
     return res.status(200).json({ success: true, message: "Task deleted." });
   } catch (error) {
@@ -1214,7 +1391,7 @@ export const addTaskProgress = async (req, res) => {
       return res.status(404).json({ success: false, message: "Task not found." });
     }
 
-    const { status, remark, attachments, isReport } = req.body;
+    const { status, remark, attachments, isReport, handTo } = req.body;
 
     // Trust the caller's rights, not the flag they sent: anyone who cannot post
     // a status update is writing a comment, whatever `kind` says.
@@ -1237,9 +1414,22 @@ export const addTaskProgress = async (req, res) => {
       return res.status(400).json({ success: false, message: "A valid status is required." });
     }
 
+    // Hand-over: the author has done their part and passes the task to another
+    // assignee. Only an update can do it, and only to somebody on the task.
+    const ownerBefore = actionOwnerOf(task);
+    const handedTo =
+      !isComment && handTo
+        ? (task.assignees || []).find(
+            (a) =>
+              String(a.userId) === String(handTo) &&
+              String(a.userId) !== String(ownerBefore?.userId || "")
+          ) || null
+        : null;
+
     const entry = {
       kind: isComment ? "comment" : "update",
       status: normalized,
+      handedToEmail: handedTo?.email || "",
       remark: remark?.trim() || "",
       attachments: sanitizeAttachments(attachments, req.user),
       // A comment is never a formal report — that is a statement about the work
@@ -1252,7 +1442,12 @@ export const addTaskProgress = async (req, res) => {
     };
 
     task.progress.push(entry);
+    // Only the move ONTO the status alerts the admins — a second note posted
+    // while it is still waiting should not ping them all again.
+    const awaiting =
+      normalized === AWAITING_RESPONSE && normalizeStatus(task.status) !== AWAITING_RESPONSE;
     if (!isComment) applyStatusSideEffects(task, normalized, req.user._id);
+    if (handedTo) task.actionOwnerId = handedTo.userId;
 
     await task.save();
 
@@ -1260,7 +1455,16 @@ export const addTaskProgress = async (req, res) => {
     // about. Awaited so a send is at least attempted before the response, but
     // it swallows its own failures: the comment is stored either way.
     if (isComment) await notifyCommentRecipients(task, entry);
-    else await notifyProgressUpdate(task, entry);
+    else {
+      await notifyProgressUpdate(task, entry, { awaiting, skipUserId: handedTo?.userId });
+      if (handedTo) {
+        await notifyActionRequired(task, handedTo, {
+          actorId: req.user._id,
+          actorEmail: req.user.email || "",
+          remark: entry.remark,
+        });
+      }
+    }
 
     return res.status(201).json({
       success: true,
@@ -1269,6 +1473,63 @@ export const addTaskProgress = async (req, res) => {
     });
   } catch (error) {
     console.error("Add Task Progress Error:", error);
+    return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// ===========================================================================
+// Edit the wording of a comment. Only the person who wrote it may — not an
+// admin, not another assignee — and only a comment: a status update is the
+// record of how the work moved and stays as written.
+//
+// @route PATCH /api/v1/tasks/:id/progress/:entryId
+// ===========================================================================
+export const editTaskComment = async (req, res) => {
+  try {
+    if (denyNonStaff(req, res)) return;
+    if (
+      !mongoose.isValidObjectId(req.params.id) ||
+      !mongoose.isValidObjectId(req.params.entryId)
+    ) {
+      return res.status(400).json({ success: false, message: "Invalid id." });
+    }
+
+    const task = await Task.findOne({
+      _id: req.params.id,
+      organizationId: req.user.organizationId,
+      isDeleted: false,
+    });
+    if (!task || !canView(task, req)) {
+      return res.status(404).json({ success: false, message: "Task not found." });
+    }
+
+    const entry = task.progress.id(req.params.entryId);
+    if (!entry || entry.kind !== "comment") {
+      return res.status(404).json({ success: false, message: "Comment not found." });
+    }
+    if (String(entry.authorId || "") !== String(req.user._id)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the person who wrote a comment can edit it.",
+      });
+    }
+
+    const remark = String(req.body?.remark ?? "").trim();
+    if (!remark && !entry.attachments?.length) {
+      return res.status(400).json({ success: false, message: "A comment cannot be empty." });
+    }
+
+    entry.remark = remark;
+    entry.editedAt = new Date();
+    await task.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Comment updated.",
+      data: decorate(task.toObject(), req),
+    });
+  } catch (error) {
+    console.error("Edit Task Comment Error:", error);
     return res.status(400).json({ success: false, message: error.message });
   }
 };

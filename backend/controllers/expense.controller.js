@@ -41,6 +41,18 @@ const yearRange = (year) => ({
   $lt: new Date(Date.UTC(year + 1, 0, 1)),
 });
 
+// User text is matched literally — an unescaped "(" or "+" in a supplier name
+// would otherwise be read as regex syntax and either throw or match too much.
+const escapeRegex = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// "Search by supplier name" — a case-insensitive contains-match on the
+// supplier. Shared by the list and the monthly sheet so the totals always
+// describe the same entries the table shows.
+const supplierFilter = (supplier) => {
+  const needle = String(supplier || "").trim();
+  return needle ? { supplier: { $regex: escapeRegex(needle), $options: "i" } } : {};
+};
+
 // Resolve and denormalise the property name so the sheet needn't populate.
 const attachProperty = async (payload, organizationId) => {
   if (payload.propertyId) {
@@ -67,7 +79,7 @@ export const getExpenses = async (req, res) => {
       return res.status(401).json({ success: false, message: "Organization ID required" });
     }
 
-    const { year, month, propertyId, category, search } = req.query;
+    const { year, month, propertyId, category, search, supplier } = req.query;
 
     const filter = { organizationId, isDeleted: false };
 
@@ -94,11 +106,13 @@ export const getExpenses = async (req, res) => {
 
     if (propertyId) filter.propertyId = propertyId;
     if (category) filter.category = category;
+    Object.assign(filter, supplierFilter(supplier));
     if (search) {
+      const needle = escapeRegex(search);
       filter.$or = [
-        { description: { $regex: search, $options: "i" } },
-        { supplier: { $regex: search, $options: "i" } },
-        { reference: { $regex: search, $options: "i" } },
+        { description: { $regex: needle, $options: "i" } },
+        { supplier: { $regex: needle, $options: "i" } },
+        { reference: { $regex: needle, $options: "i" } },
       ];
     }
 
@@ -143,6 +157,7 @@ export const getMonthlyExpenses = async (req, res) => {
     const filter = { organizationId, isDeleted: false, date: yearRange(year) };
     if (req.query.propertyId) filter.propertyId = req.query.propertyId;
     if (req.query.category) filter.category = req.query.category;
+    Object.assign(filter, supplierFilter(req.query.supplier));
 
     const expenses = await Expense.find(filter).select("date amount category").lean();
 

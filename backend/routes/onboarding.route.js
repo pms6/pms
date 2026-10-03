@@ -20,27 +20,32 @@ import {
   deleteMyOnboardingDocument,
   cancelOnboarding,
 } from "../controllers/onboarding.controller.js";
-import { protect } from "../middleware/auth.js";
+import { protect, staffOnly } from "../middleware/auth.js";
 
 const router = express.Router();
 
 // Apply protect middleware to all routes
 router.use(protect);
 
+// The tenant's own onboarding, and the documents they upload to it (authorized
+// by email, not org membership). These fixed paths MUST be declared before
+// "/:id" so they aren't captured by it.
+router.get("/me", getMyOnboarding);
+router.post("/me/:id/documents", addMyOnboardingDocument);
+router.delete("/me/:id/documents/:docId", deleteMyOnboardingDocument);
+
+// Everything below works on every applicant's onboarding file — ID documents,
+// references, contact details — so it is staff-only. `protect` resolves an
+// organizationId for a TENANT account too.
+router.use(staffOnly);
+
 // Onboarding statistics (summary cards)
 router.get("/stats", getOnboardingStats);
 
-// Website requests inbox + accept flow (admin), and the tenant's own view.
-// These fixed paths MUST be declared before "/:id" so they aren't captured by it.
+// Website requests inbox + accept flow (admin).
 router.get("/requests", getOnboardingRequests);
-router.get("/me", getMyOnboarding);
 router.post("/accept-request", acceptOnboardingRequest);
 router.post("/decline-request", declineOnboardingRequest);
-
-// Tenant-owned document actions on their own onboarding (authorized by email,
-// not org membership). 3-segment paths, so they don't collide with "/:id".
-router.post("/me/:id/documents", addMyOnboardingDocument);
-router.delete("/me/:id/documents/:docId", deleteMyOnboardingDocument);
 
 // CRUD operations
 router.post("/", createOnboarding);

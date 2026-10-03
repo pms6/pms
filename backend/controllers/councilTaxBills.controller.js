@@ -7,6 +7,7 @@
 import CouncilTax from "../models/CouncilTax.js";
 import BillRecord from "../models/BillRecord.js";
 import { cleanAttachments } from "../utils/attachments.js";
+import { sendCouncilTaxReminders } from "../cranjob/councilTaxReminder.js";
 
 const validationMessage = (error) =>
   Object.values(error.errors).map((e) => e.message).join(", ");
@@ -199,3 +200,29 @@ export const bills = buildHandlers({
   noun: "Bill record",
   sort: { date: -1, property: 1, createdAt: -1 },
 });
+
+// @desc    Send this organization's council tax "payment due" reminders now,
+//          rather than waiting for the 8am run. Same once-per-due-date rule,
+//          so pressing it twice sends nothing new the second time.
+// @route   POST /api/v1/council-tax-bills/council-tax/send-reminders
+export const sendCouncilTaxRemindersNow = async (req, res) => {
+  try {
+    const result = await sendCouncilTaxReminders({ organizationId: req.user.organizationId });
+    if (result.errors.length && !result.sentCount) {
+      return res.status(502).json({
+        success: false,
+        message: `Reminders could not be sent: ${result.errors[0].error}`,
+      });
+    }
+    return res.status(200).json({
+      success: true,
+      message: result.instalments
+        ? `Reminder sent for ${result.instalments} instalment${result.instalments === 1 ? "" : "s"}.`
+        : "Nothing new to remind about — every due instalment has already been reminded.",
+      data: result,
+    });
+  } catch (error) {
+    console.error("Send Council Tax Reminders Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to send reminders." });
+  }
+};

@@ -4,11 +4,12 @@ import { useState } from "react";
 import {
   X, Paperclip, Send, Loader2, CalendarClock, CalendarDays, UserRound,
   MessageSquare, FileCheck2, History, Lock, ListChecks, Building2,
+  RotateCcw, ArrowRight, Hand, Pencil,
 } from "lucide-react";
 import api from "@/app/api/api";
 import { uploadAnyFileToCloudinary } from "@/app/utils/uploadToCloudinary";
 import {
-  PRIORITY_TONE, STATUS_TONE, SETTABLE_STATUSES,
+  PRIORITY_TONE, STATUS_TONE, SETTABLE_STATUSES, isClosed,
   fmtDate, fmtDateTime, fmtSchedule, displayName, dueLabel, FIELD, LABEL,
 } from "./tasks";
 import { guardModalClose } from "@/app/Shared/modalGuard";
@@ -81,6 +82,31 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
   );
   const [remark, setRemark] = useState("");
   const [isReport, setIsReport] = useState(false);
+  // Shared task: the assignee to pass the action to with this update. "" keeps
+  // it where it is.
+  const [handTo, setHandTo] = useState("");
+  const [reopening, setReopening] = useState(false);
+  // The comment being corrected by its author: { id, text } | null.
+  const [editing, setEditing] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    setSavingEdit(true);
+    setEditError("");
+    try {
+      const { data } = await api.patch(`/tasks/${task._id}/progress/${editing.id}`, {
+        remark: editing.text.trim(),
+      });
+      setEditing(null);
+      onChanged?.(data.data);
+    } catch (err) {
+      setEditError(err.response?.data?.message || err.message || "Failed to update the comment.");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
   const [files, setFiles] = useState([]);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -95,6 +121,32 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
 
   // Newest first, so the most recent entry is what you read first.
   const history = [...(task.progress || [])].reverse();
+
+  const closed = isClosed(task);
+  const shared = (task.assignees || []).length > 1;
+  const ownerId = String(task.actionOwner?.userId || "");
+  // Everyone the action could be passed to — the assignees other than whoever
+  // holds it now.
+  const handOverTargets = (task.assignees || []).filter((a) => String(a.userId) !== ownerId);
+
+  // A closed task stays readable and commentable; this puts it back to work.
+  const reopen = async () => {
+    setReopening(true);
+    setError("");
+    try {
+      const { data } = await api.post(`/tasks/${task._id}/progress`, {
+        kind: "update",
+        status: "In Progress",
+        remark: "Task reopened.",
+      });
+      setStatus("In Progress");
+      onChanged?.(data.data);
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || "Failed to reopen the task.");
+    } finally {
+      setReopening(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -129,7 +181,7 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
         kind: commenting ? "comment" : "update",
         // Sent only on an update — a comment must not carry a status, or it
         // would look like it moved the task.
-        ...(commenting ? {} : { status, isReport }),
+        ...(commenting ? {} : { status, isReport, ...(handTo ? { handTo } : {}) }),
         remark: remark.trim(),
         attachments,
       });
@@ -137,7 +189,11 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
       setRemark("");
       setFiles([]);
       setIsReport(false);
+      setHandTo("");
       onChanged?.(data.data);
+      // Posting is the last thing done here — close the panel so the person
+      // lands back on the list, which onChanged has just reloaded.
+      onClose?.();
     } catch (err) {
       // An upload failure throws a plain Error with the reason (too large,
       // empty file, preset rejected it) and no `response` — without err.message
@@ -171,10 +227,33 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
                 <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${STATUS_TONE[task.effectiveStatus] || ""}`}>
                   {task.effectiveStatus}
                 </span>
-                {task.effectiveStatus !== "Completed" && (
+                {!closed && (
                   <span className="text-[11px] font-bold text-gray-400">{dueLabel(task)}</span>
                 )}
+                {task.isPrivate && (
+                  <span
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-[#0F253B] text-white flex items-center gap-1"
+                    title="Only the people assigned, the creator and the organization owner can see this task"
+                  >
+                    <Lock size={11} /> Private
+                  </span>
+                )}
               </div>
+              {/* Whose move it is — the point of a shared task. */}
+              {shared && !closed && task.actionOwner && (
+                <p
+                  className={`mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold ${
+                    task.isMyAction
+                      ? "bg-[#F47C3C] text-white"
+                      : "bg-orange-50 text-[#0F253B] border border-orange-100"
+                  }`}
+                >
+                  <Hand size={13} />
+                  {task.isMyAction
+                    ? "Your action is required"
+                    : `Action required from ${displayName(task.actionOwner.email)}`}
+                </p>
+              )}
               <h2 className="text-xl font-bold text-[#0F253B] mt-3 break-words">{task.title}</h2>
               {(task.property || task.startDate || task.dueDate) && (
                 <p className="mt-1 text-xs font-bold text-gray-500 flex items-center gap-1.5 flex-wrap">
@@ -243,6 +322,28 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
                 Task attachments
               </p>
               <AttachmentList items={task.attachments} onOpen={openLightbox} />
+            </div>
+          )}
+
+          {/* A closed task keeps its whole history and can still be commented
+              on below; reopening is for when more work is actually needed. */}
+          {closed && (
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 border border-gray-100 rounded-2xl p-4">
+              <p className="text-xs font-medium text-gray-500">
+                This task is {task.effectiveStatus === "Cancelled" ? "cancelled" : "completed"}. Its
+                history stays here, and anyone on the team can still comment.
+              </p>
+              {mayUpdate && (
+                <button
+                  type="button"
+                  onClick={reopen}
+                  disabled={reopening}
+                  className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 hover:bg-gray-100 text-[#0F253B] font-bold text-xs rounded-xl transition-all disabled:opacity-50"
+                >
+                  {reopening ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} className="text-[#F47C3C]" />}
+                  Reopen task
+                </button>
+              )}
             </div>
           )}
 
@@ -315,6 +416,26 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
                   </div>
                 </div>
               </div>
+
+              {/* Hand-over: done with your part, pass the same task on. */}
+              {!commenting && shared && handOverTargets.length > 0 && (
+                <div>
+                  <label className={LABEL}>Pass the action to</label>
+                  <select className={FIELD} value={handTo} onChange={(e) => setHandTo(e.target.value)}>
+                    <option value="">
+                      Keep it with {displayName(task.actionOwner?.email)}
+                    </option>
+                    {handOverTargets.map((a) => (
+                      <option key={String(a.userId)} value={String(a.userId)}>
+                        {displayName(a.email)} — {a.email}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] font-medium text-gray-400 mt-1.5">
+                    The person you pick is notified that their action is now required.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className={LABEL}>{commenting ? "Comment" : "Remark"}</label>
@@ -404,11 +525,49 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
                           Report
                         </span>
                       )}
+                      {entry.handedToEmail && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-orange-50 text-[#F47C3C] flex items-center gap-1">
+                          <ArrowRight size={10} /> Passed to {displayName(entry.handedToEmail)}
+                        </span>
+                      )}
                     </div>
-                    {entry.remark && (
-                      <p className="text-sm font-medium text-gray-600 mt-1 whitespace-pre-line">
-                        {entry.remark}
-                      </p>
+                    {editing?.id === entry._id ? (
+                      <div className="mt-2 space-y-2">
+                        <textarea
+                          rows={3}
+                          className={FIELD}
+                          value={editing.text}
+                          onChange={(e) => setEditing({ id: entry._id, text: e.target.value })}
+                          autoFocus
+                        />
+                        {editError && (
+                          <p className="text-xs font-bold text-red-600">{editError}</p>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={saveEdit}
+                            disabled={savingEdit || (!editing.text.trim() && !entry.attachments?.length)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-xs rounded-lg transition-all disabled:opacity-50"
+                          >
+                            {savingEdit && <Loader2 size={12} className="animate-spin" />}
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setEditing(null); setEditError(""); }}
+                            className="px-3 py-1.5 text-xs font-bold text-gray-500 hover:text-[#0F253B]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      entry.remark && (
+                        <p className="text-sm font-medium text-gray-600 mt-1 whitespace-pre-line">
+                          {entry.remark}
+                        </p>
+                      )
                     )}
                     {entry.attachments?.length > 0 && (
                       <div className="mt-2">
@@ -420,6 +579,17 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
                       {entry.authorRole ? ` · ${entry.authorRole}` : ""}
                       {" · "}
                       {fmtDateTime(entry.createdAt)}
+                      {entry.editedAt ? " · edited" : ""}
+                      {/* Only the author of a comment gets this. */}
+                      {entry.canEdit && editing?.id !== entry._id && (
+                        <button
+                          type="button"
+                          onClick={() => { setEditing({ id: entry._id, text: entry.remark || "" }); setEditError(""); }}
+                          className="ml-2 inline-flex items-center gap-1 font-bold text-[#F47C3C] hover:underline"
+                        >
+                          <Pencil size={10} /> Edit
+                        </button>
+                      )}
                     </p>
                   </li>
                   );

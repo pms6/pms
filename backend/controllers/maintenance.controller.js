@@ -3,7 +3,49 @@ import Maintenance, {
   MAINTENANCE_STATUSES,
   MAINTENANCE_RESOLVED_STATUSES,
 } from "../models/Maintenance.js";
+import Notification from "../models/Notification.js";
 import { resolveTenantProperty } from "../utils/tenantProperty.js";
+import { orgTeamUserIds } from "../utils/orgTeam.js";
+
+const AWAITING_RESPONSE = "awaiting_response";
+
+// An entry moved to "awaiting response" is stuck on somebody's answer, so every
+// admin gets an in-app notification — except the one who made the change.
+// Never throws: the entry is already saved by the time this runs.
+const notifyAwaitingResponse = async (request, actor) => {
+  try {
+    const adminIds = await orgTeamUserIds(request.organizationId, ["OWNER", "ADMIN"]);
+    const docs = adminIds
+      .filter((id) => id !== String(actor?._id))
+      .map((userId) => ({
+        organizationId: request.organizationId,
+        userId,
+        type: "maintenance_awaiting_response",
+        title: "Maintenance awaiting response",
+        message: [request.ref, request.title, request.property].filter(Boolean).join(" — "),
+        relatedType: "Maintenance",
+        relatedId: request._id,
+        actorEmail: actor?.email || "",
+      }));
+    if (docs.length) await Notification.insertMany(docs, { ordered: false });
+  } catch (err) {
+    console.error("Maintenance notification failed:", err.message);
+  }
+};
+
+// One entry as a plain object, with each comment saying whether THIS viewer
+// may edit it — only the person who wrote it can.
+const withCommentFlags = (request, req) => {
+  const row = typeof request.toObject === "function" ? request.toObject() : request;
+  if (!Array.isArray(row.comments)) return row;
+  return {
+    ...row,
+    comments: row.comments.map((c) => ({
+      ...c,
+      canEdit: String(c.authorId || "") === String(req.user._id),
+    })),
+  };
+};
 
 /**
  * Whitelist of fields a client may set on create/update.
@@ -144,12 +186,17 @@ export const getMaintenance = async (req, res) => {
     }
 
     let query = Maintenance.find(filter).sort({ date: -1, createdAt: -1 });
+    // The discussion is the office talking among itself — never sent to a tenant.
+    if (req.user.role === "Tenant") query = query.select("-comments");
     const max = Number(limit);
     if (Number.isFinite(max) && max > 0) query = query.limit(max);
 
     const requests = await query;
 
-    return res.status(200).json({ success: true, data: requests });
+    return res.status(200).json({
+      success: true,
+      data: requests.map((r) => withCommentFlags(r, req)),
+    });
   } catch (error) {
     console.error("Get Maintenance Error:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch maintenance requests." });
@@ -212,6 +259,17 @@ export const createMaintenance = async (req, res) => {
     // For a tenant, stamp the request with THEIR property/room and name so the
     // operator sees who reported it and where — the tenant can't set these.
     if (req.user.role === "Tenant") {
+      // A tenant's report must come with evidence — at least one photo or
+      // video of the problem. The portal enforces this too; this stops a
+      // report sent straight to the API from skipping it.
+      const evidence = (payload.media || []).filter((m) => m.type === "image" || m.type === "video");
+      if (evidence.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Please attach at least one photo or video of the problem.",
+        });
+      }
+
       const { tenancy, property } = await resolveTenantProperty(req.user);
       if (property?._id) payload.propertyId = property._id;
       payload.property = property?.name || tenancy?.property || payload.property || "";
@@ -242,6 +300,8 @@ export const createMaintenance = async (req, res) => {
       createdBy,
     });
 
+    if (request.status === AWAITING_RESPONSE) await notifyAwaitingResponse(request, req.user);
+
     return res.status(201).json({
       success: true,
       message: "Maintenance request created.",
@@ -270,12 +330,14 @@ export const getMaintenanceById = async (req, res) => {
     };
     if (req.user.role === "Tenant") filter.createdBy = req.user._id;
 
-    const request = await Maintenance.findOne(filter);
+    const request = await Maintenance.findOne(filter).select(
+      req.user.role === "Tenant" ? "-comments" : ""
+    );
     if (!request) {
       return res.status(404).json({ success: false, message: "Maintenance request not found." });
     }
 
-    return res.status(200).json({ success: true, data: request });
+    return res.status(200).json({ success: true, data: withCommentFlags(request, req) });
   } catch (error) {
     console.error("Get Maintenance By Id Error:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch maintenance request." });
@@ -303,8 +365,13 @@ export const updateMaintenance = async (req, res) => {
       return res.status(400).json({ success: false, message: "Issue is required." });
     }
 
+    const awaiting =
+      payload.status === AWAITING_RESPONSE && request.status !== AWAITING_RESPONSE;
+
     Object.assign(request, payload);
     const updated = await request.save();
+
+    if (awaiting) await notifyAwaitingResponse(updated, req.user);
 
     return res.status(200).json({ success: true, data: updated });
   } catch (error) {
@@ -330,20 +397,133 @@ export const updateMaintenanceStatus = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid status." });
     }
 
-    const request = await Maintenance.findOneAndUpdate(
+    // The document as it was BEFORE the change, so a move onto "awaiting
+    // response" can be told apart from a re-save of the same status.
+    const previous = await Maintenance.findOneAndUpdate(
       { _id: req.params.id, organizationId, isDeleted: false },
       { status },
-      { new: true }
+      { new: false }
     );
 
-    if (!request) {
+    if (!previous) {
       return res.status(404).json({ success: false, message: "Maintenance request not found." });
     }
+
+    const request = previous.toObject();
+    const awaiting = status === AWAITING_RESPONSE && request.status !== AWAITING_RESPONSE;
+    request.status = status;
+
+    if (awaiting) await notifyAwaitingResponse(request, req.user);
 
     return res.status(200).json({ success: true, data: request });
   } catch (error) {
     console.error("Update Maintenance Status Error:", error);
     return res.status(500).json({ success: false, message: "Failed to update status." });
+  }
+};
+
+// @desc    Add a comment to an entry's discussion (staff only — see the route)
+// @route   POST /api/v1/maintenance/:id/comments
+export const addMaintenanceComment = async (req, res) => {
+  try {
+    const organizationId = req.user.organizationId;
+    const text = String(req.body?.text ?? "").trim().slice(0, 5000);
+
+    if (!text) {
+      return res.status(400).json({ success: false, message: "Write a comment first." });
+    }
+
+    const request = await Maintenance.findOne({
+      _id: req.params.id,
+      organizationId,
+      isDeleted: false,
+    });
+    if (!request) {
+      return res.status(404).json({ success: false, message: "Maintenance request not found." });
+    }
+
+    // Everyone already in the conversation, read before this comment is added.
+    const participants = request.comments.map((c) => String(c.authorId || "")).filter(Boolean);
+
+    request.comments.push({
+      text,
+      authorId: req.user._id,
+      authorEmail: req.user.email || "",
+      authorRole: req.user.organizationRole || "",
+      createdAt: new Date(),
+    });
+    await request.save();
+
+    // In-app notification to the owner, admins and managers, plus anyone who
+    // has already written on this entry — minus the author. Failing to write
+    // it must not fail the comment, which is saved by now.
+    try {
+      const team = await orgTeamUserIds(organizationId);
+      const docs = [...new Set([...team, ...participants])]
+        .filter((id) => id !== String(req.user._id))
+        .map((userId) => ({
+          organizationId,
+          userId,
+          type: "maintenance_comment",
+          title: "New comment on a maintenance entry",
+          message: `${[request.ref, request.title].filter(Boolean).join(" — ")}: ${text}`.slice(0, 200),
+          relatedType: "Maintenance",
+          relatedId: request._id,
+          actorEmail: req.user.email || "",
+        }));
+      if (docs.length) await Notification.insertMany(docs, { ordered: false });
+    } catch (err) {
+      console.error("Maintenance comment notification failed:", err.message);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Comment added.",
+      data: withCommentFlags(request, req),
+    });
+  } catch (error) {
+    console.error("Add Maintenance Comment Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to add the comment." });
+  }
+};
+
+// @desc    Edit a comment — only by the person who wrote it
+// @route   PATCH /api/v1/maintenance/:id/comments/:commentId
+export const editMaintenanceComment = async (req, res) => {
+  try {
+    const text = String(req.body?.text ?? "").trim().slice(0, 5000);
+    if (!text) {
+      return res.status(400).json({ success: false, message: "A comment cannot be empty." });
+    }
+
+    const request = await Maintenance.findOne({
+      _id: req.params.id,
+      organizationId: req.user.organizationId,
+      isDeleted: false,
+    });
+    const comment = request?.comments.id(req.params.commentId);
+    if (!comment) {
+      return res.status(404).json({ success: false, message: "Comment not found." });
+    }
+    if (String(comment.authorId || "") !== String(req.user._id)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the person who wrote a comment can edit it.",
+      });
+    }
+
+    comment.text = text;
+    comment.editedAt = new Date();
+    await request.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Comment updated.",
+      data: withCommentFlags(request, req),
+    });
+  } catch (error) {
+    console.error("Edit Maintenance Comment Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update the comment." });
   }
 };
 

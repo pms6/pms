@@ -1,6 +1,6 @@
 // routes/councilTaxBills.route.js
 import express from "express";
-import { councilTax, bills } from "../controllers/councilTaxBills.controller.js";
+import { councilTax, bills, sendCouncilTaxRemindersNow } from "../controllers/councilTaxBills.controller.js";
 import { protect, staffOnly } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -11,6 +11,8 @@ router.use(protect, staffOnly);
 
 // Council tax sheet
 router.get("/council-tax", councilTax.list);
+// "Send reminders now" — fixed path, declared before "/council-tax/:id".
+router.post("/council-tax/send-reminders", sendCouncilTaxRemindersNow);
 router.post("/council-tax", councilTax.create);
 router.put("/council-tax/:id", councilTax.update);
 router.delete("/council-tax/:id", councilTax.remove);

@@ -21,6 +21,8 @@ import {
   Film,
   ImageIcon,
   FileText,
+  MessageSquare,
+  Send,
 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import api from "@/app/api/api";
@@ -37,10 +39,11 @@ import { guardModalClose } from "@/app/Shared/modalGuard";
  * ------------------------------------------------------------------ */
 
 // The statuses an operator can pick. "open" and "closed" were dropped from the
-// vocabulary — "pending" covers a request not yet started, "on_hold" covers
-// one paused waiting on something (parts, access, a tenant reply), and
+// vocabulary — "pending" covers a request not yet started, "awaiting_response"
+// covers one stuck on somebody's answer (setting it alerts every admin),
+// "on_hold" covers one paused waiting on something else (parts, access), and
 // "sorted" covers one that is done.
-export const STATUSES = ["pending", "assigned", "in_progress", "on_hold", "sorted"];
+export const STATUSES = ["pending", "assigned", "in_progress", "awaiting_response", "on_hold", "sorted"];
 // Still counts a legacy "closed" row as resolved so old data reads correctly.
 export const RESOLVED_STATUSES = ["sorted", "closed"];
 const PRIORITIES = ["urgent", "high", "med", "low"];
@@ -52,6 +55,7 @@ const STATUS_TONE = {
   open: "blue",
   assigned: "blue",
   in_progress: "orange",
+  awaiting_response: "amber",
   on_hold: "red",
   sorted: "green",
   closed: "gray",
@@ -72,6 +76,22 @@ const fmtDate = (v) => {
   if (!v) return "—";
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-GB");
+};
+
+// A comment's timestamp: 03/08/2026, 14:05 on a UK clock.
+const fmtDateTime = (v) => {
+  if (!v) return "—";
+  const d = new Date(v);
+  return Number.isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Europe/London",
+      });
 };
 
 // <input type="date"> wants yyyy-mm-dd.
@@ -683,11 +703,52 @@ function SolutionDetail({ m }) {
 /* ------------------------------------------------------------------ *
  * View — the whole booklet entry, read-only
  * ------------------------------------------------------------------ */
-function ViewModal({ entry, srNo, onClose, onEdit }) {
+function ViewModal({ entry, srNo, onClose, onEdit, onChanged }) {
   // Render the row we already have straight away, then refresh from the API so
   // the panel reflects anything a colleague changed since the list was loaded.
   const [m, setM] = useState(entry);
   const [refreshing, setRefreshing] = useState(true);
+  const [comment, setComment] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [commentError, setCommentError] = useState("");
+  // The comment being corrected by its author: { id, text } | null.
+  const [editing, setEditing] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const saveEdit = async () => {
+    if (!editing?.text.trim()) return;
+    setSavingEdit(true);
+    setCommentError("");
+    try {
+      const res = await api.patch(`/maintenance/${entry._id}/comments/${editing.id}`, {
+        text: editing.text.trim(),
+      });
+      setM(res.data.data);
+      setEditing(null);
+      onChanged?.(res.data.data);
+    } catch (err) {
+      setCommentError(err.response?.data?.message || "Failed to update the comment.");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const postComment = async (e) => {
+    e.preventDefault();
+    if (!comment.trim()) return;
+    setPosting(true);
+    setCommentError("");
+    try {
+      const res = await api.post(`/maintenance/${entry._id}/comments`, { text: comment.trim() });
+      setM(res.data.data);
+      setComment("");
+      onChanged?.(res.data.data);
+    } catch (err) {
+      setCommentError(err.response?.data?.message || "Failed to add the comment.");
+    } finally {
+      setPosting(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -702,7 +763,7 @@ function ViewModal({ entry, srNo, onClose, onEdit }) {
   const media = mediaOf(m);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={guardModalClose(onClose)}>
       <div
         className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -759,6 +820,100 @@ function ViewModal({ entry, srNo, onClose, onEdit }) {
             )}
           </div>
         )}
+
+        {/* Discussion — the office's running conversation on this entry:
+            updates, questions and answers, oldest first so it reads as a
+            thread. Append-only, so the history stays complete. */}
+        <div className="mt-5 rounded-2xl border border-gray-100 p-4">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
+            <MessageSquare size={13} /> Discussion ({m.comments?.length || 0})
+          </p>
+
+          {m.comments?.length ? (
+            <ol className="space-y-3 mb-4">
+              {m.comments.map((c) => (
+                <li key={c._id || c.createdAt} className="pl-4 border-l-2 border-gray-100">
+                  {editing?.id === c._id ? (
+                    <div className="space-y-2">
+                      <textarea
+                        rows={3}
+                        className={FIELD}
+                        value={editing.text}
+                        onChange={(e) => setEditing({ id: c._id, text: e.target.value })}
+                        autoFocus
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={saveEdit}
+                          disabled={savingEdit || !editing.text.trim()}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold text-xs rounded-lg transition-all disabled:opacity-50"
+                        >
+                          {savingEdit && <Loader2 size={12} className="animate-spin" />}
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditing(null)}
+                          className="px-3 py-1.5 text-xs font-bold text-gray-500 hover:text-[#0F253B]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm font-medium text-gray-600 whitespace-pre-line">{c.text}</p>
+                  )}
+                  <p className="text-[11px] font-medium text-gray-400 mt-1">
+                    {c.authorEmail || "Team member"}
+                    {c.authorRole ? ` · ${c.authorRole}` : ""}
+                    {" · "}
+                    {fmtDateTime(c.createdAt)}
+                    {c.editedAt ? " · edited" : ""}
+                    {/* Only the author of a comment gets this. */}
+                    {c.canEdit && editing?.id !== c._id && (
+                      <button
+                        type="button"
+                        onClick={() => setEditing({ id: c._id, text: c.text })}
+                        className="ml-2 inline-flex items-center gap-1 font-bold text-[#F47C3C] hover:underline"
+                      >
+                        <Pencil size={10} /> Edit
+                      </button>
+                    )}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-sm font-medium text-gray-400 mb-4">
+              No comments yet. Ask a question or post an update on this issue.
+            </p>
+          )}
+
+          {commentError && (
+            <div className="mb-3 p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">
+              {commentError}
+            </div>
+          )}
+
+          <form onSubmit={postComment} className="flex items-end gap-2">
+            <textarea
+              rows={2}
+              className={FIELD}
+              placeholder="Write a comment, update or question…"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+            />
+            <button
+              type="submit"
+              disabled={posting || !comment.trim()}
+              className="flex items-center gap-2 px-4 py-3 bg-[#0F253B] hover:bg-[#16344f] text-white font-bold text-sm rounded-xl transition-all disabled:opacity-50 shrink-0"
+            >
+              {posting ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+              Post
+            </button>
+          </form>
+        </div>
 
         <div className="mt-6 flex gap-3">
           <button
@@ -822,6 +977,29 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // A maintenance notification (Shared/NotificationBell.js) lands here with
+  // ?open=<entryId> — open that entry once the list has loaded, the same way
+  // the task lists do.
+  const openedFromNotification = useRef(false);
+  useEffect(() => {
+    if (openedFromNotification.current || loading) return;
+    const params = new URLSearchParams(window.location.search);
+    const openId = params.get("open");
+    if (!openId) return;
+    openedFromNotification.current = true;
+    (async () => {
+      const hit = list.find((x) => x._id === openId);
+      if (hit) setViewing(hit);
+    })();
+    params.delete("open");
+    const qs = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+    );
+  }, [loading, list]);
 
   // The room filter only makes sense inside one property, so its options are
   // that property's rooms. Picking a property loads them and clears the room;
@@ -1120,6 +1298,9 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
           srNo={posOf.get(viewing._id)}
           onClose={() => setViewing(null)}
           onEdit={(entry) => { setViewing(null); setModal(entry); }}
+          onChanged={(updated) =>
+            setList((prev) => prev.map((x) => (x._id === updated._id ? updated : x)))
+          }
         />
       )}
 
@@ -1233,6 +1414,11 @@ function FragmentRow({ m, srNo, open, steps, onToggle, onStatus, onView, onEdit,
             {m.category || "General"}
             {attachments > 0 && (
               <span className="inline-flex items-center gap-1 text-gray-400"><ImageIcon size={11} />{attachments}</span>
+            )}
+            {m.comments?.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-[#F47C3C]" title="Comments — open the entry to read them">
+                <MessageSquare size={11} />{m.comments.length}
+              </span>
             )}
           </p>
         </td>

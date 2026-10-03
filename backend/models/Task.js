@@ -10,9 +10,17 @@ export const TASK_PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 // its due date — the same trap the Compliance model falls into.
 // "Done" is the terminal success state (replaces legacy "Completed").
 // "Cancelled" is an explicit terminal cancel.
+// "Awaiting Response" is open work that is stuck on an answer from somebody —
+// moving a task onto it alerts every admin (see notifyProgressUpdate).
+// "Action Required" is open work that needs its current action owner to do
+// something before it can move on.
+// Read as a flow: Not Started (assigned) → In Progress → Action Required →
+// Awaiting Response → Done / Cancelled.
 export const TASK_STATUSES = [
   "Not Started",
   "In Progress",
+  "Action Required",
+  "Awaiting Response",
   "Done",
   "Cancelled",
   "Overdue",
@@ -61,6 +69,10 @@ const progressSchema = new mongoose.Schema(
     // report, as opposed to a routine progress note.
     isReport: { type: Boolean, default: false },
 
+    // Set when this update passed the task on: the assignee whose action is
+    // required next. Kept on the entry so the history shows each hand-over.
+    handedToEmail: { type: String, trim: true, default: "" },
+
     // Who wrote it. The email and role are denormalised so the history renders
     // without populating a user per entry.
     authorId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
@@ -68,6 +80,10 @@ const progressSchema = new mongoose.Schema(
     authorRole: { type: String, trim: true, default: "" },
 
     createdAt: { type: Date, default: Date.now },
+
+    // Set when the author corrected the wording of their own COMMENT. A status
+    // update is never edited — that is the record of how the work moved.
+    editedAt: { type: Date, default: null },
   },
   { _id: true }
 );
@@ -128,6 +144,17 @@ const taskSchema = new mongoose.Schema(
     // One or more team members. An empty array is rejected by the controller —
     // an unassigned task has nobody to do it.
     assignees: { type: [assigneeSchema], default: [] },
+
+    // On a shared task, the ONE assignee whose action is required right now.
+    // It stays one task; this pointer moves from person to person as each
+    // finishes their part (see the hand-over in addTaskProgress). Null on rows
+    // written before it existed — the controller then reads the first assignee.
+    actionOwnerId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+
+    // A private task is visible only to its assignees, the person who created
+    // it and the organization owner — not to the rest of the team, and not to
+    // other admins. See canView in task.controller.js.
+    isPrivate: { type: Boolean, default: false },
 
     priority: {
       type: String,

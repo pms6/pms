@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Plus, X, Pencil, Search, Landmark, Zap, Printer, CheckCircle2, Circle, Trash2, BellRing, Paperclip } from "lucide-react";
+import { Plus, X, Pencil, Search, Landmark, Zap, Printer, CheckCircle2, Circle, Trash2, BellRing, Paperclip, History, Send, Loader2 } from "lucide-react";
 import { PageHeader, Badge } from "./ui";
 import { MediaUploader, MediaViewerModal, applyFiles } from "./MediaAttachments";
 import api from "@/app/api/api";
@@ -369,6 +369,156 @@ function CouncilTaxModal({ initial, properties, onClose, onSave }) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Council tax — the "+" on a row: add one instalment without opening the
+ * whole entry. The payment amount and date, plus the due date and proof.
+ * ------------------------------------------------------------------ */
+function AddInstallmentModal({ row, onClose, onSave }) {
+  const existing = installmentsOf(row);
+  const [inst, setInst] = useState(() => ({ ...blankInstallment(), paidAt: toInputDate(new Date()) }));
+  const [uploading, setUploading] = useState(0);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const set = (field) => (e) => setInst((i) => ({ ...i, [field]: e.target.value }));
+  const summary = installmentSummary({ installments: [...existing, inst], totalAmount: row.totalAmount });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (inst.amount === "" || Number(inst.amount) <= 0) { setError("Enter the payment amount"); return; }
+    if (!inst.paidAt && !inst.dueDate) { setError("Enter the payment date, or a due date if it isn't paid yet"); return; }
+    if (uploading) { setError("Wait for the uploads to finish"); return; }
+    setSaving(true);
+    setError("");
+    try {
+      await onSave(row, toInstallmentPayload([...existing, inst]));
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to add the instalment");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell
+      title={`Add instalment ${existing.length + 1}`}
+      subtitle={`${row.property}${row.councilName ? ` · ${row.councilName}` : ""}`}
+      onClose={onClose}
+    >
+      <ErrorBanner>{error}</ErrorBanner>
+      <form onSubmit={submit} className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className={LABEL}>Amount (£)</label>
+            <input type="number" min="0" step="0.01" autoFocus className={FIELD} value={inst.amount} onChange={set("amount")} placeholder="0.00" required />
+          </div>
+          <div>
+            <label className={LABEL}>Payment date</label>
+            <input type="date" className={FIELD} value={inst.paidAt} onChange={set("paidAt")} title="Leave blank if not paid yet" />
+          </div>
+          <div>
+            <label className={LABEL}>Due date</label>
+            <input type="date" className={FIELD} value={inst.dueDate} onChange={set("dueDate")} />
+          </div>
+        </div>
+        <p className="-mt-2 text-[11px] text-gray-400 font-medium">
+          Clear the payment date to record an upcoming instalment that is not paid yet.
+        </p>
+        <MediaUploader
+          files={inst.files}
+          onChange={(update) => setInst((i) => ({ ...i, files: applyFiles(update, i.files) }))}
+          onUploadingChange={setUploading}
+          label="Proof of payment"
+          hint="Drop the receipt or bank screenshot here — PDF, photo, any file type"
+        />
+        <div>
+          <p className={LABEL}>After this instalment</p>
+          <InstallmentTotals summary={summary} />
+        </div>
+        <button
+          type="submit"
+          disabled={saving}
+          className="w-full py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all active:scale-[0.98]"
+        >
+          {saving ? "Saving…" : "Add Instalment"}
+        </button>
+      </form>
+    </ModalShell>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Council tax — every payment made, across the properties on screen
+ * ------------------------------------------------------------------ */
+function PaymentRecord({ rows, onOpenFiles }) {
+  const payments = rows
+    .flatMap((r) => installmentsOf(r).map((inst, n) => ({ r, inst, n })))
+    .filter(({ inst }) => inst.paidAt)
+    .sort((a, b) => new Date(b.inst.paidAt) - new Date(a.inst.paidAt));
+  const total = payments.reduce((sum, p) => sum + Number(p.inst.amount || 0), 0);
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/70 flex items-center justify-between gap-3">
+        <p className="text-sm font-bold text-[#0F253B] flex items-center gap-2">
+          <History size={15} className="text-[#F47C3C]" /> Payment record
+        </p>
+        <p className="text-xs font-bold text-gray-500">
+          {payments.length} payment{payments.length === 1 ? "" : "s"} · <span className="text-emerald-600">{money(total)} paid</span>
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
+              <th className="px-4 py-3">Payment date</th>
+              <th className="px-4 py-3">Property</th>
+              <th className="px-4 py-3">Instalment</th>
+              <th className="px-4 py-3">Due date</th>
+              <th className="px-4 py-3 text-right">Amount paid</th>
+              <th className="px-4 py-3">Proof</th>
+            </tr>
+          </thead>
+          <tbody>
+            {payments.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">No payments recorded yet</td></tr>
+            ) : (
+              payments.map(({ r, inst, n }) => (
+                <tr key={`${r._id}-${n}`} className="border-b border-gray-50">
+                  <td className="px-4 py-2.5 font-bold text-emerald-600 whitespace-nowrap">{fmtDate(inst.paidAt)}</td>
+                  <td className="px-4 py-2.5 font-semibold text-[#0F253B]">{r.property}</td>
+                  <td className="px-4 py-2.5 text-gray-500 font-medium">#{n + 1}</td>
+                  <td className="px-4 py-2.5 text-gray-500 font-medium whitespace-nowrap">{inst.dueDate ? fmtDate(inst.dueDate) : <Dash />}</td>
+                  <td className="px-4 py-2.5 text-right font-bold text-[#0F253B] whitespace-nowrap">{moneyOrBlank(inst.amount) || <Dash />}</td>
+                  <td className="px-4 py-2.5">
+                    {filesOf(inst.files).length > 0 ? (
+                      <button
+                        onClick={() => onOpenFiles(r, filesOf(inst.files), `Instalment ${n + 1} proof of payment`)}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#F47C3C] hover:underline"
+                      >
+                        <Paperclip size={11} /> {filesOf(inst.files).length}
+                      </button>
+                    ) : <Dash />}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+          {payments.length > 0 && (
+            <tfoot>
+              <tr className="bg-gray-50/50 border-t border-gray-100">
+                <td colSpan={4} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-gray-400">Total paid</td>
+                <td className="px-4 py-3 text-right font-bold text-emerald-600 whitespace-nowrap">{money(total)}</td>
+                <td />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * Bills record — add / edit
  * ------------------------------------------------------------------ */
 function BillModal({ initial, properties, onClose, onSave }) {
@@ -672,6 +822,10 @@ export default function CouncilTaxBillsBoard({
   const [viewing, setViewing] = useState(null);
   // What the media viewer is open on: { key, title, subtitle, files }.
   const [viewer, setViewer] = useState(null);
+  // The council tax row the "+" was pressed on.
+  const [addingTo, setAddingTo] = useState(null);
+  const [showPayments, setShowPayments] = useState(false);
+  const [reminding, setReminding] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -764,6 +918,27 @@ export default function CouncilTaxBillsBoard({
     } catch (err) {
       setCouncilTax(snapshot);
       alert(err.response?.data?.message || "Failed to update the instalment");
+    }
+  };
+
+  // The row's "+" — appends one instalment and saves.
+  const addInstallment = async (row, installments) => {
+    const res = await api.put(`/council-tax-bills/council-tax/${row._id}`, { installments });
+    setCouncilTax((prev) => prev.map((r) => (r._id === row._id ? res.data.data : r)));
+    setAddingTo(null);
+  };
+
+  // Emails the team about instalments due within the week (or overdue) now,
+  // rather than waiting for the 8am run.
+  const sendReminders = async () => {
+    setReminding(true);
+    try {
+      const res = await api.post("/council-tax-bills/council-tax/send-reminders");
+      alert(res.data?.message || "Reminders sent.");
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to send reminders");
+    } finally {
+      setReminding(false);
     }
   };
 
@@ -887,9 +1062,19 @@ export default function CouncilTaxBillsBoard({
 
       {tab === "council-tax" && reminders.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
-          <p className="flex items-center gap-2 text-sm font-bold text-amber-800">
-            <BellRing size={16} /> Council tax payments due
-          </p>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="flex items-center gap-2 text-sm font-bold text-amber-800">
+              <BellRing size={16} /> Council tax payments due
+            </p>
+            <button
+              onClick={sendReminders}
+              disabled={reminding}
+              title="Email the owner and managers about these now. Each instalment is reminded once; the 8am run does this automatically."
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-amber-100 border border-amber-200 text-amber-800 text-xs font-bold rounded-lg disabled:opacity-50"
+            >
+              {reminding ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Send reminder email
+            </button>
+          </div>
           <ul className="mt-2 space-y-1.5">
             {reminders.map(({ r, due, date, amount }) => (
               <li key={r._id} className="flex items-center gap-2 flex-wrap text-xs font-medium text-amber-900">
@@ -917,6 +1102,17 @@ export default function CouncilTaxBillsBoard({
           />
         </div>
 
+        {tab === "council-tax" && (
+          <button
+            onClick={() => setShowPayments((v) => !v)}
+            className={`inline-flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold border transition-all ${
+              showPayments ? "bg-[#0F253B] text-white border-[#0F253B]" : "bg-white text-[#0F253B] border-gray-100 hover:bg-gray-50"
+            }`}
+          >
+            <History size={15} /> {showPayments ? "Hide payment record" : "Payment record"}
+          </button>
+        )}
+
         {tab === "bills" && (
           <select
             value={month}
@@ -930,6 +1126,10 @@ export default function CouncilTaxBillsBoard({
           </select>
         )}
       </div>
+
+      {tab === "council-tax" && showPayments && (
+        <PaymentRecord rows={visibleTax} onOpenFiles={openViewer} />
+      )}
 
       <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/70">
@@ -993,7 +1193,7 @@ export default function CouncilTaxBillsBoard({
                         )}
                       </td>
                       <td className="px-4 py-3 min-w-[230px]">
-                        {s.list.length === 0 ? <Dash /> : (
+                        {s.list.length === 0 ? null : (
                           <ul className="space-y-1.5">
                             {s.list.map((inst, n) => (
                               <li key={inst._id || n} className="flex items-start gap-1.5 text-xs">
@@ -1034,6 +1234,13 @@ export default function CouncilTaxBillsBoard({
                             ))}
                           </ul>
                         )}
+                        <button
+                          onClick={() => setAddingTo(r)}
+                          title="Add an instalment"
+                          className={`${s.list.length ? "mt-2" : ""} inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-50 hover:bg-orange-100 text-[#F47C3C] text-[11px] font-bold transition-all`}
+                        >
+                          <Plus size={13} /> Instalment
+                        </button>
                       </td>
                       <td className="px-4 py-3 text-emerald-600 font-bold whitespace-nowrap">{s.list.length || s.manualTotal ? money(s.paid) : <Dash />}</td>
                       <td className={`px-4 py-3 font-bold whitespace-nowrap ${s.outstanding > 0 ? "text-red-600" : "text-[#0F253B]"}`}>
@@ -1181,6 +1388,10 @@ export default function CouncilTaxBillsBoard({
           onClose={() => setModal(null)}
           onSave={save}
         />
+      )}
+
+      {addingTo && (
+        <AddInstallmentModal row={addingTo} onClose={() => setAddingTo(null)} onSave={addInstallment} />
       )}
 
       {modal?.kind === "bills" && (

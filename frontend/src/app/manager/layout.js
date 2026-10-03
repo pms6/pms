@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  MessagesSquare,
+  CalendarCheck,
   LayoutDashboard,
   Building2,
   KeyRound,
@@ -59,6 +61,8 @@ const NAV = [
   { href: "/manager/occupancy", label: "Occupancy", icon: DoorOpen },
   { href: "/manager/tenants", label: "Tenants", icon: UserRound },
   { href: "/manager/cases", label: "Tenant Cases", icon: Briefcase },
+  { href: "/manager/messages", label: "Tenant Messages", icon: MessagesSquare },
+  { href: "/manager/access-notices", label: "Access Notices", icon: CalendarCheck },
   { href: "/manager/invoices", label: "Invoices", icon: FileText },
   { href: "/manager/welcome-pack", label: "Welcome Pack", icon: Wallet },
   { href: "/manager/Inspection", label: "Inspection", icon: Search },

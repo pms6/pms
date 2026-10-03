@@ -62,6 +62,12 @@ export default function MaintenanceForm() {
         bytes: bytes || 0,
       }));
 
+    // Evidence is mandatory — the steps enforce it too, this is the last guard.
+    if (!media.some((m) => m.type === 'image' || m.type === 'video')) {
+      toast.error('Please add at least one photo or video of the problem.');
+      return;
+    }
+
     const coverPhoto = media.find((p) => p.type === 'image')?.url || '';
 
     // Fold the extra contact fields into the description (the model has no

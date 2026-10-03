@@ -8,10 +8,14 @@
 export const TASK_PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 
 // "Overdue" is derived on read from dueDate. "Done" replaces legacy
-// "Completed". "Cancelled" is an explicit terminal cancel.
+// "Completed". "Cancelled" is an explicit terminal cancel. "Awaiting Response"
+// is open work stuck on somebody's answer — setting it alerts every admin.
+// "Action Required" is open work waiting on its current action owner.
 export const TASK_STATUSES = [
   "Not Started",
   "In Progress",
+  "Action Required",
+  "Awaiting Response",
   "Done",
   "Cancelled",
   "Overdue",
@@ -22,9 +26,17 @@ export const TASK_STATUSES = [
 export const SETTABLE_STATUSES = [
   "Not Started",
   "In Progress",
+  "Action Required",
+  "Awaiting Response",
   "Done",
   "Cancelled",
 ];
+
+/** Done or Cancelled — finished work, listed apart from what is still open. */
+export const isClosed = (task) => {
+  const s = normalizeStatus(task?.effectiveStatus || task?.status);
+  return s === "Done" || s === "Cancelled";
+};
 
 /** Map legacy stored value "Completed" → "Done". */
 export const normalizeStatus = (s) => (s === "Completed" ? "Done" : s);
@@ -39,6 +51,24 @@ export const isDueToday = (task) => {
   return s !== "Done" && s !== "Cancelled" && task?.daysUntilDue === 0;
 };
 
+// The team a task belongs to is the role of the people it is assigned to. The
+// owner and promoted admins are one team here. A task shared across roles
+// shows under each of them.
+export const TEAMS = [
+  { key: "ADMIN", label: "Admin", roles: ["OWNER", "ADMIN"] },
+  { key: "MANAGER", label: "Manager", roles: ["MANAGER"] },
+  { key: "AGENT", label: "Agent", roles: ["AGENT"] },
+  { key: "OPERATION", label: "Operations", roles: ["OPERATION"] },
+  { key: "FINANCE", label: "Finance", roles: ["FINANCE"] },
+];
+
+/** Is anybody on this task in the given team? No team means every task. */
+export const inTeam = (task, teamKey) => {
+  const team = TEAMS.find((t) => t.key === teamKey);
+  if (!team) return true;
+  return (task?.assignees || []).some((a) => team.roles.includes(a.role));
+};
+
 export const PRIORITY_TONE = {
   Low: "bg-slate-100 text-slate-600",
   Medium: "bg-blue-100 text-blue-700",
@@ -49,6 +79,8 @@ export const PRIORITY_TONE = {
 export const STATUS_TONE = {
   "Not Started": "bg-slate-100 text-slate-600",
   "In Progress": "bg-blue-100 text-blue-700",
+  "Action Required": "bg-orange-100 text-orange-700",
+  "Awaiting Response": "bg-amber-100 text-amber-700",
   Done: "bg-emerald-100 text-emerald-700",
   Completed: "bg-emerald-100 text-emerald-700", // legacy alias
   Cancelled: "bg-gray-100 text-gray-500",

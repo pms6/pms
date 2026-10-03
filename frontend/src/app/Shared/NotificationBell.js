@@ -146,8 +146,20 @@ export default function NotificationBell() {
     // there for an admin and fall back to the task list for anyone else.
     // Tenant Cases has a page in the owner and manager portals; staff in the
     // other portals land on their task list.
+    // Tenant Chat has a page in every staff portal; Access Notices in the
+    // owner and manager portals; Council Tax in the owner portal only.
+    const ownerOrManager = role === "organization" || role === "manager";
+    const portal = role === "organization" ? "admin" : role;
     const target =
-      n.relatedType === "EmailRecord" && n.relatedId && role === "organization"
+      n.relatedType === "TenantMessage" && TASK_PATH_BY_ROLE[role]
+        ? `/${portal}/messages${n.relatedId ? `?tenancy=${n.relatedId}` : ""}`
+      : n.relatedType === "AccessNotice" && ownerOrManager
+        ? `/${portal}/access-notices${n.relatedId ? `?open=${n.relatedId}` : ""}`
+      : n.relatedType === "Maintenance" && ownerOrManager
+        ? `/${portal}/maintenance${n.relatedId ? `?open=${n.relatedId}` : ""}`
+      : n.relatedType === "CouncilTax" && role === "organization"
+        ? "/admin/council-tax-bills"
+      : n.relatedType === "EmailRecord" && n.relatedId && role === "organization"
         ? `/admin/email-records?open=${n.relatedId}`
         : n.relatedType === "TenantCase" && n.relatedId && (role === "organization" || role === "manager")
           ? `/${role === "manager" ? "manager" : "admin"}/cases?open=${n.relatedId}`

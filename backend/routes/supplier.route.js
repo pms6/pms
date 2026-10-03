@@ -8,12 +8,14 @@ import {
   toggleSupplierArchive,
   deleteSupplier,
 } from "../controllers/supplier.controller.js";
-import { protect } from "../middleware/auth.js";
+import { protect, staffOnly } from "../middleware/auth.js";
 
 const router = express.Router();
 
 // Apply auth to all routes
-router.use(protect);
+// staffOnly as well as protect: `protect` resolves an organizationId for a
+// TENANT account too, so without it a tenant could read the whole register.
+router.use(protect, staffOnly);
 
 // CRUD
 router.get("/", getSuppliers);

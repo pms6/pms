@@ -11,12 +11,15 @@ import {
   rescheduleTask,
   deleteTask,
   addTaskProgress,
+  editTaskComment,
 } from "../controllers/task.controller.js";
-import { protect } from "../middleware/auth.js";
+import { protect, staffOnly } from "../middleware/auth.js";
 
 const router = express.Router();
 
-router.use(protect);
+// staffOnly as well as protect: `protect` resolves an organizationId for a
+// TENANT account too, so without it a tenant could read the whole register.
+router.use(protect, staffOnly);
 
 // Specific paths first, so "/my" and "/stats" are not swallowed by "/:id".
 //
@@ -44,5 +47,7 @@ router.delete("/:id", deleteTask);
 // The only write a non-owner can make: a comment from anyone on the team, or a
 // status update from an assignee. Never a reassignment.
 router.post("/:id/progress", addTaskProgress);
+// The author correcting the wording of their own comment.
+router.patch("/:id/progress/:entryId", editTaskComment);
 
 export default router;

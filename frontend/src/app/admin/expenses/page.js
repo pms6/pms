@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Plus,
   X,
@@ -596,8 +596,34 @@ export default function AdminExpenses() {
   const [monthFilter, setMonthFilter] = useState("");
   const [propertyFilter, setPropertyFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
-  // Narrows the entries list by supplier name as you type.
+  // Narrows the entries list by supplier name as you type. The list narrows
+  // instantly on screen; the debounced copy is what goes to the API, so the
+  // monthly sheet and the KPI cards follow the search as well.
   const [supplierSearch, setSupplierSearch] = useState("");
+  const [supplierQuery, setSupplierQuery] = useState("");
+  // Supplier names offered as suggestions in the search bar.
+  const [supplierNames, setSupplierNames] = useState([]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSupplierQuery(supplierSearch.trim()), 500);
+    return () => clearTimeout(t);
+  }, [supplierSearch]);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .get("/suppliers")
+      .then((res) => {
+        if (!active) return;
+        const names = (res.data?.data || []).map((s) => s.company).filter(Boolean);
+        setSupplierNames([...new Set(names)].sort((a, b) => a.localeCompare(b)));
+      })
+      // Suggestions are a convenience — the search works without them.
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const [sheet, setSheet] = useState(null);
   const [rows, setRows] = useState([]);
@@ -611,13 +637,23 @@ export default function AdminExpenses() {
   // The entry being edited, or null when the form is adding.
   const [editRow, setEditRow] = useState(null);
 
+  // Only the very first load swaps the page for a "Loading…" state. A reload
+  // caused by a filter or by typing in the search keeps what is on screen and
+  // replaces it when the answer lands — otherwise every pause while typing
+  // blanked the cards and both tables, which read as the page reloading.
+  const loadedOnce = useRef(false);
+  // Typing fires several requests; only the newest one's answer is used.
+  const requestToken = useRef(0);
+
   const loadData = useCallback(async () => {
-    setLoading(true);
+    const token = ++requestToken.current;
+    if (!loadedOnce.current) setLoading(true);
     setError("");
     try {
       const params = { year };
       if (propertyFilter) params.propertyId = propertyFilter;
       if (categoryFilter) params.category = categoryFilter;
+      if (supplierQuery) params.supplier = supplierQuery;
 
       const listParams = { ...params };
       if (monthFilter) listParams.month = monthFilter;
@@ -628,6 +664,9 @@ export default function AdminExpenses() {
         api.get("/properties", { params: { limit: 100 } }),
       ]);
 
+      // A newer request has gone out since — its answer is the one to show.
+      if (token !== requestToken.current) return;
+
       setSheet(sheetRes.data);
       if (Array.isArray(sheetRes.data?.availableYears) && sheetRes.data.availableYears.length) {
         setYears(sheetRes.data.availableYears);
@@ -635,11 +674,15 @@ export default function AdminExpenses() {
       setRows(listRes.data?.data || []);
       setProperties(propsRes.data?.data || []);
     } catch (err) {
+      if (token !== requestToken.current) return;
       setError(err.response?.data?.message || "Failed to load expenses");
     } finally {
-      setLoading(false);
+      if (token === requestToken.current) {
+        loadedOnce.current = true;
+        setLoading(false);
+      }
     }
-  }, [year, monthFilter, propertyFilter, categoryFilter]);
+  }, [year, monthFilter, propertyFilter, categoryFilter, supplierQuery]);
 
   useEffect(() => {
     (async () => {
@@ -811,7 +854,7 @@ export default function AdminExpenses() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi icon={Wallet} label={`Total ${year}`} value={loading ? "—" : money(total)} tone="orange" />
+        <Kpi icon={Wallet} label={supplierQuery ? `${supplierQuery} · ${year}` : `Total ${year}`} value={loading ? "—" : money(total)} tone="orange" />
         <Kpi icon={Receipt} label="Entries" value={loading ? "—" : sheet?.count ?? 0} tone="navy" />
         <Kpi
           icon={CalendarRange}
@@ -828,7 +871,10 @@ export default function AdminExpenses() {
       {/* The sheet: one row per month, always all twelve */}
       <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
         <div className="p-4 border-b border-gray-100">
-          <h2 className="text-sm font-bold text-[#0F253B]">Monthly breakdown — {year}</h2>
+          <h2 className="text-sm font-bold text-[#0F253B]">
+            Monthly breakdown — {year}
+            {supplierQuery && <span className="text-[#F47C3C]"> · supplier &quot;{supplierQuery}&quot;</span>}
+          </h2>
         </div>
         {loading ? (
           <div className="p-10 text-center text-gray-400">Loading expense sheet…</div>
@@ -901,8 +947,14 @@ export default function AdminExpenses() {
                 value={supplierSearch}
                 onChange={(e) => setSupplierSearch(e.target.value)}
                 placeholder="Search by supplier name…"
+                list="expense-supplier-names"
                 className="w-full pl-9 pr-8 py-2 bg-gray-50 border border-gray-100 rounded-xl text-xs font-medium text-[#0F253B] outline-none focus:ring-2 focus:ring-[#F47C3C] focus:bg-white"
               />
+              <datalist id="expense-supplier-names">
+                {supplierNames.map((n) => (
+                  <option key={n} value={n} />
+                ))}
+              </datalist>
               {supplierSearch && (
                 <button
                   onClick={() => setSupplierSearch("")}
@@ -935,7 +987,7 @@ export default function AdminExpenses() {
           <div className="p-10 text-center text-gray-400">Loading…</div>
         ) : visibleRows.length === 0 ? (
           <div className="p-10 text-center text-gray-400">
-            {supplierNeedle && rows.length > 0
+            {supplierNeedle
               ? `No expenses from a supplier matching "${supplierSearch.trim()}".`
               : "No expenses recorded for this filter."}
           </div>

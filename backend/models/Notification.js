@@ -15,6 +15,14 @@ export const NOTIFICATION_TYPES = [
   "task_assigned",
   "task_comment",
   "task_update",
+  // A task or a maintenance entry was moved to "awaiting response" — goes to
+  // every admin, since somebody has to chase the answer.
+  "task_awaiting_response",
+  "maintenance_awaiting_response",
+  // A shared task was passed to this person — their action is required next.
+  "task_action_required",
+  // Somebody wrote in the discussion on a maintenance entry.
+  "maintenance_comment",
   // Email Records — a record handed to someone, a follow-up that has come
   // due, and an urgent one left unresolved past its follow-up date.
   "email_assigned",
@@ -26,6 +34,13 @@ export const NOTIFICATION_TYPES = [
   // case they are assigned to.
   "case_assigned",
   "case_update",
+  // Tenant Chat — a tenant has messaged the office (one unread row per
+  // conversation per person, not one per message).
+  "tenant_message",
+  // Access Notices — a tenant acknowledged a notice of entry.
+  "access_notice_ack",
+  // Council Tax — an instalment is due soon or overdue.
+  "council_tax_due",
 ];
 
 const notificationSchema = new mongoose.Schema(

@@ -8,6 +8,15 @@ import { toast } from 'react-toastify';
 export const isVideoFile = (item) =>
   item?.type === 'video' || /\.(mp4|mov|webm|m4v)(\?|$)/i.test(item?.url || '');
 
+// Photo or video evidence is required before a report can go in: the office
+// triages and quotes from it. An item still uploading has only a local blob
+// preview, so it doesn't count until Cloudinary hands back a real URL.
+export const uploadedEvidence = (photos) =>
+  (photos || []).filter((p) => {
+    const url = typeof p === 'string' ? p : p?.url;
+    return url && !p?.loading && !String(url).startsWith('blob:') && p?.type !== 'pdf';
+  });
+
 export default function StepTwo({ formData, setFormData, onNext, onBack }) {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -55,10 +64,28 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
       return;
     }
 
+    if (uploading) {
+      toast.info("Please wait for your photos or videos to finish uploading.");
+      return;
+    }
+
+    if (uploadedEvidence(formData.photos).length === 0) {
+      toast.info("Please add at least one photo or video of the problem before continuing.");
+      return;
+    }
+
     onNext();
   };
 
-  const uploadFiles = async (files) => {
+  const uploadFiles = async (picked) => {
+    // Drag-and-drop bypasses the picker's `accept`, so anything that is not a
+    // photo or a video is turned away here.
+    const files = picked.filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
+    if (files.length < picked.length) {
+      toast.error("Only photos and videos can be attached to a repair report.");
+    }
+    if (!files.length) return;
+
     try {
       setUploading(true);
 
@@ -134,6 +161,8 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
 
   const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files);
+    // Let the same file be picked again after it is removed.
+    e.target.value = "";
     if (!files.length) return;
 
     await uploadFiles(files);
@@ -256,8 +285,11 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
           <div className={cardContainerStyle}>
             <div className={sectionHeaderStyle}>
               <h3 className="text-sm font-bold text-[#0F253B] flex items-center gap-2 uppercase tracking-tight">
-                <span className="md:hidden">📷</span> Add photos
+                <span className="md:hidden">📷</span> Add photos or videos <span className="text-red-500">*</span>
               </h3>
+              <p className="text-[11px] text-[#6B7280] mt-1 normal-case">
+                At least one photo or video of the problem is required.
+              </p>
             </div>
             <div className="p-4 md:p-1">
               <div className="space-y-4">
@@ -270,28 +302,53 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
                   ${dragActive ? "border-orange-500 bg-orange-50" : "border-[#E8E4DF] bg-white"}`}
                 >
 
+                  {/* Separate pickers for photos and videos: on phones a single
+                      "image/*,video/*" picker often opens the photo camera only,
+                      leaving no way to record a clip. */}
                   <input
                     type="file"
                     multiple
-                    accept="image/*,video/*"
+                    accept="image/*"
                     onChange={handleFileUpload}
                     className="hidden"
                     id="photoUpload"
                   />
+                  <input
+                    type="file"
+                    multiple
+                    accept="video/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    id="videoUpload"
+                  />
 
-                  <label htmlFor="photoUpload" className="cursor-pointer block">
-                    
-                    <span className="text-3xl">📸</span>
+                  <span className="text-3xl">📸 🎥</span>
 
-                    <p className="text-xs font-bold text-[#0F253B] mt-2">
-                      {uploading ? "Uploading..." : "Drag & Drop or Click to Upload"}
-                    </p>
+                  <p className="text-xs font-bold text-[#0F253B] mt-2">
+                    {uploading ? "Uploading..." : "Upload a photo or video of the problem"}
+                  </p>
+                  <p className="text-[10px] font-bold text-red-500 mt-0.5">
+                    Required — at least one photo or video
+                  </p>
 
-                    <p className="text-[9px] text-gray-400">
-                      JPG, PNG, HEIC up to 10MB · MP4, MOV up to 100MB
-                    </p>
+                  <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-2">
+                    <label
+                      htmlFor="photoUpload"
+                      className="cursor-pointer inline-flex items-center justify-center gap-2 w-full sm:w-auto px-4 py-2.5 rounded-xl bg-[#F47C3C] hover:bg-[#e85e2f] text-white text-xs font-bold transition"
+                    >
+                      📷 Add photos
+                    </label>
+                    <label
+                      htmlFor="videoUpload"
+                      className="cursor-pointer inline-flex items-center justify-center gap-2 w-full sm:w-auto px-4 py-2.5 rounded-xl bg-[#0F253B] hover:bg-[#1b3a58] text-white text-xs font-bold transition"
+                    >
+                      🎥 Add video
+                    </label>
+                  </div>
 
-                  </label>
+                  <p className="text-[10px] text-gray-400 mt-3">
+                    or drag &amp; drop here · Photos (JPG, PNG, HEIC) up to 10MB · Videos (MP4, MOV) up to 100MB
+                  </p>
 
                 </div>
 

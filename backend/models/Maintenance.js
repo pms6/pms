@@ -5,15 +5,19 @@ import mongoose from "mongoose";
 // frontend/src/app/admin/maintenance/page.js.
 export const MAINTENANCE_PRIORITIES = ["urgent", "high", "med", "low"];
 
-// The picker offers "pending", "assigned", "in_progress", "on_hold" and
-// "sorted" (see STATUSES in frontend/src/app/Shared/MaintenanceBooklet.js).
+// The picker offers "pending", "assigned", "in_progress", "awaiting_response",
+// "on_hold" and "sorted" (see STATUSES in
+// frontend/src/app/Shared/MaintenanceBooklet.js).
 // "open" and "closed" were retired from the vocabulary but stay in the enum so
 // rows saved under the old scheme keep validating on edit.
+// Moving an entry to "awaiting_response" alerts every admin (see
+// notifyAwaitingResponse in maintenance.controller.js).
 export const MAINTENANCE_STATUSES = [
   "pending",
   "open",
   "assigned",
   "in_progress",
+  "awaiting_response",
   "on_hold",
   "sorted",
   "closed",
@@ -50,6 +54,22 @@ const mediaSchema = new mongoose.Schema(
     bytes: { type: Number, default: 0 },
   },
   { _id: false }
+);
+
+// One message in the entry's discussion. Append-only, like a task's history —
+// the point is a complete record of what was asked and answered on the job.
+// Staff-only: it is stripped from anything a tenant reads.
+const commentSchema = new mongoose.Schema(
+  {
+    text: { type: String, trim: true, required: true },
+    authorId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    authorEmail: { type: String, trim: true, default: "" },
+    authorRole: { type: String, trim: true, default: "" },
+    createdAt: { type: Date, default: Date.now },
+    // Set when the author corrected their own comment.
+    editedAt: { type: Date, default: null },
+  },
+  { _id: true }
 );
 
 const maintenanceSchema = new mongoose.Schema(
@@ -147,6 +167,9 @@ const maintenanceSchema = new mongoose.Schema(
     // the tenant report form, which posts one photo) keep rendering. The
     // controller mirrors the first image of `media` into it.
     image: { type: String, trim: true, default: "" },
+
+    // The office's discussion on this entry — updates, questions and answers.
+    comments: { type: [commentSchema], default: [] },
 
     // ============================
     // Soft delete

@@ -9,7 +9,7 @@
 // /admin/tasks/<id>/edit instead of opening it in place.
 
 import { useState } from "react";
-import { X, Loader2, Paperclip } from "lucide-react";
+import { X, Loader2, Paperclip, Lock } from "lucide-react";
 import { uploadAnyFileToCloudinary } from "../../utils/uploadToCloudinary";
 import {
   TASK_PRIORITIES,
@@ -48,6 +48,10 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
     startDate: initial?.startDate ? new Date(initial.startDate).toISOString() : "",
     dueDate: initial?.dueDate ? new Date(initial.dueDate).toISOString() : "",
     adminRemarks: initial?.adminRemarks || "",
+    isPrivate: Boolean(initial?.isPrivate),
+    // Whose action is required first on a shared task. "" lets the backend
+    // fall back to the first assignee.
+    actionOwnerId: initial?.actionOwner?.userId ? String(initial.actionOwner.userId) : "",
   });
   // Attachments already saved on the task, kept so an edit does not drop them.
   const [existing, setExisting] = useState(initial?.attachments || []);
@@ -70,12 +74,14 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
   };
 
   const toggleAssignee = (userId) =>
-    setForm((f) => ({
-      ...f,
-      assignees: f.assignees.includes(userId)
+    setForm((f) => {
+      const assignees = f.assignees.includes(userId)
         ? f.assignees.filter((id) => id !== userId)
-        : [...f.assignees, userId],
-    }));
+        : [...f.assignees, userId];
+      // The action owner has to be somebody on the task.
+      const actionOwnerId = assignees.includes(f.actionOwnerId) ? f.actionOwnerId : "";
+      return { ...f, assignees, actionOwnerId };
+    });
 
   const submit = async (e) => {
     e.preventDefault();
@@ -209,6 +215,50 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
             </div>
           )}
         </div>
+
+        {/* Shared task — one task, several people, one of them holding it at
+            a time. Each person passes it on from the task itself when their
+            part is done. */}
+        {form.assignees.length > 1 && (
+          <div>
+            <label className={LABEL}>Action currently required from</label>
+            <select
+              className={FIELD}
+              value={form.actionOwnerId || form.assignees[0]}
+              onChange={set("actionOwnerId")}
+            >
+              {form.assignees.map((id) => (
+                <option key={id} value={id}>
+                  {members.find((m) => String(m.userId) === id)?.email || "Team member"}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] font-medium text-gray-400 mt-1.5">
+              Everyone assigned sees whose move it is. This person is notified, and
+              passes the task to the next person when their part is done.
+            </p>
+          </div>
+        )}
+
+        <label className="flex items-start gap-2.5 px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={form.isPrivate}
+            onChange={(e) => setForm((f) => ({ ...f, isPrivate: e.target.checked }))}
+            className="accent-[#F47C3C] mt-0.5"
+          />
+          <span>
+            <span className="flex items-center gap-1.5 text-xs font-bold text-[#0F253B]">
+              <Lock size={12} className="text-[#F47C3C]" /> Private task
+            </span>
+            <span className="block text-[11px] font-medium text-gray-400 mt-0.5">
+              A task is already seen only by the people assigned, you and the
+              organization owner — unless somebody in Operations is on it, which
+              opens it to every role. Tick this to keep an Operations task
+              restricted too.
+            </span>
+          </span>
+        </label>
 
         <div className="grid grid-cols-2 gap-3">
           <div>

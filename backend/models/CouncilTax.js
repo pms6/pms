@@ -90,6 +90,11 @@ const councilTaxSchema = new mongoose.Schema(
     // Stamped when the status turns Paid, cleared when it turns back.
     paidAt: { type: Date, default: null },
 
+    // The due dates a "payment due" reminder has already gone out for, so the
+    // daily job reminds once per instalment rather than every morning. Kept
+    // apart from the instalments because saving the form replaces that list.
+    remindedDueDates: { type: [Date], default: [] },
+
     // The council's bill, payment receipts, discount letters.
     files: { type: [attachmentSchema], default: [] },
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, CreditCard, UserPlus, CalendarClock, ShieldCheck, BarChart3, ListChecks, MapPin } from "lucide-react";
+import { LayoutDashboard, CreditCard, UserPlus, CalendarClock, ShieldCheck, BarChart3, ListChecks, MapPin, MessagesSquare } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 import LiveLocationToggle from "../Shared/LiveLocationToggle";
 import ScreenMonitorToggle from "../Shared/ScreenMonitorToggle";
@@ -14,6 +14,7 @@ const NAV = [
   { href: "/operation/leads", label: "Leads", icon: UserPlus },
   { href: "/operation/viewings", label: "Viewings", icon: CalendarClock },
   { href: "/operation/tasks", label: "My Tasks", icon: ListChecks },
+  { href: "/operation/messages", label: "Tenant Messages", icon: MessagesSquare },
   { href: "/operation/live-location", label: "Live Location", icon: MapPin },
 ];
 

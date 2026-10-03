@@ -19,6 +19,9 @@ import {
   History,
   Ban,
   Sun,
+  MessageSquare,
+  Hand,
+  Lock,
 } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "../../Shared/ui";
@@ -38,6 +41,9 @@ import {
   displayName,
   dueLabel,
   isDueToday,
+  isClosed,
+  TEAMS,
+  inTeam,
   FIELD,
   LABEL,
 } from "../../Shared/tasks";
@@ -51,27 +57,38 @@ import TaskNotificationBadge, {
 const STATUS_META = {
   "Not Started": { icon: Circle, tone: "text-slate-500 bg-slate-100" },
   "In Progress": { icon: PlayCircle, tone: "text-blue-700 bg-blue-100" },
+  "Action Required": { icon: Hand, tone: "text-orange-700 bg-orange-100" },
+  "Awaiting Response": { icon: MessageSquare, tone: "text-amber-700 bg-amber-100" },
   Done: { icon: CheckCircle2, tone: "text-emerald-700 bg-emerald-100" },
   Cancelled: { icon: Ban, tone: "text-gray-500 bg-gray-100" },
   Overdue: { icon: AlertTriangle, tone: "text-red-700 bg-red-100" },
 };
 
-function Kpi({ icon: Icon, label, value, tone = "light" }) {
-  const wrap = {
-    navy: "bg-[#0F253B] text-white",
-    orange: "bg-gradient-to-br from-[#F47C3C] to-[#e0651f] text-white",
-    light: "bg-white border border-gray-100 text-[#0F253B]",
-  }[tone];
-  const iconWrap = tone === "light" ? "bg-orange-50 text-[#F47C3C]" : "bg-white/15 text-white";
-  const subC = tone === "light" ? "text-gray-400" : "text-white/70";
+// A summary card that is also a filter: click it to show only that status,
+// click it again (or "All") to clear. The selected card fills navy.
+function Kpi({ icon: Icon, label, value, tone = "light", active = false, onClick }) {
+  const filled = active || tone !== "light";
+  const wrap = active
+    ? "bg-[#0F253B] text-white ring-2 ring-[#F47C3C]"
+    : {
+        orange: "bg-gradient-to-br from-[#F47C3C] to-[#e0651f] text-white",
+        light: "bg-white border border-gray-100 text-[#0F253B] hover:border-[#F47C3C]/40",
+      }[tone];
+  const iconWrap = filled ? "bg-white/15 text-white" : "bg-orange-50 text-[#F47C3C]";
+  const subC = filled ? "text-white/70" : "text-gray-400";
   return (
-    <div className={`rounded-2xl p-5 shadow-sm ${wrap}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-2xl p-5 shadow-sm text-left transition-all ${wrap}`}
+    >
       <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${iconWrap}`}>
         <Icon size={22} />
       </div>
       <p className="text-2xl font-bold mt-4">{value}</p>
       <p className={`text-[11px] font-bold uppercase tracking-widest mt-1 ${subC}`}>{label}</p>
-    </div>
+    </button>
   );
 }
 
@@ -180,6 +197,7 @@ export default function AdminTasks() {
   const [error, setError] = useState("");
 
   const [statusFilter, setStatusFilter] = useState("");
+  const [teamFilter, setTeamFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [memberFilter, setMemberFilter] = useState("");
   const [propertyFilter, setPropertyFilter] = useState("");
@@ -192,8 +210,10 @@ export default function AdminTasks() {
 
   const loadData = useCallback(async () => {
     try {
+      // Status and team are NOT sent: both are applied to the loaded list
+      // below, so the summary cards can count every status for the team in
+      // view rather than only the one currently selected.
       const params = {};
-      if (statusFilter) params.status = statusFilter;
       if (priorityFilter) params.priority = priorityFilter;
       if (memberFilter) params.assignee = memberFilter;
       if (propertyFilter) params.property = propertyFilter;
@@ -217,7 +237,7 @@ export default function AdminTasks() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, priorityFilter, memberFilter, propertyFilter, q]);
+  }, [priorityFilter, memberFilter, propertyFilter, q]);
 
   useEffect(() => {
     (async () => {
@@ -298,11 +318,44 @@ export default function AdminTasks() {
   };
 
   const stats = dash?.stats;
-  // "Due today" is a client-side view over the already-loaded list, so it
-  // stacks with the status / priority / member filters rather than replacing
-  // that request.
-  const shown = dueTodayOnly ? tasks.filter(isDueToday) : tasks;
+  // Team, status and "due today" are all views over the already-loaded list,
+  // so they stack with each other and with the priority / member / property
+  // filters the request applied (e.g. Operations + Done).
+  const teamTasks = teamFilter ? tasks.filter((t) => inTeam(t, teamFilter)) : tasks;
+  // What the cards show: every status counted within the team in view, so
+  // they move as soon as the team or any other filter changes.
+  const counts = teamTasks.reduce(
+    (acc, t) => {
+      acc[t.effectiveStatus] = (acc[t.effectiveStatus] || 0) + 1;
+      if (isDueToday(t)) acc.dueToday++;
+      return acc;
+    },
+    { dueToday: 0 }
+  );
+  const count = (key) => (loading ? "—" : counts[key] ?? 0);
+  const toggleStatus = (s) => setStatusFilter((cur) => (cur === s ? "" : s));
+
+  const shown = teamTasks
+    .filter((t) => (statusFilter ? t.effectiveStatus === statusFilter : true))
+    .filter((t) => (dueTodayOnly ? isDueToday(t) : true));
   const detail = tasks.find((t) => t._id === detailId);
+
+  const sections = [
+    {
+      key: "active",
+      title: "Active tasks",
+      rows: shown.filter((t) => !isClosed(t)),
+      pill: "bg-blue-50 text-blue-700",
+      empty: "No active tasks in this view",
+    },
+    {
+      key: "closed",
+      title: "Completed & closed",
+      rows: shown.filter(isClosed),
+      pill: "bg-emerald-50 text-emerald-700",
+      empty: "No completed or cancelled tasks in this view",
+    },
+  ];
 
   return (
     <div className="space-y-5">
@@ -325,9 +378,43 @@ export default function AdminTasks() {
         </div>
       )}
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
-        <Kpi icon={ListChecks} label="Total tasks" value={loading ? "—" : stats?.total ?? 0} tone="navy" />
+      {/* Teams — pick one to see only that team's tasks. Stacks with the
+          status cards underneath. */}
+      <div className="flex flex-wrap items-center gap-1 bg-white border border-gray-100 rounded-2xl p-1.5 w-fit max-w-full">
+        {[{ key: "", label: "All teams" }, ...TEAMS].map((team) => {
+          const active = teamFilter === team.key;
+          const n = team.key ? tasks.filter((t) => inTeam(t, team.key)).length : tasks.length;
+          return (
+            <button
+              key={team.key || "all"}
+              type="button"
+              onClick={() => setTeamFilter(team.key)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                active ? "bg-[#0F253B] text-white" : "text-gray-400 hover:text-[#0F253B]"
+              }`}
+            >
+              {team.label}
+              <span
+                className={`px-1.5 py-0.5 rounded-md text-[10px] ${
+                  active ? "bg-white/15 text-white" : "bg-gray-100 text-gray-500"
+                }`}
+              >
+                {loading ? "—" : n}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Status cards — each is a filter. Counts are for the team in view. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-4">
+        <Kpi
+          icon={ListChecks}
+          label="All"
+          value={loading ? "—" : teamTasks.length}
+          active={!statusFilter}
+          onClick={() => setStatusFilter("")}
+        />
         <button
           type="button"
           onClick={() => setDueTodayOnly((v) => !v)}
@@ -341,16 +428,30 @@ export default function AdminTasks() {
           <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${dueTodayOnly ? "bg-white/15 text-white" : "bg-orange-50 text-[#F47C3C]"}`}>
             <Sun size={22} />
           </div>
-          <p className="text-2xl font-bold mt-4">{loading ? "—" : stats?.dueToday ?? 0}</p>
+          <p className="text-2xl font-bold mt-4">{count("dueToday")}</p>
           <p className={`text-[11px] font-bold uppercase tracking-widest mt-1 ${dueTodayOnly ? "text-white/70" : "text-gray-400"}`}>
             Due today
           </p>
         </button>
-        <Kpi icon={Circle} label="Not started" value={loading ? "—" : stats?.byStatus?.["Not Started"] ?? 0} />
-        <Kpi icon={PlayCircle} label="In progress" value={loading ? "—" : stats?.byStatus?.["In Progress"] ?? 0} />
-        <Kpi icon={CheckCircle2} label="Done" value={loading ? "—" : stats?.byStatus?.Done ?? 0} />
-        <Kpi icon={Ban} label="Cancelled" value={loading ? "—" : stats?.byStatus?.Cancelled ?? 0} />
-        <Kpi icon={AlertTriangle} label="Overdue" value={loading ? "—" : stats?.byStatus?.Overdue ?? 0} tone="orange" />
+        {[
+          { key: "Not Started", label: "Not started", icon: Circle },
+          { key: "In Progress", label: "In progress", icon: PlayCircle },
+          { key: "Action Required", label: "Action required", icon: Hand },
+          { key: "Awaiting Response", label: "Awaiting response", icon: MessageSquare },
+          { key: "Done", label: "Done", icon: CheckCircle2 },
+          { key: "Cancelled", label: "Cancelled", icon: Ban },
+          { key: "Overdue", label: "Overdue", icon: AlertTriangle, tone: "orange" },
+        ].map((s) => (
+          <Kpi
+            key={s.key}
+            icon={s.icon}
+            label={s.label}
+            value={count(s.key)}
+            tone={s.tone}
+            active={statusFilter === s.key}
+            onClick={() => toggleStatus(s.key)}
+          />
+        ))}
       </div>
 
       {/* Completion + priority + members */}
@@ -549,7 +650,7 @@ export default function AdminTasks() {
           }`}
         >
           <Sun size={14} className={dueTodayOnly ? "text-white" : "text-[#F47C3C]"} />
-          Due today{typeof stats?.dueToday === "number" ? ` (${stats.dueToday})` : ""}
+          Due today{loading ? "" : ` (${counts.dueToday})`}
         </button>
         <select
           value={statusFilter}
@@ -619,6 +720,20 @@ export default function AdminTasks() {
             </p>
           </div>
         ) : (
+          // Open work and finished work are read apart, the way the
+          // Maintenance Booklet keeps its "sorted" entries in their own card.
+          // Each half is already in schedule order from the API.
+          sections.map((sec, i) => (
+          <div key={sec.key} className={i > 0 ? "border-t-4 border-gray-50" : ""}>
+          <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+            <h2 className="text-base font-bold text-[#0F253B]">{sec.title}</h2>
+            <span className={`rounded-full px-3 py-1 text-xs font-bold ${sec.pill}`}>
+              {sec.rows.length} {sec.rows.length === 1 ? "Task" : "Tasks"}
+            </span>
+          </div>
+          {sec.rows.length === 0 ? (
+            <p className="px-5 py-8 text-center text-sm font-medium text-gray-400">{sec.empty}</p>
+          ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -634,7 +749,7 @@ export default function AdminTasks() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-sm font-medium text-[#0F253B]">
-                {shown.map((t) => (
+                {sec.rows.map((t) => (
                   <tr
                     key={t._id}
                     onClick={() => setDetailId(t._id)}
@@ -673,6 +788,22 @@ export default function AdminTasks() {
                     </td>
                     <td className="p-4 text-xs text-gray-500">
                       {(t.assignees || []).map((a) => displayName(a.email)).join(", ") || "—"}
+                      {/* Shared task: whose move it is right now. */}
+                      {t.isShared && !isClosed(t) && t.actionOwner && (
+                        <span
+                          className={`mt-1 flex w-fit items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            t.isMyAction ? "bg-[#F47C3C] text-white" : "bg-orange-50 text-[#F47C3C]"
+                          }`}
+                        >
+                          <Hand size={10} />
+                          {t.isMyAction ? "Your action" : `Action: ${displayName(t.actionOwner.email)}`}
+                        </span>
+                      )}
+                      {t.isPrivate && (
+                        <span className="mt-1 flex w-fit items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#0F253B] text-white">
+                          <Lock size={10} /> Private
+                        </span>
+                      )}
                     </td>
                     <td className="p-4">
                       <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${PRIORITY_TONE[t.priority]}`}>
@@ -776,6 +907,9 @@ export default function AdminTasks() {
               </tbody>
             </table>
           </div>
+          )}
+          </div>
+          ))
         )}
       </div>
 

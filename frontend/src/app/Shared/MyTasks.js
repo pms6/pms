@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Search, ListChecks, Circle, PlayCircle, CheckCircle2, AlertTriangle,
   CalendarClock, Paperclip, MessageSquare, UserRound, Users, Sun,
-  Building2,
+  Building2, Hand, Lock,
 } from "lucide-react";
 import { PageHeader } from "./ui";
 import api from "@/app/api/api";
@@ -16,7 +16,7 @@ import TaskNotificationBadge, {
 } from "./TaskNotificationBadge";
 import {
   TASK_PRIORITIES, PRIORITY_TONE, STATUS_TONE, PRIORITY_DOT,
-  fmtDateTime, fmtSchedule, displayName, dueLabel, isDueToday,
+  fmtDateTime, fmtSchedule, displayName, dueLabel, isDueToday, isClosed, TEAMS, inTeam,
 } from "./tasks";
 
 // Keys are matched against a task's effectiveStatus, so the completed tab is
@@ -28,6 +28,8 @@ const TABS = [
   { key: "today", label: "Due today", icon: Sun },
   { key: "Not Started", label: "Not started", icon: Circle },
   { key: "In Progress", label: "In progress", icon: PlayCircle },
+  { key: "Action Required", label: "Action required", icon: Hand },
+  { key: "Awaiting Response", label: "Awaiting response", icon: MessageSquare },
   { key: "Overdue", label: "Overdue", icon: AlertTriangle },
   { key: "Done", label: "Completed", icon: CheckCircle2 },
 ];
@@ -48,9 +50,11 @@ const TABS = [
 export default function MyTasks({ portalLabel = "your" }) {
   const [scope, setScope] = useState("mine");
   const [tasks, setTasks] = useState([]);
-  const [stats, setStats] = useState({ total: 0 });
   const [tab, setTab] = useState("all");
   const [priority, setPriority] = useState("");
+  // Team scope only: narrow the board to one person's tasks.
+  const [person, setPerson] = useState("");
+  const [teamKey, setTeamKey] = useState("");
   const [q, setQ] = useState("");
   const [detailId, setDetailId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -64,7 +68,6 @@ export default function MyTasks({ portalLabel = "your" }) {
     try {
       const { data } = await api.get(scope === "team" ? "/tasks" : "/tasks/my");
       setTasks(data?.data || []);
-      setStats(data?.stats || { total: 0 });
       setError("");
     } catch (err) {
       setError(
@@ -120,26 +123,47 @@ export default function MyTasks({ portalLabel = "your" }) {
   }, [detailId, tasks]);
 
   const needle = q.trim().toLowerCase();
-  const list = tasks.filter((t) => {
-    if (tab === "today") {
-      if (!isDueToday(t)) return false;
-    } else if (tab !== "all" && t.effectiveStatus !== tab) {
+  // Everything except the status tab — the set the tab cards count over, so
+  // their numbers follow the team, person, priority and search in view.
+  const base = tasks.filter((t) => {
+    if (priority && t.priority !== priority) return false;
+    if (team && teamKey && !inTeam(t, teamKey)) return false;
+    if (team && person && !(t.assignees || []).some((a) => String(a.userId) === person)) {
       return false;
     }
-    if (priority && t.priority !== priority) return false;
     if (!needle) return true;
     return (
       t.title?.toLowerCase().includes(needle) ||
       t.description?.toLowerCase().includes(needle)
     );
   });
+  const list = base.filter((t) =>
+    tab === "today" ? isDueToday(t) : tab === "all" || t.effectiveStatus === tab
+  );
+
+  // Everyone who has a task on the board, for the per-person filter.
+  const people = [
+    ...new Map(
+      tasks.flatMap((t) => t.assignees || []).map((a) => [String(a.userId), a.email])
+    ),
+  ].sort((a, b) => displayName(a[1]).localeCompare(displayName(b[1])));
+
+  // Open work first, finished work in a section of its own underneath. The
+  // API already returns each in schedule order.
+  const groups = [
+    { key: "active", title: "Active tasks", rows: list.filter((t) => !isClosed(t)) },
+    { key: "closed", title: "Completed & closed", rows: list.filter(isClosed) },
+  ].filter((g) => g.rows.length);
 
   const detail = tasks.find((t) => t._id === detailId);
-  const counts = {
-    ...stats,
-    all: stats.total,
-    today: stats.dueToday ?? tasks.filter(isDueToday).length,
-  };
+  const counts = base.reduce(
+    (acc, t) => {
+      acc[t.effectiveStatus] = (acc[t.effectiveStatus] || 0) + 1;
+      if (isDueToday(t)) acc.today++;
+      return acc;
+    },
+    { all: base.length, today: 0 }
+  );
 
   return (
     <div className="space-y-5">
@@ -147,7 +171,7 @@ export default function MyTasks({ portalLabel = "your" }) {
         title="Tasks"
         subtitle={
           team
-            ? "Every task across the team — open any one to read its history and comment"
+            ? "Your tasks plus everything assigned to Operations — open any one to read its history and comment"
             : "Work assigned to you — update progress and report back to the admin"
         }
       />
@@ -157,7 +181,7 @@ export default function MyTasks({ portalLabel = "your" }) {
       <div className="flex items-center gap-1 bg-white border border-gray-100 rounded-2xl p-1.5 w-fit">
         {[
           { key: "mine", label: "My tasks", icon: UserRound },
-          { key: "team", label: "All team tasks", icon: Users },
+          { key: "team", label: "Team tasks", icon: Users },
         ].map((s) => {
           const active = scope === s.key;
           return (
@@ -170,6 +194,8 @@ export default function MyTasks({ portalLabel = "your" }) {
                 if (s.key !== scope) setLoading(true);
                 setScope(s.key);
                 setTab("all");
+                setPerson("");
+                setTeamKey("");
                 setDetailId(null);
               }}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
@@ -190,7 +216,7 @@ export default function MyTasks({ portalLabel = "your" }) {
       )}
 
       {/* Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
         {TABS.map((t) => {
           const active = tab === t.key;
           return (
@@ -234,6 +260,30 @@ export default function MyTasks({ portalLabel = "your" }) {
           <option value="">All priorities</option>
           {TASK_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
+        {team && (
+          <select
+            value={teamKey}
+            onChange={(e) => setTeamKey(e.target.value)}
+            className="px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-xl text-xs font-bold text-[#0F253B] outline-none focus:ring-2 focus:ring-[#F47C3C] sm:w-44"
+          >
+            <option value="">All teams</option>
+            {TEAMS.map((t) => (
+              <option key={t.key} value={t.key}>{t.label}</option>
+            ))}
+          </select>
+        )}
+        {team && (
+          <select
+            value={person}
+            onChange={(e) => setPerson(e.target.value)}
+            className="px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-xl text-xs font-bold text-[#0F253B] outline-none focus:ring-2 focus:ring-[#F47C3C] sm:w-52"
+          >
+            <option value="">Everyone</option>
+            {people.map(([id, email]) => (
+              <option key={id} value={id}>{displayName(email)}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Task cards */}
@@ -257,8 +307,20 @@ export default function MyTasks({ portalLabel = "your" }) {
           </p>
         </div>
       ) : (
+        groups.map((g) => (
+        <div key={g.key} className="space-y-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-bold text-[#0F253B]">{g.title}</h2>
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+              g.key === "closed" ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700"
+            }`}
+          >
+            {g.rows.length}
+          </span>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {list.map((t) => (
+          {g.rows.map((t) => (
             <button
               key={t._id}
               onClick={() => setDetailId(t._id)}
@@ -276,6 +338,22 @@ export default function MyTasks({ portalLabel = "your" }) {
                 {team && t.isMine && (
                   <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#0F253B] text-white">
                     Mine
+                  </span>
+                )}
+                {t.isPrivate && (
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#0F253B] text-white flex items-center gap-1">
+                    <Lock size={10} /> Private
+                  </span>
+                )}
+                {/* Shared task: whose move it is right now. */}
+                {t.isShared && !isClosed(t) && t.actionOwner && (
+                  <span
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 ${
+                      t.isMyAction ? "bg-[#F47C3C] text-white" : "bg-orange-50 text-[#F47C3C]"
+                    }`}
+                  >
+                    <Hand size={10} />
+                    {t.isMyAction ? "Your action" : `Action: ${displayName(t.actionOwner.email)}`}
                   </span>
                 )}
                 <TaskNotificationBadge task={t} />
@@ -344,6 +422,8 @@ export default function MyTasks({ portalLabel = "your" }) {
             </button>
           ))}
         </div>
+        </div>
+        ))
       )}
 
       {detail && (

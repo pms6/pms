@@ -157,7 +157,7 @@ export default function ProfilePage() {
           My Profile
         </h1>
         <p className="text-sm sm:text-base text-gray-500 mt-1">
-          Manage how your profile appears to your property manager and housemates.
+          Manage how your profile appears to your property manager.
         </p>
       </div>
 

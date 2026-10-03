@@ -23,6 +23,8 @@ const TYPE_LABEL = {
   task_assigned: "Newly assigned",
   task_comment: "New comment",
   task_update: "New update",
+  task_awaiting_response: "Awaiting response",
+  task_action_required: "Your action required",
 };
 
 /**

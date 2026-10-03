@@ -11,6 +11,7 @@ import cookieParser from "cookie-parser";
 import cron from "node-cron";
 import { sendAllPendingReminders } from "./cranjob/complianceReminder.js";
 import { sendAllContractReminders } from "./cranjob/contractReminder.js";
+import { sendCouncilTaxReminders } from "./cranjob/councilTaxReminder.js";
 import { sendAllLocationDigests } from "./cranjob/locationDigest.js";
 import { generateAllSchedules } from "./cranjob/cleaningSchedule.js";
 import { sweepEmailFollowUps } from "./cranjob/emailFollowUp.js";
@@ -79,6 +80,13 @@ cron.schedule("0 8 * * *", async () => {
   const contracts = await sendAllContractReminders();
   console.log(
     `Contract reminders sent: ${contracts.sentCount}, Skipped: ${contracts.skipped}, Errors: ${contracts.errors.length}`
+  );
+
+  // Council tax instalments due within the week, or overdue.
+  console.log("Running council tax payment reminders...");
+  const councilTax = await sendCouncilTaxReminders();
+  console.log(
+    `Council tax reminders sent: ${councilTax.sentCount} (${councilTax.instalments} instalments), Errors: ${councilTax.errors.length}`
   );
 
   // Email Records whose follow-up date has come round, and urgent ones left

@@ -60,7 +60,8 @@ export default function RoleShell({
     );
   }
 
-  const navLink = ({ href, label, icon: Icon }) => {
+  // `badge` — an optional count shown beside the label (unread messages, say).
+  const navLink = ({ href, label, icon: Icon, badge }) => {
     const active = pathname === href || pathname.startsWith(href + "/");
 
     return (
@@ -75,7 +76,16 @@ export default function RoleShell({
         }`}
       >
         <Icon size={18} />
-        {label}
+        <span className="flex-1">{label}</span>
+        {badge > 0 && (
+          <span
+            className={`min-w-5 h-5 px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center ${
+              active ? "bg-white text-[#F47C3C]" : "bg-[#F47C3C] text-white"
+            }`}
+          >
+            {badge > 99 ? "99+" : badge}
+          </span>
+        )}
       </Link>
     );
   };

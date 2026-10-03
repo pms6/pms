@@ -1,9 +1,26 @@
 import { uploadMediaToCloudinary } from '@/app/utils/uploadToCloudinary';
 import { toast } from 'react-toastify';
-import React from 'react';
-import { isVideoFile } from './StepTwo';
+import React, { useState } from 'react';
+import { isVideoFile, uploadedEvidence } from './StepTwo';
 
 export default function StepThree({ formData = {}, setFormData, onBack, onSubmit, loading }) {
+  const [confirmed, setConfirmed] = useState(false);
+  const [adding, setAdding] = useState(false);
+
+  const evidenceCount = uploadedEvidence(formData.photos).length;
+  const canSubmit = evidenceCount > 0 && confirmed && !adding && !loading;
+
+  const handleSubmit = () => {
+    if (evidenceCount === 0) {
+      toast.info('Please add at least one photo or video of the problem.');
+      return;
+    }
+    if (!confirmed) {
+      toast.info('Please confirm the details are correct before submitting.');
+      return;
+    }
+    onSubmit();
+  };
 
   const priorityStyles = {
     Low: "bg-green-50 text-green-600 border-green-100",
@@ -12,25 +29,36 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
   };
 
   const handleAddPhotos = async (e) => {
-    const files = Array.from(e.target.files);
+    const picked = Array.from(e.target.files);
     e.target.value = "";
+    const files = picked.filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
+    if (files.length < picked.length) {
+      toast.error("Only photos and videos can be attached to a repair report.");
+    }
+    if (!files.length) return;
 
     const uploaded = [];
-
-    for (const file of files) {
-      try {
-        uploaded.push(await uploadMediaToCloudinary(file));
-      } catch (error) {
-        toast.error(error.message || `Could not upload "${file.name}"`);
+    setAdding(true);
+    try {
+      for (const file of files) {
+        try {
+          uploaded.push(await uploadMediaToCloudinary(file));
+        } catch (error) {
+          toast.error(error.message || `Could not upload "${file.name}"`);
+        }
       }
+    } finally {
+      setAdding(false);
     }
 
     if (!uploaded.length) return;
 
-    setFormData({
-      ...formData,
-      photos: [...(formData.photos || []), ...uploaded],
-    });
+    // Functional update: an upload can take a while, and the form may have
+    // changed (a photo removed) in the meantime.
+    setFormData((prev) => ({
+      ...prev,
+      photos: [...(prev.photos || []), ...uploaded],
+    }));
   };
 
   const handleRemovePhoto = (index) => {
@@ -118,7 +146,7 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
             </SectionWrapper>
 
             {/* Section: Photos */}
-            <SectionWrapper title="Photos Attached">
+            <SectionWrapper title="Photos & Videos Attached">
               <div className="flex flex-col gap-4 py-2">
 
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 md:gap-3">
@@ -151,23 +179,45 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
                     </div>
                   ))}
 
-                  {/* Upload Box */}
-                  <label className="w-full aspect-square border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center text-gray-300 text-xl cursor-pointer hover:border-orange-400 hover:text-orange-400 transition">
-                    +
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*,video/*"
-                      onChange={handleAddPhotos}
-                      className="hidden"
-                    />
-                  </label>
+                  {/* Upload boxes — one for photos, one for video, so a phone
+                      offers the video camera as well as the photo one. */}
+                  {[
+                    { accept: 'image/*', icon: '📷', label: 'Photo' },
+                    { accept: 'video/*', icon: '🎥', label: 'Video' },
+                  ].map((box) => (
+                    <label
+                      key={box.label}
+                      className="w-full aspect-square border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:border-orange-400 hover:text-orange-400 transition"
+                    >
+                      {adding ? (
+                        <div className="w-5 h-5 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <span className="text-lg">{box.icon}</span>
+                          <span className="text-[10px] font-bold mt-1">+ {box.label}</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        multiple
+                        accept={box.accept}
+                        onChange={handleAddPhotos}
+                        className="hidden"
+                      />
+                    </label>
+                  ))}
 
                 </div>
 
-                <p className="text-[11px] text-gray-400">
-                  {formData.photos?.length || 0} photos / videos attached (optional)
-                </p>
+                {evidenceCount > 0 ? (
+                  <p className="text-[11px] text-gray-400">
+                    {evidenceCount} photo{evidenceCount === 1 ? '' : 's'} / video{evidenceCount === 1 ? '' : 's'} attached
+                  </p>
+                ) : (
+                  <p className="text-[11px] font-bold text-red-500">
+                    At least one photo or video is required before you can submit.
+                  </p>
+                )}
 
               </div>
             </SectionWrapper>
@@ -183,10 +233,12 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
               </div>
 
               <div className="flex items-center gap-3 px-1">
-                <input 
-                  type="checkbox" 
-                  id="confirm" 
-                  className="w-5 h-5 rounded border-gray-300 text-orange-500 focus:ring-orange-500" 
+                <input
+                  type="checkbox"
+                  id="confirm"
+                  checked={confirmed}
+                  onChange={(e) => setConfirmed(e.target.checked)}
+                  className="w-5 h-5 rounded border-gray-300 text-orange-500 focus:ring-orange-500"
                 />
                 <label htmlFor="confirm" className="text-xs font-medium text-slate-500">
                   I confirm the details above are correct and I agree to Rentaroomlondon arranging access to the property to carry out the repair.
@@ -197,10 +249,11 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
             {/* Actions */}
             <div className="pt-4 md:pt-0">
               <button
-                onClick={onSubmit}
-                disabled={loading}
+                onClick={handleSubmit}
+                disabled={loading || adding}
+                aria-disabled={!canSubmit}
                 className={`w-full text-[12px] md:text-[16px] font-sans text-white font-bold py-5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-wide
-                  ${loading ? "bg-gray-400 cursor-not-allowed" : "bg-orange-500 hover:bg-orange-600 shadow-orange-200"}
+                  ${!canSubmit ? "bg-gray-400 cursor-not-allowed" : "bg-orange-500 hover:bg-orange-600 shadow-orange-200"}
                 `}
               >
 

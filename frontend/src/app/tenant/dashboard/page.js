@@ -19,6 +19,7 @@ const MR_STATUS = {
   open: { label: "open", tone: "amber" },
   assigned: { label: "assigned", tone: "blue" },
   in_progress: { label: "in progress", tone: "amber" },
+  awaiting_response: { label: "awaiting response", tone: "amber" },
   sorted: { label: "sorted", tone: "green" },
   closed: { label: "closed", tone: "green" },
 };

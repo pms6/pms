@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, UserPlus, CalendarClock, ClipboardList, Megaphone, ListChecks } from "lucide-react";
+import { LayoutDashboard, UserPlus, CalendarClock, ClipboardList, Megaphone, ListChecks, MessagesSquare } from "lucide-react";
 import RoleShell from "../Shared/RoleShell";
 import ScreenMonitorToggle from "../Shared/ScreenMonitorToggle";
 
@@ -11,6 +11,7 @@ const NAV = [
   // { href: "/agent/applicants", label: "Applicants", icon: ClipboardList },
   { href: "/agent/properties", label: "Properties", icon: Megaphone },
   { href: "/agent/tasks", label: "My Tasks", icon: ListChecks },
+  { href: "/agent/messages", label: "Tenant Messages", icon: MessagesSquare },
 ];
 
 export default function AgentLayout({ children }) {

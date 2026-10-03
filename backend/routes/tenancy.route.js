@@ -4,7 +4,6 @@ import {
   getTenancies,
   getTenancyStats,
   getTenantDirectory,
-  getMyHousemates,
   getMyRoom,
   createTenancy,
   updateTenancy,
@@ -20,11 +19,18 @@ const router = express.Router();
 // Apply auth to all routes
 router.use(protect);
 
-// The signed-in tenant's housemates (others in the same property)
-router.get("/housemates", getMyHousemates);
-
-// The signed-in tenant's own room/tenancy
+// The signed-in tenant's own room/tenancy. The one route here a tenant may
+// reach — it is scoped to their own tenancy by email.
+//
+// There is deliberately no "housemates" route: tenants must never see other
+// occupiers' personal details.
 router.get("/my-room", getMyRoom);
+
+// Everything below is the organization's tenancy register — every occupier's
+// name, email and rent — so it is staff-only. `protect` resolves an
+// organizationId for a TENANT account too, which would otherwise hand a tenant
+// the whole house's details.
+router.use(staffOnly);
 
 // Occupancy overview stats (summary cards)
 router.get("/stats", getTenancyStats);
@@ -44,7 +50,7 @@ router.put("/:id", updateTenancy);
 router.delete("/:id", deleteTenancy);
 
 // One tenant's whole history across every record — the Tenants page timeline.
-router.get("/:id/timeline", staffOnly, getTenantTimeline);
+router.get("/:id/timeline", getTenantTimeline);
 
 // Single onboarding invite
 router.patch("/:id/invite", inviteTenant);
