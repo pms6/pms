@@ -97,20 +97,35 @@ const normalizeStatus = (status) => (status === "Completed" ? "Done" : status);
 // time falls due on that start date.
 const dueAt = (task) => task.dueDate || task.startDate || null;
 
-// Lists read in the order the work is scheduled: earliest start first, so
-// overdue work leads and upcoming work follows in time order. A task with no
-// date at all has no place on that line and goes to the end, newest first.
+// Lists lead with overdue work, longest overdue first, then what is on now:
+// tasks dated today, then upcoming ones soonest first. Finished tasks dated
+// before today follow, most recent first, and a task with no date at all goes
+// to the end, newest first.
 const scheduledAt = (task) => {
   const at = task.startDate || task.dueDate;
   return at ? new Date(at).getTime() : null;
 };
 
+// 0 = overdue, 1 = still running today or later (a task that started
+// yesterday but is due tomorrow is current), 2 = done or cancelled before
+// today, 3 = no date.
+const scheduleGroup = (task, today) => {
+  const due = dueAt(task);
+  if (!due) return 3;
+  if (effectiveStatus(task) === "Overdue") return 0;
+  return new Date(due).getTime() >= today ? 1 : 2;
+};
+
 const bySchedule = (a, b) => {
-  const ta = scheduledAt(a);
-  const tb = scheduledAt(b);
-  if (ta !== null && tb !== null && ta !== tb) return ta - tb;
-  if ((ta === null) !== (tb === null)) return ta === null ? 1 : -1;
-  return new Date(b.createdAt) - new Date(a.createdAt);
+  const today = startOfToday().getTime();
+  const ga = scheduleGroup(a, today);
+  const gb = scheduleGroup(b, today);
+  if (ga !== gb) return ga - gb;
+  let diff = 0;
+  if (ga === 0) diff = new Date(dueAt(a)) - new Date(dueAt(b));
+  else if (ga === 1) diff = scheduledAt(a) - scheduledAt(b);
+  else if (ga === 2) diff = new Date(dueAt(b)) - new Date(dueAt(a));
+  return diff || new Date(b.createdAt) - new Date(a.createdAt);
 };
 
 export const effectiveStatus = (task) => {

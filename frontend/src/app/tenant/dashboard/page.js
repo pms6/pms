@@ -20,6 +20,7 @@ const MR_STATUS = {
   assigned: { label: "assigned", tone: "blue" },
   in_progress: { label: "in progress", tone: "amber" },
   awaiting_response: { label: "awaiting response", tone: "amber" },
+  on_hold: { label: "on hold", tone: "gray" },
   sorted: { label: "sorted", tone: "green" },
   closed: { label: "closed", tone: "green" },
 };
@@ -156,6 +157,11 @@ export default function TenantDashboard() {
             </Link>
           }
         >
+          {requests.length > 0 && (
+            <Link href="/tenant/maintenance?tab=requests" className="block mb-2 text-[11px] font-bold text-[#F47C3C] hover:underline">
+              Track progress
+            </Link>
+          )}
           {requests.length === 0 ? (
             <p className="text-sm text-gray-400 font-medium py-2">No maintenance requests yet.</p>
           ) : (

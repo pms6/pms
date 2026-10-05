@@ -1,9 +1,12 @@
 
 
 import React from "react";
-import MaintenanceForm from "./component/MaintenanceForm";
+import MaintenanceTabs from "./component/MaintenanceTabs";
 
-const Page = () => {
+const Page = async ({ searchParams }) => {
+  // `?tab=requests` opens the tracker (the dashboard links there).
+  const { tab } = await searchParams;
+
   return (
     <div>
       
@@ -20,15 +23,14 @@ const Page = () => {
               Maintenance
             </h1>
             <p className="text-xs md:text-sm text-[#6B7280]">
-              Report maintenance issue
+              Report a problem and track your repairs
             </p>
           </div>
 
         </div>
       </div>
 
-      {/* Form */}
-      <MaintenanceForm />
+      <MaintenanceTabs initialTab={tab === "requests" ? "requests" : "report"} />
 
     </div>
   );

@@ -17,6 +17,15 @@ export const uploadedEvidence = (photos) =>
     return url && !p?.loading && !String(url).startsWith('blob:') && p?.type !== 'pdf';
   });
 
+// "Best time to contact you" — values match MAINTENANCE_CONTACT_TIMES on the
+// backend.
+export const CONTACT_TIMES = [
+  { value: "anytime", label: "Anytime" },
+  { value: "morning", label: "Morning (8am–12pm)" },
+  { value: "afternoon", label: "Afternoon (12pm–5pm)" },
+  { value: "evening", label: "Evening (5pm–8pm)" },
+];
+
 export default function StepTwo({ formData, setFormData, onNext, onBack }) {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -58,7 +67,16 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
   </div>
 );
 
+  const access = formData.access || {};
+  const setAccess = (patch) =>
+    setFormData((prev) => ({ ...prev, access: { ...(prev.access || {}), ...patch } }));
+
   const handleNext = () => {
+    if (access.permissionToEnter !== true && access.permissionToEnter !== false) {
+      toast.info("Please say whether a contractor may let themselves in.");
+      return;
+    }
+
     if (!formData.description || !formData.description.trim()) {
       toast.info("Please describe the problem before continuing.");
       return;
@@ -179,7 +197,9 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
           <div className="bg-[#FFF9F5] p-3 rounded-xl border border-[#FDEEE3] flex justify-between items-center mb-5 md:hidden">
             <div className="flex items-center gap-2">
               <span className="text-base">🚪</span>
-              <span className="text-[#F47C3C] font-bold text-xs uppercase tracking-wider">{formData.category}</span>
+              <span className="text-[#F47C3C] font-bold text-xs uppercase tracking-wider">
+                {[formData.category, formData.issue].filter(Boolean).join(" — ")}
+              </span>
             </div>
             <button onClick={onBack} className="text-[#F47C3C] text-xs font-bold underline">Change</button>
           </div>
@@ -256,27 +276,74 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
             </div>
             <div className="p-4 md:p-1 space-y-4">
               
-              <div className="grid grid-cols-2 gap-4">
-                 <div>
-                   <label className="text-[10px] font-bold text-[#6B7280] uppercase mb-1 block">Best time to call</label>
-                   <input
-                      type="time"
-                      className="w-full border border-[#E8E4DF] rounded-lg p-3 text-sm"
-                      value={formData.contactTime}
-                      onChange={(e) =>
-                        setFormData({ ...formData, contactTime: e.target.value })
-                      }
-                    />
-                 </div>
-                 <div>
-                   <label className="text-[10px] font-bold text-[#6B7280] uppercase mb-1 block">Access?</label>
-                   <input 
-                     type="text" 
-                     className="w-full border border-[#E8E4DF] rounded-lg p-3 text-sm " 
-                     value={formData.access} 
-                     onChange={(e) => setFormData({ ...formData, access: e.target.value })} 
-                   />
-                 </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-[#6B7280] uppercase mb-1 block">Best time to contact you</label>
+                  <select
+                    className="w-full border border-[#E8E4DF] rounded-lg p-3 text-sm bg-white"
+                    value={access.contactTime}
+                    onChange={(e) => setAccess({ contactTime: e.target.value })}
+                  >
+                    {CONTACT_TIMES.map((t) => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-[#6B7280] uppercase mb-1 block">When can a contractor visit?</label>
+                  <input
+                    type="text"
+                    className="w-full border border-[#E8E4DF] rounded-lg p-3 text-sm"
+                    placeholder="e.g. Weekdays after 5pm, Saturday mornings"
+                    value={access.availability}
+                    onChange={(e) => setAccess({ availability: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-[#6B7280] uppercase mb-2 block">
+                  If nobody is home, may the contractor let themselves in?
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { value: true, label: "Yes, that's fine" },
+                    { value: false, label: "No, I need to be there" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      onClick={() => setAccess({ permissionToEnter: opt.value })}
+                      className={`p-3 border rounded-xl text-sm font-medium transition
+                      ${access.permissionToEnter === opt.value ? "border-[#F47C3C] bg-[#F47C3C0F] text-[#0F253B]" : "border-[#E8E4DF] bg-white text-[#0F253B]"}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-[#6B7280] uppercase mb-1 block">Any pets?</label>
+                  <input
+                    type="text"
+                    className="w-full border border-[#E8E4DF] rounded-lg p-3 text-sm"
+                    placeholder="e.g. A friendly dog, no pets"
+                    value={access.pets}
+                    onChange={(e) => setAccess({ pets: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-[#6B7280] uppercase mb-1 block">Anything else the contractor should know?</label>
+                  <input
+                    type="text"
+                    className="w-full border border-[#E8E4DF] rounded-lg p-3 text-sm"
+                    placeholder="e.g. Use the side door, alarm panel in hallway"
+                    value={access.notes}
+                    onChange={(e) => setAccess({ notes: e.target.value })}
+                  />
+                </div>
               </div>
             </div>
           </div>

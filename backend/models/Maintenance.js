@@ -72,6 +72,32 @@ const commentSchema = new mongoose.Schema(
   { _id: true }
 );
 
+// How the contractor gets in — asked by the tenant portal's report form so the
+// office can book a visit without phoning round first.
+export const MAINTENANCE_CONTACT_TIMES = ["anytime", "morning", "afternoon", "evening", ""];
+const accessSchema = new mongoose.Schema(
+  {
+    contactTime: { type: String, enum: MAINTENANCE_CONTACT_TIMES, default: "" },
+    // May a contractor let themselves in (with the office's key) if nobody is home?
+    permissionToEnter: { type: Boolean, default: null },
+    // Free text, e.g. "Weekdays after 5pm, Saturday mornings".
+    availability: { type: String, trim: true, default: "" },
+    pets: { type: String, trim: true, default: "" },
+    // Alarm codes, parking, which door — anything else the contractor needs.
+    notes: { type: String, trim: true, default: "" },
+  },
+  { _id: false }
+);
+
+// One move on the job's status, so the tenant can follow its progress.
+const statusEventSchema = new mongoose.Schema(
+  {
+    status: { type: String, enum: MAINTENANCE_STATUSES, required: true },
+    at: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const maintenanceSchema = new mongoose.Schema(
   {
     // ============================
@@ -102,6 +128,11 @@ const maintenanceSchema = new mongoose.Schema(
     title: { type: String, trim: true, required: true },
     description: { type: String, trim: true, default: "" },
     category: { type: String, trim: true, default: "General" },
+    // The specific problem picked under the category in the tenant portal,
+    // e.g. "No hot water" under "Heating and Boiler".
+    issue: { type: String, trim: true, default: "" },
+    // When the tenant says the problem started (`date` is when it was logged).
+    issueStarted: { type: Date, default: null },
 
     // Optional links back to source records; denormalised names keep the card
     // list cheap to render.
@@ -147,6 +178,11 @@ const maintenanceSchema = new mongoose.Schema(
       enum: MAINTENANCE_STATUSES,
       default: "pending",
     },
+    // Every status the job has passed through, oldest first — the tenant's
+    // progress tracker. Rows saved before this existed have none.
+    statusHistory: { type: [statusEventSchema], default: [] },
+
+    access: { type: accessSchema, default: () => ({}) },
 
     // ============================
     // Solution ("what we did") — the booklet's widest column: a procedure

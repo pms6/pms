@@ -10,19 +10,28 @@ import StepThree from './StepThree';
 // Map the form's priority labels to the backend enum.
 const PRIORITY_MAP = { Low: 'low', Routine: 'med', Urgent: 'urgent' };
 
-export default function MaintenanceForm() {
+const EMPTY_FORM = {
+  category: '',
+  categoryId: '',
+  issue: '',
+  priority: 'Routine',
+  description: '',
+  issueStarted: '',
+  access: {
+    contactTime: 'anytime',
+    availability: '',
+    permissionToEnter: null,
+    pets: '',
+    notes: '',
+  },
+  photos: [],
+};
+
+export default function MaintenanceForm({ onViewRequests }) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [formData, setFormData] = useState({
-    category: '',
-    priority: 'Routine',
-    description: '',
-    issueStarted: '',
-    contactTime: 'Anytime',
-    access: 'Yes — someone is always home',
-    photos: []
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
 
   const nextStep = () => setStep((prev) => prev + 1);
   const prevStep = () => setStep((prev) => prev - 1);
@@ -31,15 +40,7 @@ export default function MaintenanceForm() {
   const stepLabels = ["Select Problem", "Add Details", "Confirm & Submit"];
 
   const resetForm = () => {
-    setFormData({
-      category: '',
-      priority: 'Routine',
-      description: '',
-      issueStarted: '',
-      contactTime: 'Anytime',
-      access: 'Yes — someone is always home',
-      photos: [],
-    });
+    setFormData(EMPTY_FORM);
     setStep(1);
     setSubmitted(false);
   };
@@ -70,26 +71,18 @@ export default function MaintenanceForm() {
 
     const coverPhoto = media.find((p) => p.type === 'image')?.url || '';
 
-    // Fold the extra contact fields into the description (the model has no
-    // dedicated columns for them).
-    const detail = [
-      formData.description,
-      formData.contactTime ? `Best time to call: ${formData.contactTime}` : '',
-      formData.access ? `Access: ${formData.access}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
-
     setLoading(true);
     try {
       await api.post('/maintenance', {
-        title: formData.category || 'Maintenance request',
+        title: [formData.category, formData.issue].filter(Boolean).join(' — ') || 'Maintenance request',
         category: formData.category || 'General',
-        description: detail,
+        issue: formData.issue,
+        description: formData.description,
         priority: PRIORITY_MAP[formData.priority] || 'med',
+        access: formData.access,
         media,
         image: coverPhoto,
-        ...(formData.issueStarted ? { date: formData.issueStarted } : {}),
+        ...(formData.issueStarted ? { issueStarted: formData.issueStarted } : {}),
       });
       setSubmitted(true);
       toast.success('Your maintenance request has been submitted.');
@@ -110,10 +103,19 @@ export default function MaintenanceForm() {
           <h2 className="text-xl font-bold text-[#0F253B]">Request submitted</h2>
           <p className="mt-2 text-sm text-[#6B7280]">
             Thanks — your operator has been notified and will be in touch to arrange the repair.
+            You can follow its progress under &quot;My requests&quot;.
           </p>
+          {onViewRequests && (
+            <button
+              onClick={onViewRequests}
+              className="mt-6 w-full py-3 bg-[#0F253B] hover:bg-[#1b3a58] text-white font-bold rounded-xl transition"
+            >
+              Track my requests
+            </button>
+          )}
           <button
             onClick={resetForm}
-            className="mt-6 w-full py-3 bg-[#F47C3C] hover:bg-[#e85e2f] text-white font-bold rounded-xl transition"
+            className="mt-3 w-full py-3 bg-[#F47C3C] hover:bg-[#e85e2f] text-white font-bold rounded-xl transition"
           >
             Report another issue
           </button>

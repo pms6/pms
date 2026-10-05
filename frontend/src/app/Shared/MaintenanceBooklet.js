@@ -202,6 +202,10 @@ function MediaGroup({ label, items }) {
   );
 }
 
+// Whether a tenant filled in any of the report form's access questions.
+const hasAccess = (a) =>
+  !!a && (!!a.contactTime || !!a.availability || typeof a.permissionToEnter === "boolean" || !!a.pets || !!a.notes);
+
 /** The label under a row's field in the read-only view. */
 function ViewRow({ label, children }) {
   return (
@@ -800,6 +804,21 @@ function ViewModal({ entry, srNo, onClose, onEdit, onChanged }) {
           <div className="mt-5">
             <p className={LABEL}>Notes</p>
             <p className="text-sm text-gray-500 font-medium whitespace-pre-line leading-relaxed">{m.description}</p>
+          </div>
+        )}
+
+        {/* What the tenant told us about getting in (tenant portal reports). */}
+        {(m.issue || m.issueStarted || hasAccess(m.access)) && (
+          <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {m.issue && <ViewRow label="Problem">{m.issue}</ViewRow>}
+            {m.issueStarted && <ViewRow label="Started">{fmtDate(m.issueStarted)}</ViewRow>}
+            {m.access?.contactTime && <ViewRow label="Best Contact Time">{nice(m.access.contactTime)}</ViewRow>}
+            {m.access?.availability && <ViewRow label="Contractor Can Visit">{m.access.availability}</ViewRow>}
+            {typeof m.access?.permissionToEnter === "boolean" && (
+              <ViewRow label="Let Themselves In">{m.access.permissionToEnter ? "Yes" : "No — tenant must be home"}</ViewRow>
+            )}
+            {m.access?.pets && <ViewRow label="Pets">{m.access.pets}</ViewRow>}
+            {m.access?.notes && <ViewRow label="Access Notes">{m.access.notes}</ViewRow>}
           </div>
         )}
 

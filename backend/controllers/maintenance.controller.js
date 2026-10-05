@@ -2,8 +2,14 @@
 import Maintenance, {
   MAINTENANCE_STATUSES,
   MAINTENANCE_RESOLVED_STATUSES,
+  MAINTENANCE_CONTACT_TIMES,
 } from "../models/Maintenance.js";
 import Notification from "../models/Notification.js";
+import Tenancy from "../models/Tenancy.js";
+import User from "../models/User.js";
+import Organization from "../models/Organization.js";
+import { sendEmail } from "../utils/sendEmail.js";
+import env from "../config/env.js";
 import { resolveTenantProperty } from "../utils/tenantProperty.js";
 import { orgTeamUserIds } from "../utils/orgTeam.js";
 
@@ -33,6 +39,74 @@ const notifyAwaitingResponse = async (request, actor) => {
   }
 };
 
+const esc = (v) =>
+  String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+// What each status means to the tenant who reported the job.
+const TENANT_STATUS_COPY = {
+  pending: { label: "Reported", line: "We have your report and will review it shortly." },
+  open: { label: "Reported", line: "We have your report and will review it shortly." },
+  assigned: { label: "Contractor assigned", line: "A contractor has been assigned and will be in touch to arrange a visit." },
+  in_progress: { label: "Work in progress", line: "Work on your repair is under way." },
+  awaiting_response: { label: "Awaiting a response", line: "We are waiting on a reply, possibly from you, a contractor or the landlord, before the job can move on." },
+  on_hold: { label: "On hold", line: "Your repair is on hold for now. We will let you know when it moves again." },
+  sorted: { label: "Sorted", line: "Your repair has been marked as complete. If the problem isn't fixed, please report it again." },
+  closed: { label: "Sorted", line: "Your repair has been marked as complete. If the problem isn't fixed, please report it again." },
+};
+
+// Email the tenant behind a job that its status has changed. Only jobs tied to
+// a tenant (reported from the portal, or linked by staff) have anyone to tell.
+// Never throws, and callers don't await it: the status is already saved and a
+// slow SMTP server must not hold up the office's screen.
+const emailTenantStatusChange = async (request, status) => {
+  try {
+    const copy = TENANT_STATUS_COPY[status];
+    if (!copy) return;
+
+    let email = "";
+    let name = "";
+    if (request.tenancyId) {
+      const tenancy = await Tenancy.findById(request.tenancyId).select("tenantEmail tenant").lean();
+      email = tenancy?.tenantEmail || "";
+      name = tenancy?.tenant || "";
+    }
+    if (!email && request.createdBy) {
+      const user = await User.findById(request.createdBy).select("email role").lean();
+      if (user?.role === "Tenant") email = user.email || "";
+    }
+    if (!email) return;
+
+    const org = await Organization.findById(request.organizationId).select("name").lean();
+    const orgName = org?.name || "";
+    const link = `${env.clientUrl}/tenant/maintenance?tab=requests`;
+
+    await sendEmail({
+      email,
+      subject: `Repair update: ${request.title} is now "${copy.label}"${request.ref ? ` (${request.ref})` : ""}`,
+      html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; color: #0F253B;">
+        <h2 style="color: #F47C3C; margin-bottom: 4px;">Your repair has been updated</h2>
+        <p>Hi ${esc(name || "there")},</p>
+        <p>The status of your repair request has changed:</p>
+        <table style="margin: 16px 0; border-collapse: collapse; font-size: 14px;">
+          <tr><td style="padding: 4px 16px 4px 0; color: #64748b;">Reference</td><td><strong>${esc(request.ref || "—")}</strong></td></tr>
+          <tr><td style="padding: 4px 16px 4px 0; color: #64748b;">Issue</td><td><strong>${esc(request.title)}</strong></td></tr>
+          <tr><td style="padding: 4px 16px 4px 0; color: #64748b;">New status</td><td><strong style="color: #F47C3C;">${esc(copy.label)}</strong></td></tr>
+        </table>
+        <p>${esc(copy.line)}</p>
+        <p><a href="${link}" style="display:inline-block;padding:10px 18px;background:#F47C3C;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Track your repair</a></p>
+        <p style="color:#64748b;font-size:12px;">${orgName ? `Sent by ${esc(orgName)}. ` : ""}Please don't reply to this email. Use the tenant portal instead.</p>
+      </div>`,
+    });
+  } catch (err) {
+    console.error("Maintenance status email failed:", err.message);
+  }
+};
+
 // One entry as a plain object, with each comment saying whether THIS viewer
 // may edit it — only the person who wrote it can.
 const withCommentFlags = (request, req) => {
@@ -54,6 +128,9 @@ const EDITABLE_KEYS = [
   "title",
   "description",
   "category",
+  "issue",
+  "issueStarted",
+  "access",
   "propertyId",
   "property",
   "roomId",
@@ -107,6 +184,20 @@ const cleanSteps = (steps) => {
     .filter((s) => s.title || s.detail);
 };
 
+// The tenant form's access answers. Unknown keys are dropped and a contact time
+// outside the vocabulary is treated as "not said".
+const cleanAccess = (access) => {
+  const a = access && typeof access === "object" ? access : {};
+  const text = (v) => String(v ?? "").trim().slice(0, 500);
+  return {
+    contactTime: MAINTENANCE_CONTACT_TIMES.includes(a.contactTime) ? a.contactTime : "",
+    permissionToEnter: typeof a.permissionToEnter === "boolean" ? a.permissionToEnter : null,
+    availability: text(a.availability),
+    pets: text(a.pets),
+    notes: text(a.notes),
+  };
+};
+
 const pickPayload = (body) => {
   const payload = {};
   for (const key of EDITABLE_KEYS) {
@@ -117,6 +208,8 @@ const pickPayload = (body) => {
   }
   // An emptied tenant picker sends "" — that means "no tenant".
   if (payload.tenancyId !== undefined && !payload.tenancyId) payload.tenancyId = null;
+  if (payload.access !== undefined) payload.access = cleanAccess(payload.access);
+  if (payload.issueStarted !== undefined && !payload.issueStarted) payload.issueStarted = null;
   if (payload.media !== undefined) {
     payload.media = cleanMedia(payload.media);
     // Mirror the first photo into the legacy `image` field so anything still
@@ -298,6 +391,7 @@ export const createMaintenance = async (req, res) => {
       srNo,
       organizationId,
       createdBy,
+      statusHistory: [{ status: payload.status || "pending", at: new Date() }],
     });
 
     if (request.status === AWAITING_RESPONSE) await notifyAwaitingResponse(request, req.user);
@@ -368,10 +462,14 @@ export const updateMaintenance = async (req, res) => {
     const awaiting =
       payload.status === AWAITING_RESPONSE && request.status !== AWAITING_RESPONSE;
 
+    const statusChanged = payload.status !== undefined && payload.status !== request.status;
+
     Object.assign(request, payload);
+    if (statusChanged) request.statusHistory.push({ status: payload.status, at: new Date() });
     const updated = await request.save();
 
     if (awaiting) await notifyAwaitingResponse(updated, req.user);
+    if (statusChanged) emailTenantStatusChange(updated, updated.status);
 
     return res.status(200).json({ success: true, data: updated });
   } catch (error) {
@@ -399,9 +497,24 @@ export const updateMaintenanceStatus = async (req, res) => {
 
     // The document as it was BEFORE the change, so a move onto "awaiting
     // response" can be told apart from a re-save of the same status.
+    // Only a real change goes on the tenant's progress tracker; re-saving
+    // the same status leaves the history alone.
     const previous = await Maintenance.findOneAndUpdate(
       { _id: req.params.id, organizationId, isDeleted: false },
-      { status },
+      [
+        {
+          $set: {
+            statusHistory: {
+              $cond: [
+                { $eq: ["$status", status] },
+                { $ifNull: ["$statusHistory", []] },
+                { $concatArrays: [{ $ifNull: ["$statusHistory", []] }, [{ status, at: "$$NOW" }]] },
+              ],
+            },
+            status,
+          },
+        },
+      ],
       { new: false }
     );
 
@@ -414,6 +527,7 @@ export const updateMaintenanceStatus = async (req, res) => {
     request.status = status;
 
     if (awaiting) await notifyAwaitingResponse(request, req.user);
+    if (previous.status !== status) emailTenantStatusChange(request, status);
 
     return res.status(200).json({ success: true, data: request });
   } catch (error) {

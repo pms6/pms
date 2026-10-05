@@ -1,12 +1,13 @@
 import { uploadMediaToCloudinary } from '@/app/utils/uploadToCloudinary';
 import { toast } from 'react-toastify';
 import React, { useState } from 'react';
-import { isVideoFile, uploadedEvidence } from './StepTwo';
+import { isVideoFile, uploadedEvidence, CONTACT_TIMES } from './StepTwo';
 
 export default function StepThree({ formData = {}, setFormData, onBack, onSubmit, loading }) {
   const [confirmed, setConfirmed] = useState(false);
   const [adding, setAdding] = useState(false);
 
+  const access = formData.access || {};
   const evidenceCount = uploadedEvidence(formData.photos).length;
   const canSubmit = evidenceCount > 0 && confirmed && !adding && !loading;
 
@@ -118,6 +119,7 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
                   <span>{formData.category || '🛠️'}</span>
                 </span>
               </div>
+              {formData.issue && <InfoRow label="Problem" value={formData.issue} isBold />}
               <div className="flex justify-between items-center py-3 md:py-5 border-b border-gray-100">
                 <span className="text-gray-400 text-sm font-medium">Priority</span>
                 <span
@@ -141,8 +143,19 @@ export default function StepThree({ formData = {}, setFormData, onBack, onSubmit
 
             {/* Section: Your Details */}
             <SectionWrapper title="Your Details">
-              <InfoRow label="Best contact time" value={formData.contactTime || 'Anytime'} isBold />
-              <InfoRow label="Access" value={formData.access || 'Yes — someone is always home'} isBold />
+              <InfoRow
+                label="Best contact time"
+                value={CONTACT_TIMES.find((t) => t.value === access.contactTime)?.label || 'Anytime'}
+                isBold
+              />
+              <InfoRow label="Contractor can visit" value={access.availability} isBold />
+              <InfoRow
+                label="Let themselves in if nobody is home"
+                value={access.permissionToEnter === true ? 'Yes' : access.permissionToEnter === false ? 'No' : ''}
+                isBold
+              />
+              <InfoRow label="Pets" value={access.pets} isBold />
+              <InfoRow label="Other access notes" value={access.notes} isBold />
             </SectionWrapper>
 
             {/* Section: Photos */}
