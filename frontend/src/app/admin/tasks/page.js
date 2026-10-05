@@ -357,6 +357,36 @@ export default function AdminTasks() {
     },
   ];
 
+  const todayUpcoming = (dash?.upcoming || []).filter(isDueToday);
+  const nextSevenDays = (dash?.upcoming || []).filter(
+    (t) => t.daysUntilDue >= 1 && t.daysUntilDue <= 7
+  );
+  const todayByHour = new Map();
+  const todayWithoutTime = [];
+  for (const task of todayUpcoming) {
+    const date = task.dueDate || task.startDate;
+    if (!date) { todayWithoutTime.push(task); continue; }
+    const hour = Number(new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/London", hour: "2-digit", hourCycle: "h23",
+    }).format(new Date(date)));
+    todayByHour.set(hour, [...(todayByHour.get(hour) || []), task]);
+  }
+  const hourLabel = (hour) => `${hour % 12 || 12}${hour < 12 ? "am" : "pm"}`;
+  const renderUpcomingTask = (t) => (
+    <button key={t._id} onClick={() => setDetailId(t._id)} className="w-full flex items-center gap-3 text-left px-2 py-2 rounded-lg hover:bg-gray-50 transition-all">
+      <span className={`w-2 h-2 rounded-full shrink-0 ${PRIORITY_DOT[t.priority]}`} />
+      <span className="min-w-0 flex-1">
+        {t.property && <span className="block text-xs font-bold text-[#F47C3C] truncate">{t.property}</span>}
+        <span className={`block text-xs truncate ${t.property ? "font-semibold text-gray-600" : "font-bold text-[#0F253B]"}`}>{t.title}</span>
+        {t.unreadNotifications > 0 && <span className="block mt-0.5"><TaskNotificationBadge task={t} /></span>}
+        <span className="block text-[10px] font-medium text-gray-400 truncate">{(t.assignees || []).map((a) => displayName(a.email)).join(", ")}</span>
+      </span>
+      <span className="text-[10px] font-bold text-[#F47C3C] shrink-0 text-right">
+        <span className="block">{dueLabel(t)}</span><span className="block font-medium text-gray-400">{fmtSchedule(t)}</span>
+      </span>
+    </button>
+  );
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -541,42 +571,39 @@ export default function AdminTasks() {
           {!dash?.upcoming?.length ? (
             <p className="text-xs font-medium text-gray-400">Nothing due in the next 14 days.</p>
           ) : (
-            <div className="space-y-2">
-              {dash.upcoming.map((t) => (
-                <button
-                  key={t._id}
-                  onClick={() => setDetailId(t._id)}
-                  className="w-full flex items-center gap-3 text-left px-2 py-2 rounded-lg hover:bg-gray-50 transition-all"
-                >
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${PRIORITY_DOT[t.priority]}`} />
-                  <span className="min-w-0 flex-1">
-                    {t.property && (
-                      <span className="block text-xs font-bold text-[#F47C3C] truncate">
-                        {t.property}
-                      </span>
+            <div className="space-y-3">
+              {todayUpcoming.length > 0 && (
+                <div>
+                  <p className="px-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-[#F47C3C]">Due today</p>
+                  <div className="divide-y divide-gray-50">
+                    {Array.from({ length: 13 }, (_, i) => i + 9)
+                      .filter((hour) => (todayByHour.get(hour) || []).length > 0)
+                      .map((hour) => (
+                      <div key={hour} className="flex gap-3 py-1.5">
+                        <span className="w-10 shrink-0 pt-2 text-[11px] font-bold text-gray-400">{hourLabel(hour)}</span>
+                        <div className="min-w-0 flex-1">
+                          {(todayByHour.get(hour) || []).map(renderUpcomingTask)}
+                        </div>
+                      </div>
+                    ))}
+                    {[...todayByHour.entries()].filter(([hour, rows]) => (hour < 9 || hour > 21) && rows.length > 0).map(([hour, rows]) => (
+                      <div key={hour} className="flex gap-3 py-1.5"><span className="w-10 shrink-0 pt-2 text-[11px] font-bold text-gray-400">{hourLabel(hour)}</span><div className="min-w-0 flex-1">{rows.map(renderUpcomingTask)}</div></div>
+                    ))}
+                    {todayWithoutTime.length > 0 && (
+                      <div className="flex gap-3 py-1.5"><span className="w-10 shrink-0 pt-2 text-[11px] font-bold text-gray-400">Any</span><div className="min-w-0 flex-1">{todayWithoutTime.map(renderUpcomingTask)}</div></div>
                     )}
-                    <span
-                      className={`block text-xs truncate ${
-                        t.property ? "font-semibold text-gray-600" : "font-bold text-[#0F253B]"
-                      }`}
-                    >
-                      {t.title}
-                    </span>
-                    {t.unreadNotifications > 0 && (
-                      <span className="block mt-0.5">
-                        <TaskNotificationBadge task={t} />
-                      </span>
-                    )}
-                    <span className="block text-[10px] font-medium text-gray-400 truncate">
-                      {(t.assignees || []).map((a) => displayName(a.email)).join(", ")}
-                    </span>
-                  </span>
-                  <span className="text-[10px] font-bold text-[#F47C3C] shrink-0 text-right">
-                    <span className="block">{dueLabel(t)}</span>
-                    <span className="block font-medium text-gray-400">{fmtSchedule(t)}</span>
-                  </span>
-                </button>
-              ))}
+                  </div>
+                </div>
+              )}
+              {nextSevenDays.length > 0 && (
+                <div>
+                  <p className="px-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-gray-400">Upcoming in 7 days</p>
+                  <div className="divide-y divide-gray-50">{nextSevenDays.map(renderUpcomingTask)}</div>
+                </div>
+              )}
+              {todayUpcoming.length === 0 && nextSevenDays.length === 0 && (
+                <p className="px-2 text-xs font-medium text-gray-400">No tasks due today or in the next 7 days.</p>
+              )}
             </div>
           )}
         </div>
