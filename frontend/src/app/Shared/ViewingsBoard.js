@@ -38,6 +38,7 @@ const useViewingsData = ({
   propertyId = "",
   scheduledBy = "", // member who created / scheduled the viewing
   period = "all", // "all" | "this_month" | "1m" | "6m" | "12m" | "YYYY-MM"
+  dueToday = false,
 } = {}) => {
   const { user } = useAuth();
   const organizationId = user?.organization?._id || user?.organizationId;
@@ -135,6 +136,13 @@ const useViewingsData = ({
 
   const rescheduleViewing = async (id, payload) => {
     const res = await api.patch(`/viewings/${id}/reschedule`, payload);
+    const updated = res.data?.data || res.data;
+    setAllViewings((prev) => prev.map((v) => (v._id === id ? updated : v)));
+    return updated;
+  };
+
+  const addFeedback = async (id, text) => {
+    const res = await api.post(`/viewings/${id}/feedback`, { text });
     const updated = res.data?.data || res.data;
     setAllViewings((prev) => prev.map((v) => (v._id === id ? updated : v)));
     return updated;
@@ -275,7 +283,7 @@ const useViewingsData = ({
       return false;
     }
 
-    if (!inPeriod(v.date)) return false;
+    if (dueToday ? v.date !== todayISO() : !inPeriod(v.date)) return false;
 
     // Dedicated "Scheduled by" member filter
     if (scheduledBy) {
@@ -342,6 +350,7 @@ const useViewingsData = ({
     createBlock,
     removeBlock,
     updateViewingStatus,
+    addFeedback,
     rescheduleViewing,
     respondToRequest,
     fetchSupportingData,
@@ -370,7 +379,28 @@ function prettyDay(iso) {
   });
 }
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+function prettyDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00Z");
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+const todayISO = () => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const get = (type) => parts.find((part) => part.type === type)?.value || "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+};
 
 // ---------------------------------------------------------------------------
 // Blocked dates
@@ -721,6 +751,7 @@ export default function ViewingsBoard({
   const [propertyId, setPropertyId] = useState("");
   const [scheduledBy, setScheduledBy] = useState(""); // member who added the viewing
   const [period, setPeriod] = useState("all");
+  const [dueTodayOnly, setDueTodayOnly] = useState(false);
 
   const {
     viewings,
@@ -738,6 +769,7 @@ export default function ViewingsBoard({
     createBlock,
     removeBlock,
     updateViewingStatus,
+    addFeedback,
     rescheduleViewing,
     respondToRequest,
     fetchSupportingData,
@@ -747,19 +779,30 @@ export default function ViewingsBoard({
     propertyId,
     scheduledBy,
     period,
+    dueToday: dueTodayOnly,
   });
 
   const [rescheduling, setRescheduling] = useState(null);
   const [blockOpen, setBlockOpen] = useState(false);
+  const [feedbackFor, setFeedbackFor] = useState("");
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [feedbackError, setFeedbackError] = useState("");
 
-  const days = [...new Set(viewings.map((v) => v.date))].sort();
+  const today = todayISO();
+  const days = [...new Set(viewings.map((v) => v.date))].sort((a, b) => {
+    const aUpcoming = a >= today;
+    const bUpcoming = b >= today;
+    if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;
+    return aUpcoming ? a.localeCompare(b) : b.localeCompare(a);
+  });
 
   if (authLoading || initialLoading)
     return <div className="p-8 text-center text-gray-500">Loading data...</div>;
   if (!user)
     return <div className="p-8 text-center text-red-500">Please log in.</div>;
 
-  const hasActiveFilters = person || propertyId || scheduledBy;
+  const hasActiveFilters = person || propertyId || scheduledBy || dueTodayOnly;
 
   return (
     <div className="space-y-5">
@@ -841,6 +884,18 @@ export default function ViewingsBoard({
       {/* Status chips */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setDueTodayOnly((current) => !current)}
+            aria-pressed={dueTodayOnly}
+            className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all ${
+              dueTodayOnly
+                ? "bg-[#F47C3C] text-white border-[#F47C3C]"
+                : "bg-white text-[#F47C3C] border-orange-200 hover:bg-orange-50"
+            }`}
+          >
+            Due Today
+          </button>
           {["", "scheduled", "done", "cancelled"].map((s) => (
             <button
               key={s || "all"}
@@ -907,6 +962,7 @@ export default function ViewingsBoard({
                 setPerson("");
                 setPropertyId("");
                 setScheduledBy("");
+                setDueTodayOnly(false);
               }}
               className="px-3 py-2 text-xs font-bold text-gray-500 bg-white border border-gray-100 rounded-lg hover:bg-gray-50 transition-all"
             >
@@ -988,7 +1044,7 @@ export default function ViewingsBoard({
           {days.map((day) => (
             <div key={day}>
               <p className="text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-3">
-                {prettyDay(day)}
+                {day === today ? `Due Today · ${prettyDate(day)}` : prettyDay(day)}
               </p>
               <div className="space-y-3">
                 {viewings
@@ -1004,6 +1060,9 @@ export default function ViewingsBoard({
                           <Clock size={22} className="text-[#F47C3C] mx-auto" />
                           <div className="font-bold text-xl mt-1 text-[#0F253B]">
                             {v.time}
+                          </div>
+                          <div className="mt-1 text-[10px] font-semibold leading-tight text-gray-400">
+                            {prettyDate(v.date)}
                           </div>
                         </div>
 
@@ -1060,6 +1119,24 @@ export default function ViewingsBoard({
                               )}
                             </div>
                           )}
+
+                          <div className="mt-3 border-t border-gray-100 pt-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-bold text-[#0F253B]">Feedback / comments</p>
+                              <button type="button" onClick={() => { setFeedbackFor(feedbackFor === v._id ? "" : v._id); setFeedbackText(""); setFeedbackError(""); }} className="text-xs font-bold text-[#F47C3C] hover:underline">{feedbackFor === v._id ? "Close" : "Add feedback"}</button>
+                            </div>
+                            {(v.feedback || []).map((entry, index) => (
+                              <div key={entry._id || `${entry.createdAt}-${index}`} className="mt-2 rounded-xl bg-gray-50 px-3 py-2">
+                                <p className="text-sm text-gray-700 whitespace-pre-wrap">{entry.text}</p>
+                                <p className="mt-1 text-[10px] text-gray-400">{entry.authorEmail || "Team member"} · {entry.createdAt ? new Date(entry.createdAt).toLocaleString("en-GB") : ""}</p>
+                              </div>
+                            ))}
+                            {feedbackFor === v._id && <form className="mt-2 space-y-2" onSubmit={async (e) => { e.preventDefault(); if (!feedbackText.trim()) return; setFeedbackSaving(true); setFeedbackError(""); try { await addFeedback(v._id, feedbackText); setFeedbackText(""); setFeedbackFor(""); } catch (err) { setFeedbackError(err.response?.data?.message || "Could not save feedback."); } finally { setFeedbackSaving(false); } }}>
+                              <textarea rows={2} maxLength={5000} required value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)} placeholder="Record viewing feedback or notes…" className="w-full rounded-xl border border-gray-200 p-3 text-sm outline-none focus:ring-2 focus:ring-[#F47C3C]" />
+                              {feedbackError && <p className="text-xs text-red-600">{feedbackError}</p>}
+                              <button disabled={feedbackSaving} className="rounded-lg bg-[#0F253B] px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{feedbackSaving ? "Saving…" : "Save feedback"}</button>
+                            </form>}
+                          </div>
 
                           {v.rescheduleRequest?.status === "pending" && (
                             <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3">

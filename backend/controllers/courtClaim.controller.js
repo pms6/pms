@@ -19,6 +19,7 @@ const pickPayload = (body) => {
   if (body.claimDate !== undefined) payload.claimDate = body.claimDate;
   if (body.claimBy !== undefined) payload.claimBy = text(body.claimBy);
   if (body.claimTo !== undefined) payload.claimTo = text(body.claimTo);
+  if (body.claimType !== undefined) payload.claimType = text(body.claimType);
   if (body.amount !== undefined) payload.amount = money(body.amount);
   if (body.rent !== undefined) payload.rent = money(body.rent);
   if (body.deposit !== undefined) payload.deposit = money(body.deposit);
@@ -38,6 +39,19 @@ const pickPayload = (body) => {
   }
   if (body.claimReason !== undefined) payload.claimReason = text(body.claimReason);
   if (body.details !== undefined) payload.details = text(body.details);
+  if (body.nextActionRequired !== undefined) payload.nextActionRequired = text(body.nextActionRequired);
+  if (body.payments !== undefined) {
+    payload.payments = Array.isArray(body.payments)
+      ? body.payments.map((payment) => {
+          const amount = Number(payment?.amountPaid);
+          return {
+            paymentDate: payment?.paymentDate || null,
+            amountPaid: Number.isFinite(amount) && amount >= 0 ? amount : 0,
+            proof: cleanAttachments(payment?.proof),
+          };
+        })
+      : [];
+  }
   if (body.files !== undefined) payload.files = cleanAttachments(body.files);
 
   return payload;

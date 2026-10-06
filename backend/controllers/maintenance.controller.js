@@ -568,18 +568,27 @@ export const addMaintenanceComment = async (req, res) => {
     });
     await request.save();
 
-    // In-app notification to the owner, admins and managers, plus anyone who
-    // has already written on this entry — minus the author. Failing to write
-    // it must not fail the comment, which is saved by now.
+    // Owner comments go to active Admins; Admin comments go to the Owner.
+    // Other staff keep the existing leadership-and-participants notification.
+    // Failing to write a notification must not fail the saved comment.
     try {
-      const team = await orgTeamUserIds(organizationId);
-      const docs = [...new Set([...team, ...participants])]
+      const role = req.user.organizationRole;
+      let recipients;
+      if (role === "OWNER") {
+        recipients = await orgTeamUserIds(organizationId, ["ADMIN"]);
+      } else if (role === "ADMIN") {
+        recipients = await orgTeamUserIds(organizationId, ["OWNER"]);
+      } else {
+        const team = await orgTeamUserIds(organizationId);
+        recipients = [...team, ...participants];
+      }
+      const docs = [...new Set(recipients)]
         .filter((id) => id !== String(req.user._id))
         .map((userId) => ({
           organizationId,
           userId,
           type: "maintenance_comment",
-          title: "New comment on a maintenance entry",
+          title: "New comment on maintenance issue",
           message: `${[request.ref, request.title].filter(Boolean).join(" — ")}: ${text}`.slice(0, 200),
           relatedType: "Maintenance",
           relatedId: request._id,

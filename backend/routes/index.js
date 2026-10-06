@@ -26,6 +26,7 @@ import internetDetailRoutes from "./internetDetail.route.js"
 import checkInRoutes from "./checkIn.route.js"
 import checkOutRoutes from "./checkOut.route.js"
 import depositRegisterRoutes from "./depositRegister.route.js"
+import depositProtectionRoutes from "./depositProtection.route.js";
 import referenceDataRoutes from "./referenceData.route.js"
 import clientDatabaseRoutes from "./clientDatabase.route.js"
 import inventoryRoutes from "./inventory.route.js"
@@ -92,6 +93,7 @@ router.use("/check-ins", checkInRoutes);
 router.use("/check-outs", checkOutRoutes);
 router.use("/reference-data", referenceDataRoutes);
 router.use("/deposit-register", depositRegisterRoutes);
+router.use("/deposit-protection", depositProtectionRoutes);
 router.use("/client-database", clientDatabaseRoutes);
 
 // Overall Stay Duration — how long each person has been with us, read across

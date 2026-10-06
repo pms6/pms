@@ -616,3 +616,20 @@ export const updateViewingStatus = async (req, res) => {
     res.status(400).json({ message: error.message });
   }
 };
+
+// Add a permanent, attributed note from the person conducting the viewing.
+export const addViewingFeedback = async (req, res) => {
+  try {
+    const text = String(req.body?.text || "").trim();
+    if (!text) return res.status(400).json({ message: "Feedback cannot be empty." });
+    if (text.length > 5000) return res.status(400).json({ message: "Feedback must be 5,000 characters or fewer." });
+    const viewing = await Viewing.findOne({ _id: req.params.id, organizationId: req.user.organizationId, isDeleted: false });
+    if (!viewing) return res.status(404).json({ message: "Viewing not found." });
+    viewing.feedback.push({ text, authorId: req.user._id, authorEmail: req.user.email || "" });
+    await viewing.save();
+    await viewing.populate(POPULATE);
+    res.json(viewing);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};

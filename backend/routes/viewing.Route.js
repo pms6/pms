@@ -7,6 +7,7 @@ import {
   updateViewing,
   deleteViewing,
   updateViewingStatus,
+  addViewingFeedback,
   rescheduleViewing,
   requestMyViewingReschedule,
   respondToRescheduleRequest,
@@ -47,6 +48,7 @@ router.get("/", getViewings);
 router.post("/", createViewing);
 router.put("/:id", updateViewing);
 router.patch("/:id/status", updateViewingStatus);
+router.post("/:id/feedback", addViewingFeedback);
 router.patch("/:id/reschedule", rescheduleViewing);
 router.patch("/:id/reschedule-request/respond", respondToRescheduleRequest);
 router.delete("/:id", deleteViewing);

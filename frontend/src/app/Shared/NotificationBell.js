@@ -71,7 +71,12 @@ export default function NotificationBell() {
       if (seenIds.current) {
         const fresh = rows.filter((n) => !n.read && !seenIds.current.has(n._id));
         for (const n of fresh.slice(0, 3)) {
-          toast.info(n.title, { autoClose: 6000 });
+          toast.info(
+            n.type === "maintenance_comment" && n.message
+              ? `${n.title}: ${n.message}`
+              : n.title,
+            { autoClose: 7000 }
+          );
         }
         // Let an open task list badge the tasks these are about.
         if (fresh.length) window.dispatchEvent(new Event(NOTIFICATIONS_ARRIVED));

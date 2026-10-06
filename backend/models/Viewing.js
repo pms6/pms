@@ -77,6 +77,12 @@ const viewingSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    feedback: [{
+      text: { type: String, required: true, trim: true },
+      authorId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      authorEmail: { type: String, trim: true, default: "" },
+      createdAt: { type: Date, default: Date.now },
+    }],
 
     // ============================
     // Reschedule trail

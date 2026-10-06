@@ -85,6 +85,7 @@ const NAV = [
   { href: "/admin/rent-review", label: "Rent Review", icon: TrendingUp },
   { href: "/admin/finances", label: "Finances", icon: Banknote },
   { href: "/admin/deposits", label: "Deposits", icon: ShieldCheck },
+  { href: "/admin/deposit-protection", label: "Deposit Protection", icon: ShieldCheck },
   { href: "/admin/suppliers", label: "Suppliers", icon: HardHat },
   { href: "/admin/reports", label: "Reports", icon: BarChart3 },
   { href: "/admin/feedback", label: "Feedback", icon: MessageSquare },

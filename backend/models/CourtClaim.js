@@ -12,6 +12,13 @@ import { attachmentSchema } from "../utils/attachments.js";
 // MUST stay in sync with CLAIM_STATUSES in
 // frontend/src/app/Shared/CourtClaimsBoard.js.
 export const CLAIM_STATUSES = ["In Progress", "Paid"];
+export const CLAIM_TYPES = ["Penalty", "Claim"];
+
+const paymentSchema = new mongoose.Schema({
+  paymentDate: { type: Date, required: true },
+  amountPaid: { type: Number, required: true, min: 0 },
+  proof: { type: [attachmentSchema], default: [] },
+}, { timestamps: true });
 
 const courtClaimSchema = new mongoose.Schema(
   {
@@ -44,6 +51,7 @@ const courtClaimSchema = new mongoose.Schema(
     // Who is bringing the claim, and who it is brought against.
     claimBy: { type: String, trim: true, default: "" },
     claimTo: { type: String, trim: true, default: "" },
+    claimType: { type: String, enum: CLAIM_TYPES, default: "Claim" },
 
     // The sheet's Amount, Rent and Deposit columns. Amount is what is being
     // claimed in total; Rent and Deposit are the two figures it is made up
@@ -67,6 +75,11 @@ const courtClaimSchema = new mongoose.Schema(
     // The short reason on the sheet, and the longer write-up behind it.
     claimReason: { type: String, trim: true, default: "" },
     details: { type: String, trim: true, default: "" },
+    nextActionRequired: { type: String, trim: true, default: "" },
+
+    // Payments and costs recorded against this claim, each with its own date
+    // and proof. Total cost paid to date is derived from these entries.
+    payments: { type: [paymentSchema], default: [] },
 
     // Court papers, letters, photos, video — whatever backs the claim.
     files: { type: [attachmentSchema], default: [] },
