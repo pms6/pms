@@ -13,6 +13,7 @@ export const COMPLIANCE_TYPES = [
   "HMO Licence",
   "PAT",
   "Smoke Detector Test",
+  "PRS (Property Redress Scheme)",
 ];
 
 // Types that never expire. A floor plan is a record of the building, not a
@@ -68,6 +69,29 @@ const complianceSchema = new mongoose.Schema(
     subType: {
       type: String,
       trim: true,
+    },
+
+    // Property Redress Scheme details. These live on the shared compliance
+    // record so the existing register, access controls and attachment flow
+    // continue to apply.
+    companyName: {
+      type: String,
+      trim: true,
+      required: function () {
+        return this.type === "PRS (Property Redress Scheme)";
+      },
+    },
+
+    payment: {
+      type: Number,
+      required: function () {
+        return this.type === "PRS (Property Redress Scheme)";
+      },
+      min: 0,
+      validate: {
+        validator: (value) => value === undefined || Number.isFinite(value),
+        message: "Payment must be a valid GBP amount.",
+      },
     },
 
     carriedOut: {

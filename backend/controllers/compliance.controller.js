@@ -101,6 +101,8 @@ export const createCompliance = async (req, res) => {
       propertyId,
       type,
       subType,
+      companyName,
+      payment,
       carriedOut,
       validityMonths,
       expiryDate,
@@ -134,12 +136,26 @@ export const createCompliance = async (req, res) => {
     // than storing whatever the form happened to hold keeps it out of the
     // reminder job's expiryDate query and off the expiring-soon filters.
     const dated = !NON_EXPIRING_TYPES.includes(type);
+    const amount = num(payment);
+    if (type === "PRS (Property Redress Scheme)") {
+      if (!String(companyName || "").trim()) {
+        return res.status(400).json({ success: false, message: "Company Name is required." });
+      }
+      if (amount === undefined || amount < 0 || !/^\d+(\.\d{1,2})?$/.test(String(payment))) {
+        return res.status(400).json({ success: false, message: "Payment must be a valid GBP amount." });
+      }
+      if (!carriedOut || !expiryDate || new Date(expiryDate) < new Date(carriedOut)) {
+        return res.status(400).json({ success: false, message: "End Date must be on or after Start Date." });
+      }
+    }
 
     const compliance = new Compliance({
       organizationId,
       propertyId,
       type,
       subType,
+      companyName: type === "PRS (Property Redress Scheme)" ? String(companyName).trim() : undefined,
+      payment: type === "PRS (Property Redress Scheme)" ? amount : undefined,
       carriedOut: dated ? carriedOut : undefined,
       validityMonths: dated ? num(validityMonths) : undefined,
       expiryDate: dated ? expiryDate : undefined,
@@ -173,6 +189,8 @@ const EDITABLE_KEYS = [
   "propertyId",
   "type",
   "subType",
+  "companyName",
+  "payment",
   "carriedOut",
   "validityMonths",
   "expiryDate",
@@ -226,10 +244,33 @@ export const updateCompliance = async (req, res) => {
 
       if (key === "validityMonths" || key === "reminderDaysBefore") {
         compliance[key] = Number(req.body[key]);
+      } else if (key === "payment") {
+        if (req.body.type && req.body.type !== "PRS (Property Redress Scheme)") {
+          compliance[key] = undefined;
+          continue;
+        }
+        const raw = String(req.body[key]);
+        const amount = Number(raw);
+        if (!/^\d+(\.\d{1,2})?$/.test(raw) || !Number.isFinite(amount) || amount < 0) {
+          return res.status(400).json({ success: false, message: "Payment must be a valid GBP amount." });
+        }
+        compliance[key] = amount;
       } else if (key === "autoReminder") {
         compliance[key] = req.body[key] === "true" || req.body[key] === true;
       } else {
         compliance[key] = req.body[key];
+      }
+    }
+
+    if (compliance.type === "PRS (Property Redress Scheme)") {
+      if (!String(compliance.companyName || "").trim()) {
+        return res.status(400).json({ success: false, message: "Company Name is required." });
+      }
+      if (!Number.isFinite(compliance.payment) || compliance.payment < 0 || Math.round(compliance.payment * 100) !== compliance.payment * 100) {
+        return res.status(400).json({ success: false, message: "Payment must be a valid GBP amount." });
+      }
+      if (!compliance.carriedOut || !compliance.expiryDate || new Date(compliance.expiryDate) < new Date(compliance.carriedOut)) {
+        return res.status(400).json({ success: false, message: "End Date must be on or after Start Date." });
       }
     }
 

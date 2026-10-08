@@ -26,7 +26,8 @@ const CATEGORIES = [
   "Gas Safety",
   "HMO Licence",
   "PAT",
-  "Smoke Detector Test"
+  "Smoke Detector Test",
+  "PRS (Property Redress Scheme)"
 ];
 
 // Types that never expire — MUST stay in sync with NON_EXPIRING_TYPES in
@@ -265,6 +266,8 @@ function ComplianceModal({ record, properties, onClose, onSave }) {
     property: record?.property || "",
     type: record?.type || "Carbon Monoxide Check",
     subType: record?.subType || "",
+    companyName: record?.companyName || "",
+    payment: record?.payment ?? "",
     carriedOut: toDateInput(record?.carriedOut),
     validityMonths: String(record?.validityMonths ?? "3"),
     expiryDate: toDateInput(record?.expiryDate),
@@ -291,13 +294,14 @@ function ComplianceModal({ record, properties, onClose, onSave }) {
   const [error, setError] = useState("");
 
   const dated = expires(form.type);
+  const isPRS = form.type === "PRS (Property Redress Scheme)";
 
   const set = (k) => (e) => {
     const val = e.target.type === "checkbox" ? e.target.checked : e.target.value;
     setForm((f) => {
       const updated = { ...f, [k]: val };
 
-      if ((k === "carriedOut" || k === "validityMonths") && updated.carriedOut) {
+      if (!isPRS && (k === "carriedOut" || k === "validityMonths") && updated.carriedOut) {
         const date = new Date(updated.carriedOut);
         date.setMonth(date.getMonth() + Number(updated.validityMonths || 0));
         updated.expiryDate = date.toISOString().split('T')[0];
@@ -376,6 +380,9 @@ function ComplianceModal({ record, properties, onClose, onSave }) {
     if (!form.propertyId) { setError("Property is required"); return; }
     // Only types that actually expire need a date; a floor plan has none.
     if (dated && !form.expiryDate) { setError("Expiry date is required"); return; }
+    if (isPRS && !form.companyName.trim()) { setError("Company Name is required"); return; }
+    if (isPRS && (!/^\d+(\.\d{1,2})?$/.test(String(form.payment)) || Number(form.payment) < 0)) { setError("Enter a valid GBP payment amount"); return; }
+    if (isPRS && new Date(form.expiryDate) < new Date(form.carriedOut)) { setError("End Date cannot be earlier than Start Date"); return; }
     // Saving mid-upload would drop whatever has not landed yet.
     if (uploading.length) { setError("Wait for the uploads to finish"); return; }
 
@@ -396,7 +403,7 @@ function ComplianceModal({ record, properties, onClose, onSave }) {
       <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-7 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-bold text-[#0F253B]">
-            {record ? "Edit Compliance Asset" : "Add Compliance Asset"}
+            {isPRS ? "PRS (Property Redress Scheme)" : record ? "Edit Compliance Asset" : "Add Compliance Asset"}
           </h3>
           <button onClick={onClose} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
         </div>
@@ -416,6 +423,13 @@ function ComplianceModal({ record, properties, onClose, onSave }) {
             </select>
           </div>
 
+          {isPRS && (
+            <div>
+              <label className={LABEL}>Company Name</label>
+              <input className={FIELD} value={form.companyName} onChange={set("companyName")} required placeholder="Company name" />
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={LABEL}>Certificate Type</label>
@@ -431,7 +445,27 @@ function ComplianceModal({ record, properties, onClose, onSave }) {
 
           {/* A floor plan has no completion or expiry date, so the whole row
               goes away rather than sitting there demanding one. */}
-          {dated ? (
+          {isPRS ? (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={LABEL}>Start Date</label>
+                  <input type="date" className={FIELD} value={form.carriedOut} onChange={set("carriedOut")} required />
+                </div>
+                <div>
+                  <label className={LABEL}>End Date</label>
+                  <input type="date" min={form.carriedOut || undefined} className={FIELD} value={form.expiryDate} onChange={set("expiryDate")} required />
+                </div>
+              </div>
+              <div>
+                <label className={LABEL}>Payment (GBP)</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400">£</span>
+                  <input type="number" min="0" step="0.01" className={FIELD + " pl-8"} value={form.payment} onChange={set("payment")} required placeholder="0.00" />
+                </div>
+              </div>
+            </>
+          ) : dated ? (
             <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className={LABEL}>Date Completed</label>
@@ -635,6 +669,8 @@ export default function AdminCompliance() {
         propertyId: formData.propertyId,
         type: formData.type,
         subType: formData.subType,
+        companyName: formData.companyName,
+        payment: formData.payment,
         carriedOut: formData.carriedOut,
         validityMonths: formData.validityMonths,
         expiryDate: formData.expiryDate,
@@ -879,6 +915,12 @@ export default function AdminCompliance() {
                     </td>
                     <td className="p-4 text-xs">
                       <div className="font-semibold text-gray-700">{row.type}</div>
+                      {row.type === "PRS (Property Redress Scheme)" && (
+                        <>
+                          {row.companyName && <div className="text-[11px] text-gray-500 font-normal mt-0.5">{row.companyName}</div>}
+                          {Number.isFinite(Number(row.payment)) && <div className="text-[11px] text-gray-400 font-normal">£{Number(row.payment).toLocaleString("en-GB", { minimumFractionDigits: 2 })}</div>}
+                        </>
+                      )}
                       {row.notes && <div className="text-[11px] text-gray-400 font-normal mt-0.5 max-w-xs truncate">{row.notes}</div>}
                     </td>
                     <td className="p-4">
