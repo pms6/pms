@@ -22,6 +22,7 @@ const CATEGORIES = [
   "Fire Alarm Servicing",
   "Fire Safety",
   "Floor Plan",
+  "British Gas",
   "Gas Safety",
   "HMO Licence",
   "PAT",
@@ -34,7 +35,7 @@ const CATEGORIES = [
 //
 // A floor plan records the building, not a test with a result that goes stale,
 // so it carries no dates and sends no renewal reminders.
-const NON_EXPIRING = ["Floor Plan"];
+const NON_EXPIRING = ["Floor Plan", "British Gas"];
 const expires = (type) => !NON_EXPIRING.includes(type);
 
 // Tone for the file-type chip on an attachment.
@@ -126,6 +127,9 @@ function ComplianceModal({ properties, onClose, onSave }) {
     notes: "",
     companyName: "",
     payment: "",
+    landlordName: "",
+    dateOfBirth: "",
+    callingNumber: "",
   });
 
   const [files, setFiles] = useState([]);
@@ -138,6 +142,7 @@ function ComplianceModal({ properties, onClose, onSave }) {
 
   const dated = expires(form.type);
   const isPRS = form.type === "PRS (Property Redress Scheme)";
+  const isBritishGas = form.type === "British Gas";
 
   const set = (k) => (e) => {
     const val = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -222,6 +227,7 @@ function ComplianceModal({ properties, onClose, onSave }) {
     // Only types that actually expire need a date; a floor plan has none.
     if (dated && !form.expiryDate) { setError("Expiry date is required"); return; }
     if (isPRS && !form.companyName.trim()) { setError("Company Name is required"); return; }
+    if (isBritishGas && (!form.landlordName.trim() || !form.dateOfBirth || !form.callingNumber.trim())) { setError("Landlord name, date of birth and calling number are required"); return; }
     if (isPRS && (!/^\d+(\.\d{1,2})?$/.test(String(form.payment)) || Number(form.payment) < 0)) { setError("Enter a valid GBP payment amount"); return; }
     if (isPRS && new Date(form.expiryDate) < new Date(form.carriedOut)) { setError("End Date cannot be earlier than Start Date"); return; }
     // Saving mid-upload would drop whatever has not landed yet.
@@ -262,14 +268,31 @@ function ComplianceModal({ properties, onClose, onSave }) {
             </select>
           </div>
 
-          {isPRS && (
+          {isBritishGas ? (
+            <>
+              <div>
+                <label className={LABEL}>Landlord Name</label>
+                <input className={FIELD} value={form.landlordName} onChange={set("landlordName")} required placeholder="Landlord's full name" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={LABEL}>Date of Birth</label>
+                  <input type="date" className={FIELD} value={form.dateOfBirth} onChange={set("dateOfBirth")} required />
+                </div>
+                <div>
+                  <label className={LABEL}>Calling Number</label>
+                  <input type="tel" className={FIELD} value={form.callingNumber} onChange={set("callingNumber")} required placeholder="Contact telephone number" />
+                </div>
+              </div>
+            </>
+          ) : isPRS && (
             <div>
               <label className={LABEL}>Company Name</label>
               <input className={FIELD} value={form.companyName} onChange={set("companyName")} required placeholder="Company name" />
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          {!isBritishGas && <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={LABEL}>Certificate Type</label>
               <select className={FIELD} value={form.type} onChange={set("type")}>
@@ -280,11 +303,11 @@ function ComplianceModal({ properties, onClose, onSave }) {
               <label className={LABEL}>Sub-Type / Details</label>
               <input className={FIELD} value={form.subType} onChange={set("subType")} placeholder="e.g. Regular Cleaner Check" />
             </div>
-          </div>
+          </div>}
 
           {/* A floor plan has no completion or expiry date, so the whole row
               goes away rather than sitting there demanding one. */}
-          {isPRS ? (
+          {isBritishGas ? null : isPRS ? (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -327,7 +350,7 @@ function ComplianceModal({ properties, onClose, onSave }) {
           )}
 
           <div>
-            <label className={LABEL}>Internal Administrative Notes</label>
+            <label className={LABEL}>{isBritishGas ? "Details" : "Internal Administrative Notes"}</label>
             <textarea rows={2} className={FIELD} value={form.notes} onChange={set("notes")} placeholder="Tested/Checked by cleaner on a regular visit..." />
           </div>
 
@@ -383,7 +406,7 @@ function ComplianceModal({ properties, onClose, onSave }) {
             )}
           </div>
 
-          <div className="p-4 bg-orange-50/50 border border-orange-100 rounded-xl space-y-3">
+          {!isBritishGas && <div className="p-4 bg-orange-50/50 border border-orange-100 rounded-xl space-y-3">
             <div className="flex items-start gap-3">
               <input
                 type="checkbox"
@@ -420,7 +443,7 @@ function ComplianceModal({ properties, onClose, onSave }) {
                 </p>
               </div>
             )}
-          </div>
+          </div>}
 
           <button
             type="submit"
@@ -501,6 +524,9 @@ export default function AdminCompliance() {
         subType: formData.subType,
         companyName: formData.companyName,
         payment: formData.payment,
+        landlordName: formData.landlordName,
+        dateOfBirth: formData.dateOfBirth,
+        callingNumber: formData.callingNumber,
         carriedOut: formData.carriedOut,
         validityMonths: formData.validityMonths,
         expiryDate: formData.expiryDate,
@@ -542,6 +568,7 @@ export default function AdminCompliance() {
   );
 
   const showingContracts = selectedCategory === CONTRACT_VIEW;
+  const showExpiryAndReminderColumns = selectedCategory !== "British Gas";
 
   // Fixed filtering logic
   const filteredRows = list.filter((item) => {
@@ -662,8 +689,8 @@ export default function AdminCompliance() {
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Type</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Status</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Carried Out</th>
-                  <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Expiry Date</th>
-                  <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">Reminder Settings</th>
+                  {showExpiryAndReminderColumns && <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Expiry Date</th>}
+                  {showExpiryAndReminderColumns && <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">Reminder Settings</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-sm font-medium text-[#0F253B]">
@@ -681,6 +708,13 @@ export default function AdminCompliance() {
                           {Number.isFinite(Number(row.payment)) && <div className="text-[11px] text-gray-400 font-normal">£{Number(row.payment).toLocaleString("en-GB", { minimumFractionDigits: 2 })}</div>}
                         </>
                       )}
+                      {row.type === "British Gas" && (
+                        <>
+                          {row.landlordName && <div className="text-[11px] text-gray-500 font-normal mt-0.5">Landlord: {row.landlordName}</div>}
+                          {row.dateOfBirth && <div className="text-[11px] text-gray-500 font-normal">Date of birth: {new Date(row.dateOfBirth).toLocaleDateString("en-GB")}</div>}
+                          {row.callingNumber && <div className="text-[11px] text-gray-500 font-normal">Calling number: {row.callingNumber}</div>}
+                        </>
+                      )}
                       {row.notes && <div className="text-[11px] text-gray-400 font-normal mt-0.5 max-w-xs truncate">{row.notes}</div>}
                     </td>
                     <td className="p-4">
@@ -696,14 +730,14 @@ export default function AdminCompliance() {
                     <td className="p-4 text-xs text-gray-500">
                       {row.carriedOut ? new Date(row.carriedOut).toLocaleDateString("en-GB") : "—"}
                     </td>
-                    <td className="p-4 text-xs font-bold text-red-600">
+                    {showExpiryAndReminderColumns && <td className="p-4 text-xs font-bold text-red-600">
                       {row.expiryDate ? (
                         new Date(row.expiryDate).toLocaleDateString("en-GB")
                       ) : (
                         <span className="font-medium text-gray-300">Does not expire</span>
                       )}
-                    </td>
-                    <td className="p-4 text-right">
+                    </td>}
+                    {showExpiryAndReminderColumns && <td className="p-4 text-right">
                       {row.autoReminder ? (
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#F47C3C] bg-orange-50 px-2 py-0.5 rounded-md">
                           <CalendarClock size={10} /> Alert active ({row.reminderDaysBefore}d prior)
@@ -711,7 +745,7 @@ export default function AdminCompliance() {
                       ) : (
                         <span className="text-[10px] text-gray-300 font-medium">Inactive</span>
                       )}
-                    </td>
+                    </td>}
                   </tr>
                 ))}
               </tbody>

@@ -9,6 +9,7 @@ export const COMPLIANCE_TYPES = [
   "Fire Alarm Servicing",
   "Fire Safety",
   "Floor Plan",
+  "British Gas",
   "Gas Safety",
   "HMO Licence",
   "PAT",
@@ -22,7 +23,7 @@ export const COMPLIANCE_TYPES = [
 // that is still perfectly accurate. So carriedOut and expiryDate are optional
 // for these, the status is always valid, and the reminder job skips them
 // (its query selects on expiryDate, which they do not have).
-export const NON_EXPIRING_TYPES = ["Floor Plan"];
+export const NON_EXPIRING_TYPES = ["Floor Plan", "British Gas"];
 
 const expires = (type) => !NON_EXPIRING_TYPES.includes(type);
 
@@ -93,6 +94,10 @@ const complianceSchema = new mongoose.Schema(
         message: "Payment must be a valid GBP amount.",
       },
     },
+
+    landlordName: { type: String, trim: true },
+    dateOfBirth: { type: Date },
+    callingNumber: { type: String, trim: true },
 
     carriedOut: {
       type: Date,

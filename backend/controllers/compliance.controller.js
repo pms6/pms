@@ -103,6 +103,9 @@ export const createCompliance = async (req, res) => {
       subType,
       companyName,
       payment,
+      landlordName,
+      dateOfBirth,
+      callingNumber,
       carriedOut,
       validityMonths,
       expiryDate,
@@ -148,6 +151,9 @@ export const createCompliance = async (req, res) => {
         return res.status(400).json({ success: false, message: "End Date must be on or after Start Date." });
       }
     }
+    if (type === "British Gas" && (!String(landlordName || "").trim() || !dateOfBirth || !String(callingNumber || "").trim())) {
+      return res.status(400).json({ success: false, message: "Landlord name, date of birth and calling number are required." });
+    }
 
     const compliance = new Compliance({
       organizationId,
@@ -156,6 +162,9 @@ export const createCompliance = async (req, res) => {
       subType,
       companyName: type === "PRS (Property Redress Scheme)" ? String(companyName).trim() : undefined,
       payment: type === "PRS (Property Redress Scheme)" ? amount : undefined,
+      landlordName: type === "British Gas" ? String(landlordName).trim() : undefined,
+      dateOfBirth: type === "British Gas" ? dateOfBirth : undefined,
+      callingNumber: type === "British Gas" ? String(callingNumber).trim() : undefined,
       carriedOut: dated ? carriedOut : undefined,
       validityMonths: dated ? num(validityMonths) : undefined,
       expiryDate: dated ? expiryDate : undefined,
@@ -191,6 +200,9 @@ const EDITABLE_KEYS = [
   "subType",
   "companyName",
   "payment",
+  "landlordName",
+  "dateOfBirth",
+  "callingNumber",
   "carriedOut",
   "validityMonths",
   "expiryDate",
@@ -272,6 +284,9 @@ export const updateCompliance = async (req, res) => {
       if (!compliance.carriedOut || !compliance.expiryDate || new Date(compliance.expiryDate) < new Date(compliance.carriedOut)) {
         return res.status(400).json({ success: false, message: "End Date must be on or after Start Date." });
       }
+    }
+    if (compliance.type === "British Gas" && (!String(compliance.landlordName || "").trim() || !compliance.dateOfBirth || !String(compliance.callingNumber || "").trim())) {
+      return res.status(400).json({ success: false, message: "Landlord name, date of birth and calling number are required." });
     }
 
     const { error: filesError, files } = resolveFiles(req.body);
