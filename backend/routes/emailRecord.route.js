@@ -14,6 +14,7 @@ import {
   getInboxStatus,
 } from "../controllers/emailRecord.controller.js";
 import { protect, staffOnly } from "../middleware/auth.js";
+import { getEmailMailbox, testEmailMailbox, saveEmailMailbox, disconnectEmailMailbox } from "../controllers/emailMailbox.controller.js";
 
 const router = express.Router();
 
@@ -23,6 +24,10 @@ router.use(protect, staffOnly);
 
 // Fixed paths before "/:id" so they are not read as an id.
 router.get("/options", getEmailRecordOptions);
+router.get("/mailbox", getEmailMailbox);
+router.post("/mailbox/test", testEmailMailbox);
+router.put("/mailbox", saveEmailMailbox);
+router.delete("/mailbox", disconnectEmailMailbox);
 router.post("/run-reminders", runEmailReminders);
 router.post("/fetch-inbox", fetchInbox);
 router.get("/inbox-status", getInboxStatus);

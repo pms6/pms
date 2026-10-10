@@ -24,17 +24,15 @@ export const EMAIL_STATUSES = [
   "Follow-Up Required",
   "Pending Approval",
   "In Progress",
-  "Completed",
   "For Information",
   "On Hold",
-  // Retained so older records remain valid and editable.
-  "Open",
-  "Resolved",
   "Closed",
 ];
 
-// Completed records no longer need reminders or escalation.
-export const DONE_STATUSES = ["Completed"];
+// Keep legacy values accepted by Mongoose so old records can still be edited;
+// they are deliberately omitted from EMAIL_STATUSES and the public options API.
+const LEGACY_EMAIL_STATUSES = ["Open", "Resolved", "Completed"];
+export const DONE_STATUSES = ["Closed", "Completed"];
 
 export const EMAIL_CATEGORIES = [
   "Maintenance",
@@ -56,7 +54,7 @@ export const EMAIL_PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 export const CHANNELS = ["Email", "Call", "Text", "WhatsApp", "Note", "Meeting", "Other"];
 
 // "" = only logged, never emailed from here.
-export const DELIVERY_STATUSES = ["", "Sent", "Failed"];
+export const DELIVERY_STATUSES = ["", "Sent", "Failed", "Scheduled", "Sending"];
 
 // Delivery of a message the system emailed itself. Shared by the record (its
 // original email) and each thread entry.
@@ -65,6 +63,7 @@ const deliveryFields = () => ({
   emailSentAt: { type: Date, default: null },
   emailError: { type: String, trim: true, default: "" },
   emailMessageId: { type: String, trim: true, default: "" },
+  emailImportKey: { type: String, trim: true, default: "" },
 });
 
 // One step in the conversation after the original email — a reply, a chase,
@@ -143,6 +142,7 @@ const emailRecordSchema = new mongoose.Schema(
     date: { type: Date, required: true, index: true },
 
     channel: { type: String, enum: CHANNELS, default: "Email" },
+    direction: { type: String, enum: ["Incoming", "Outgoing"], default: "Incoming", index: true },
     emailTo: { type: String, trim: true, default: "" },
     emailFrom: { type: String, trim: true, default: "" },
     subject: { type: String, trim: true, default: "" },
@@ -151,7 +151,7 @@ const emailRecordSchema = new mongoose.Schema(
     issue: { type: String, trim: true, required: true },
     category: { type: String, enum: EMAIL_CATEGORIES, default: "General", index: true },
     priority: { type: String, enum: EMAIL_PRIORITIES, default: "Medium", index: true },
-    status: { type: String, enum: EMAIL_STATUSES, default: "Action Required", index: true },
+    status: { type: String, enum: [...EMAIL_STATUSES, ...LEGACY_EMAIL_STATUSES], default: "Action Required", index: true },
 
     // "Reply" on the sheet.
     replyReceived: { type: Boolean, default: false },
@@ -172,6 +172,7 @@ const emailRecordSchema = new mongoose.Schema(
 
     // Set when the original email was sent from the system.
     ...deliveryFields(),
+    scheduledSendAt: { type: Date, default: null, index: true },
 
     // Set by the daily sweep. `reminderSentFor` is the follow-up date the last
     // reminder was about, so a changed follow-up date gets its own reminder.
@@ -194,5 +195,7 @@ emailRecordSchema.index({ isDeleted: 1, status: 1, followUpDate: 1 });
 // already filed, by Message-ID.
 emailRecordSchema.index({ emailMessageId: 1 });
 emailRecordSchema.index({ "history.emailMessageId": 1 });
+emailRecordSchema.index({ organizationId: 1, emailImportKey: 1 });
+emailRecordSchema.index({ organizationId: 1, "history.emailImportKey": 1 });
 
 export default mongoose.model("EmailRecord", emailRecordSchema);

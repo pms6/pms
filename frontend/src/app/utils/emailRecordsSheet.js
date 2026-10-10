@@ -18,10 +18,9 @@ export const DEFAULT_OPTIONS = {
   ],
   statuses: [
     "Action Required", "Reply Required", "Awaiting Reply", "Follow-Up Required",
-    "Pending Approval", "In Progress", "Completed", "For Information", "On Hold",
-    "Open", "Resolved", "Closed",
+    "Pending Approval", "In Progress", "For Information", "On Hold", "Closed",
   ],
-  doneStatuses: ["Completed"],
+  doneStatuses: ["Closed"],
   categories: ["Maintenance", "Tenant Issue", "Inspection", "Compliance", "Contractor", "Payment", "Notice", "General"],
   priorities: ["Low", "Medium", "High", "Urgent"],
   channels: ["Email", "Call", "Text", "WhatsApp", "Note", "Meeting", "Other"],
@@ -34,12 +33,19 @@ export const STATUS_TONE = {
   "Follow-Up Required": "orange",
   "Pending Approval": "blue",
   "In Progress": "orange",
-  Completed: "green",
+  Closed: "gray",
   "For Information": "gray",
   "On Hold": "blue",
-  Open: "blue",
-  Resolved: "green",
-  Closed: "gray",
+};
+
+export const normalizeEmailRow = (row) => {
+  if (!row) return row;
+  const status = row.status === "Open"
+    ? "Action Required"
+    : ["Resolved", "Completed"].includes(row.status)
+      ? "Closed"
+      : row.status;
+  return status === row.status ? row : { ...row, status };
 };
 
 export const PRIORITY_TONE = {

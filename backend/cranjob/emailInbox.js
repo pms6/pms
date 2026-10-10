@@ -1,10 +1,13 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
+import crypto from "crypto";
 import EmailRecord, { DONE_STATUSES } from "../models/EmailRecord.js";
+import EmailMailbox from "../models/EmailMailbox.js";
 import InboxSyncState from "../models/InboxSyncState.js";
 import Tenancy from "../models/Tenancy.js";
 import Organization from "../models/Organization.js";
 import Notification from "../models/Notification.js";
+import { mailboxForOrganization } from "../utils/emailMailbox.js";
 import env from "../config/env.js";
 
 /**
@@ -37,6 +40,21 @@ let running = false;
 
 const lower = (v) => String(v || "").trim().toLowerCase();
 const escapeRegex = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// A brand-new folder sync starts at midnight in the user's Pakistan timezone,
+// independent of the timezone configured on the server hosting PMS.
+const pakistanTodayStart = () => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Karachi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type) => parts.find((item) => item.type === type)?.value;
+  // IMAP SINCE compares calendar dates. Pass the Pakistan date without a
+  // timezone offset so converting it to UTC cannot shift it to yesterday.
+  return `${part("year")}-${part("month")}-${part("day")}`;
+};
 
 // "<abc@x>" and "abc@x" are the same Message-ID; stored ids keep the brackets
 // nodemailer gives them, so both spellings are looked up.
@@ -136,22 +154,38 @@ const keepAttachments = async (parsed) => {
   return out;
 };
 
-const alreadyFiled = async (messageId) => {
-  if (!messageId) return false;
-  const ids = idVariants([messageId]);
+const importKeyFor = ({ parsed, organizationId }) => {
+  const messageId = String(parsed.messageId || "").trim().toLowerCase();
+  const from = (parsed.from?.value || []).map((a) => lower(a.address)).sort().join(",");
+  const to = (parsed.to?.value || []).map((a) => lower(a.address)).sort().join(",");
+  const date = parsed.date && !Number.isNaN(parsed.date.getTime())
+    ? parsed.date.toISOString()
+    : "";
+  const stableContent = messageId || [from, to, date, baseSubject(parsed.subject).toLowerCase(), String(parsed.text || "").replace(/\s+/g, " ").trim()].join("\n");
+  return crypto.createHash("sha256").update(`${organizationId}\n${stableContent}`).digest("hex");
+};
+
+const alreadyFiled = async (messageId, importKey, organizationId) => {
+  const ids = messageId ? idVariants([messageId]) : [];
+  const matches = [];
+  if (ids.length) matches.push({ emailMessageId: { $in: ids } }, { "history.emailMessageId": { $in: ids } });
+  if (importKey) matches.push({ emailImportKey: importKey }, { "history.emailImportKey": importKey });
+  if (!matches.length) return false;
   return Boolean(
     await EmailRecord.exists({
-      $or: [{ emailMessageId: { $in: ids } }, { "history.emailMessageId": { $in: ids } }],
+      organizationId,
+      $or: matches,
     })
   );
 };
 
 // The record this message answers, or null.
-const findRecordFor = async ({ fromAddr, parsed }) => {
+const findRecordFor = async ({ organizationId, fromAddr, parsed }) => {
   const refs = [parsed.inReplyTo, ...(Array.isArray(parsed.references) ? parsed.references : [parsed.references])];
   const ids = idVariants(refs.filter(Boolean));
   if (ids.length) {
     const byHeader = await EmailRecord.findOne({
+      organizationId,
       isDeleted: false,
       $or: [{ emailMessageId: { $in: ids } }, { "history.emailMessageId": { $in: ids } }],
     });
@@ -166,6 +200,7 @@ const findRecordFor = async ({ fromAddr, parsed }) => {
   if (!subject || !fromAddr) return null;
   const addr = new RegExp(`(^|[\\s,;<])${escapeRegex(fromAddr)}($|[\\s,;>])`, "i");
   return EmailRecord.findOne({
+    organizationId,
     isDeleted: false,
     subject: new RegExp(`^((re|fw|fwd)\\s*:\\s*)*${escapeRegex(subject)}$`, "i"),
     $or: [
@@ -197,7 +232,7 @@ const notifyUsers = async (organizationId, userIds, { title, message, relatedId 
   }
 };
 
-const addReply = async (row, { parsed, fromAddr, messageId, date }) => {
+const addReply = async (row, { parsed, fromAddr, messageId, importKey, date }) => {
   const summary = stripQuoted(parsed.text || "") || baseSubject(parsed.subject) || "(no text)";
   const files = await keepAttachments(parsed);
   const toLine = (parsed.to?.value || []).map((a) => a.address).filter(Boolean).join(", ");
@@ -213,6 +248,7 @@ const addReply = async (row, { parsed, fromAddr, messageId, date }) => {
     isReply: true,
     auto: true,
     emailMessageId: messageId,
+    emailImportKey: importKey,
     createdByEmail: "Inbox",
   });
   row.replyReceived = true;
@@ -241,7 +277,7 @@ const addReply = async (row, { parsed, fromAddr, messageId, date }) => {
   });
 };
 
-const createFromTenant = async (tenancy, { parsed, fromAddr, messageId, date }) => {
+const createFromTenant = async (tenancy, { parsed, fromAddr, messageId, importKey, date }) => {
   const body = stripQuoted(parsed.text || "");
   const subject = String(parsed.subject || "").trim();
   const files = await keepAttachments(parsed);
@@ -255,6 +291,7 @@ const createFromTenant = async (tenancy, { parsed, fromAddr, messageId, date }) 
     tenantEmail: tenancy.tenantEmail || fromAddr,
     date,
     channel: "Email",
+    direction: "Incoming",
     emailFrom: fromAddr,
     emailTo: (parsed.to?.value || []).map((a) => a.address).filter(Boolean).join(", "),
     subject,
@@ -263,6 +300,7 @@ const createFromTenant = async (tenancy, { parsed, fromAddr, messageId, date }) 
     status: "Action Required",
     files,
     emailMessageId: messageId,
+    emailImportKey: importKey,
   });
 
   const org = await Organization.findById(tenancy.organizationId).select("userId").lean();
@@ -273,143 +311,220 @@ const createFromTenant = async (tenancy, { parsed, fromAddr, messageId, date }) 
   });
 };
 
-// Files one parsed message. Returns "reply", "new" or "ignored".
-const fileMessage = async (parsed) => {
+const createGeneralEmail = async (organizationId, { parsed, messageId, importKey, date, direction, mailboxEmail }) => {
+  const from = (parsed.from?.value || []).map((a) => a.address).filter(Boolean).join(", ");
+  const to = (parsed.to?.value || []).map((a) => a.address).filter(Boolean).join(", ");
+  const subject = String(parsed.subject || "").trim();
+  const body = stripQuoted(parsed.text || "") || subject || "(no text)";
+  const files = await keepAttachments(parsed);
+  await EmailRecord.create({
+    organizationId,
+    property: "General correspondence",
+    date,
+    channel: "Email",
+    direction,
+    emailFrom: from,
+    emailTo: to,
+    subject,
+    issue: body,
+    category: "General",
+    status: direction === "Outgoing" ? "Awaiting Reply" : "Action Required",
+    files,
+    emailMessageId: messageId,
+    emailImportKey: importKey,
+    emailStatus: direction === "Outgoing" ? "Sent" : "",
+    emailSentAt: direction === "Outgoing" ? date : null,
+  });
+};
+
+const addOutgoingMessage = async (row, { parsed, messageId, importKey, date }) => {
+  const summary = stripQuoted(parsed.text || "") || baseSubject(parsed.subject) || "(no text)";
+  const files = await keepAttachments(parsed);
+  row.history.push({
+    channel: "Email",
+    direction: "Outgoing",
+    date,
+    from: (parsed.from?.value || []).map((a) => a.address).filter(Boolean).join(", "),
+    to: (parsed.to?.value || []).map((a) => a.address).filter(Boolean).join(", "),
+    summary,
+    files,
+    emailStatus: "Sent",
+    emailSentAt: date,
+    emailMessageId: messageId,
+    emailImportKey: importKey,
+    createdByEmail: "Gmail",
+  });
+  await row.save();
+};
+
+// Files one parsed message. Returns "reply", "new", "sent" or "ignored".
+const fileMessage = async (parsed, { organizationId, mailboxEmail, direction }) => {
   const fromAddr = lower(parsed.from?.value?.[0]?.address);
   if (!fromAddr) return "ignored";
-  // Our own mail (copies, bounces of our own sends) is never a tenant reply.
-  if (fromAddr === lower(env.mail.user) || fromAddr === lower(env.imap.user)) return "ignored";
+  if (direction === "Incoming" && fromAddr === lower(mailboxEmail)) return "ignored";
   if (/^(mailer-daemon|postmaster|no-?reply)@/i.test(fromAddr)) return "ignored";
 
   const messageId = String(parsed.messageId || "").trim();
-  if (await alreadyFiled(messageId)) return "ignored";
+  const importKey = importKeyFor({ parsed, organizationId });
+  if (await alreadyFiled(messageId, importKey, organizationId)) return "ignored";
 
   const date = parsed.date && !Number.isNaN(parsed.date.getTime()) ? parsed.date : new Date();
 
-  const row = await findRecordFor({ fromAddr, parsed });
+  const matchAddress = direction === "Outgoing"
+    ? lower(parsed.to?.value?.[0]?.address)
+    : fromAddr;
+  const row = await findRecordFor({ organizationId, fromAddr: matchAddress, parsed });
   if (row) {
-    await addReply(row, { parsed, fromAddr, messageId, date });
-    return "reply";
+    if (direction === "Incoming") {
+      await addReply(row, { parsed, fromAddr, messageId, importKey, date });
+      return "reply";
+    }
+    await addOutgoingMessage(row, { parsed, messageId, importKey, date });
+    return "sent";
   }
 
-  const tenancy = await Tenancy.findOne({ tenantEmail: fromAddr, isDeleted: false })
-    .sort({ startDate: -1, createdAt: -1 })
-    .lean();
-  if (tenancy) {
-    await createFromTenant(tenancy, { parsed, fromAddr, messageId, date });
-    return "new";
+  if (direction === "Incoming") {
+    const tenancy = await Tenancy.findOne({ organizationId, tenantEmail: fromAddr, isDeleted: false })
+      .sort({ startDate: -1, createdAt: -1 })
+      .lean();
+    if (tenancy) {
+      await createFromTenant(tenancy, { parsed, fromAddr, messageId, importKey, date });
+      return "new";
+    }
   }
 
-  return "ignored";
+  await createGeneralEmail(organizationId, { parsed, messageId, importKey, date, direction, mailboxEmail });
+  return direction === "Incoming" ? "new" : "sent";
 };
 
-/**
- * One pass over the inbox. Safe to call from the cron and from the "Check
- * inbox" button at once — a second call while one is running returns straight
- * away.
- */
-export const syncInbox = async () => {
-  const cfg = env.imap;
-  const result = { replies: 0, newConversations: 0, ignored: 0, errors: [], skipped: "" };
+const stateKey = (organizationId, email, folder) => String(organizationId) + ":" + lower(email) + "@imap.gmail.com/" + folder;
+const emptyResult = () => ({ replies: 0, newConversations: 0, sent: 0, ignored: 0, errors: [], skipped: "" });
 
-  if (!cfg.enabled) return { ...result, skipped: "Inbox reading is switched off (IMAP_ENABLED=false)." };
-  if (!cfg.host || !cfg.user || !cfg.password) {
-    return { ...result, skipped: "No inbox configured — set IMAP_HOST, IMAP_USER and IMAP_PASSWORD." };
-  }
-  if (running) return { ...result, skipped: "Already checking the inbox." };
-  running = true;
-
-  const key = `${lower(cfg.user)}@${cfg.host}/${cfg.mailbox}`;
+const syncFolder = async (client, account, organizationId, folder, result) => {
+  const lock = await client.getMailboxLock(folder, { readOnly: true });
+  const key = stateKey(organizationId, account.email, folder);
   const state = (await InboxSyncState.findOne({ key })) || new InboxSyncState({ key });
   state.lastRunAt = new Date();
-
-  const client = new ImapFlow({
-    host: cfg.host,
-    port: cfg.port,
-    secure: cfg.port === 993,
-    auth: { user: cfg.user, pass: cfg.password },
-    logger: false,
-  });
-
   try {
-    await client.connect();
-    const lock = await client.getMailboxLock(cfg.mailbox, { readOnly: true });
-    try {
-      const uidValidity = String(client.mailbox.uidValidity);
-      const fresh = state.uidValidity !== uidValidity || !state.lastUid;
+    const uidValidity = String(client.mailbox.uidValidity);
+    const fresh = state.uidValidity !== uidValidity;
+    const sinceToday = pakistanTodayStart();
+    const uids = fresh
+      ? ((await client.search({ since: sinceToday }, { uid: true })) || [])
+      : ((await client.search({ since: sinceToday, uid: String(state.lastUid + 1) + ":*" }, { uid: true })) || []).filter((uid) => uid > state.lastUid);
+    uids.sort((a, b) => a - b);
+    state.uidValidity = uidValidity;
+    if (!uids.length && fresh) state.lastUid = Math.max(0, Number(client.mailbox.uidNext || 1) - 1);
 
-      let uids;
-      if (fresh) {
-        const since = new Date(Date.now() - cfg.initialDays * 24 * 60 * 60 * 1000);
-        uids = (await client.search({ since }, { uid: true })) || [];
-        state.uidValidity = uidValidity;
-        // Nothing to read yet — start from the top of the mailbox so the
-        // next check only looks at new mail.
-        if (!uids.length) state.lastUid = Math.max(0, Number(client.mailbox.uidNext || 1) - 1);
-      } else {
-        // "N:*" always includes the newest message even below N, hence the filter.
-        uids = ((await client.search({ uid: `${state.lastUid + 1}:*` }, { uid: true })) || []).filter(
-          (u) => u > state.lastUid
-        );
-      }
-
-      uids.sort((a, b) => a - b);
-      for (const uid of uids.slice(0, MAX_PER_RUN)) {
-        try {
-          const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
-          if (msg?.source) {
-            const parsed = await simpleParser(msg.source);
-            const outcome = await fileMessage(parsed);
-            if (outcome === "reply") result.replies++;
-            else if (outcome === "new") result.newConversations++;
-            else result.ignored++;
-          }
-        } catch (err) {
-          result.errors.push({ uid, error: err.message });
-          console.error(`Inbox message ${uid} failed:`, err.message);
-        }
+    for (const uid of uids.slice(0, MAX_PER_RUN)) {
+      try {
+        const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
+        if (!msg?.source) throw new Error("Message source was empty.");
+        const parsed = await simpleParser(msg.source);
+        const outcome = await fileMessage(parsed, {
+          organizationId,
+          mailboxEmail: account.email,
+          direction: folder === "INBOX" ? "Incoming" : "Outgoing",
+        });
+        if (outcome === "reply") result.replies++;
+        else if (outcome === "new") result.newConversations++;
+        else if (outcome === "sent") result.sent++;
+        else result.ignored++;
         state.lastUid = Math.max(state.lastUid, uid);
+        await state.save();
+      } catch (err) {
+        result.errors.push({ uid, folder, error: err.message });
+        console.error("Email folder message failed:", folder, uid, err.message);
+        break;
       }
-    } finally {
-      lock.release();
     }
-    await client.logout();
-
     state.lastSuccessAt = new Date();
     state.lastError = "";
   } catch (err) {
-    state.lastError = err.responseText || err.message || "Could not read the inbox.";
-    result.errors.push({ error: state.lastError });
-    console.error("Inbox sync failed:", state.lastError);
-    try {
-      client.close();
-    } catch {
-      // already closed
-    }
+    state.lastError = err.responseText || err.message || "Could not read " + folder + ".";
+    result.errors.push({ folder, error: state.lastError });
+    console.error("Email folder sync failed:", folder, state.lastError);
   } finally {
     state.lastResult = {
       replies: result.replies,
       newConversations: result.newConversations,
+      sent: result.sent,
       ignored: result.ignored,
     };
-    await state.save().catch((e) => console.error("Inbox state save failed:", e.message));
+    await state.save().catch((err) => console.error("Email sync state save failed:", err.message));
+    lock.release();
+  }
+};
+
+/** Sync all existing and new Inbox/Sent messages for one organization's Gmail account. */
+export const syncInbox = async ({ organizationId } = {}) => {
+  const result = emptyResult();
+  if (!organizationId) return { ...result, skipped: "Organization mailbox is required." };
+  const account = await mailboxForOrganization(organizationId);
+  if (!account) return { ...result, skipped: "Connect this organization's Gmail account in Settings first." };
+  if (running) return { ...result, skipped: "Already checking a mailbox. Try again shortly." };
+  running = true;
+  const client = new ImapFlow({
+    host: "imap.gmail.com",
+    port: 993,
+    secure: true,
+    auth: { user: account.email, pass: account.password },
+    logger: false,
+  });
+  try {
+    await client.connect();
+    const folders = await client.list();
+    const sentFolder = folders.find((folder) => String(folder.specialUse || "").toLowerCase() === "\\sent")?.path
+      || folders.find((folder) => String(folder.path || "").toLowerCase().includes("gmail") && String(folder.path || "").toLowerCase().includes("sent"))?.path;
+    if (!sentFolder) throw new Error("Could not find Gmail's Sent folder.");
+    await syncFolder(client, account, organizationId, "INBOX", result);
+    await syncFolder(client, account, organizationId, sentFolder, result);
+    await client.logout();
+    if (!result.errors.length) {
+      await EmailMailbox.updateOne({ organizationId }, { $set: { initialSyncComplete: true } });
+    }
+  } catch (err) {
+    result.errors.push({ error: err.responseText || err.message || "Could not read Gmail." });
+    console.error("Organization email sync failed:", err.responseText || err.message);
+    try { client.close(); } catch {}
+  } finally {
     running = false;
   }
-
   return result;
 };
 
-// What the board shows next to its "Check inbox" button.
-export const inboxStatus = async () => {
-  const cfg = env.imap;
-  const configured = Boolean(cfg.enabled && cfg.host && cfg.user && cfg.password);
-  if (!configured) return { configured, mailbox: cfg.user || "" };
-  const state = await InboxSyncState.findOne({ key: `${lower(cfg.user)}@${cfg.host}/${cfg.mailbox}` }).lean();
+export const syncAllConfiguredInboxes = async () => {
+  const accounts = await EmailMailbox.find().select("organizationId").lean();
+  const result = { organizations: accounts.length, replies: 0, newConversations: 0, sent: 0, ignored: 0, errors: [] };
+  for (const account of accounts) {
+    const current = await syncInbox({ organizationId: account.organizationId });
+    result.replies += current.replies;
+    result.newConversations += current.newConversations;
+    result.sent += current.sent;
+    result.ignored += current.ignored;
+    result.errors.push(...current.errors);
+  }
+  return result;
+};
+
+// Status for one organization's inbox button.
+export const inboxStatus = async (organizationId) => {
+  if (!organizationId) return { configured: false, mailbox: "" };
+  const mailbox = await EmailMailbox.findOne({ organizationId }).select("email initialSyncComplete").lean();
+  if (!mailbox) return { configured: false, mailbox: "" };
+  const prefix = String(organizationId) + ":" + lower(mailbox.email) + "@imap.gmail.com/";
+  const states = await InboxSyncState.find({ key: new RegExp("^" + escapeRegex(prefix)) })
+    .select("lastRunAt lastSuccessAt lastError lastResult lastUid")
+    .lean();
+  const newest = states.sort((a, b) => new Date(b.lastRunAt || 0) - new Date(a.lastRunAt || 0))[0];
+  const lastSuccess = states.map((state) => state.lastSuccessAt).filter(Boolean).sort((a, b) => new Date(b) - new Date(a))[0] || null;
   return {
-    configured,
-    mailbox: cfg.user,
-    lastRunAt: state?.lastRunAt || null,
-    lastSuccessAt: state?.lastSuccessAt || null,
-    lastError: state?.lastError || "",
+    configured: true,
+    mailbox: mailbox.email,
+    initialSyncComplete: mailbox.initialSyncComplete,
+    lastRunAt: newest?.lastRunAt || null,
+    lastSuccessAt: lastSuccess,
+    lastError: states.find((state) => state.lastError)?.lastError || "",
+    lastResult: newest?.lastResult || null,
   };
 };

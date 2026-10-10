@@ -1,4 +1,6 @@
 import nodemailer from "nodemailer";
+import crypto from "crypto";
+import { mailboxForOrganization } from "./emailMailbox.js";
 import env from "../config/env.js";
 
 const transporter = nodemailer.createTransport({
@@ -19,6 +21,29 @@ const transporter = nodemailer.createTransport({
   greetingTimeout: 10000,
   socketTimeout: 20000,
 });
+const organizationTransporters = new Map();
+
+const transporterForOrganization = async (organizationId) => {
+  const mailbox = await mailboxForOrganization(organizationId);
+  if (!mailbox) throw new Error("Connect a Gmail mailbox in organization settings before sending email.");
+  const fingerprint = crypto.createHash("sha256").update(`${mailbox.email}:${mailbox.password}`).digest("hex");
+  const cached = organizationTransporters.get(String(organizationId));
+  if (cached?.fingerprint === fingerprint) return cached.transporter;
+  const accountTransporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    auth: { user: mailbox.email, pass: mailbox.password },
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 100,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
+  });
+  organizationTransporters.set(String(organizationId), { fingerprint, transporter: accountTransporter });
+  return accountTransporter;
+};
 
 // Verify SMTP connection when the server starts
 transporter.verify((err) => {
@@ -46,6 +71,7 @@ const addressList = (value) =>
 // conversation, so the recipient's mail client files this one in the same
 // thread instead of starting a new one.
 export const sendEmail = async ({
+  organizationId,
   email,
   cc,
   subject,
@@ -62,8 +88,10 @@ export const sendEmail = async ({
 
     const ccList = addressList(cc);
 
-    const info = await transporter.sendMail({
-      from: `"PMS" <${env.mail.user}>`,
+    const sender = organizationId ? await mailboxForOrganization(organizationId) : null;
+    const activeTransporter = organizationId ? await transporterForOrganization(organizationId) : transporter;
+    const info = await activeTransporter.sendMail({
+      from: `"PMS" <${sender?.email || env.mail.user}>`,
       to,
       ...(ccList ? { cc: ccList } : {}),
       ...(replyTo ? { replyTo } : {}),

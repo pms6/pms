@@ -13,7 +13,6 @@ export function toOccupancyPayload(f) {
     tenantId: f.tenantId,
     tenant: f.tenant,
     tenantEmail: f.tenantEmail || undefined,
-    rent: f.rent ? Number(f.rent) : 0,
     startDate: f.startDate || null,
     fixedTermEnd: f.fixedTermEnd || null,
     periodicStart: f.periodicStart || null,
@@ -54,7 +53,6 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
   const [form, setForm] = useState({
     tenant: "",
     tenantEmail: "",
-    rent: "",
     startDate: "",
     fixedTermEnd: "",
     periodicStart: "",
@@ -101,6 +99,8 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
     }));
   };
 
+  const selectedRoom = rooms.find((room) => room._id === selectedRoomId);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -133,7 +133,6 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
           tenantId,
           tenant: tenantName,
           tenantEmail,
-          rent: form.rent,
           startDate: form.startDate,
           fixedTermEnd: form.fixedTermEnd,
           periodicStart: form.periodicStart,
@@ -199,11 +198,18 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
               <option value="">Select Room</option>
               {rooms.map(r => (
                 <option key={r._id} value={r._id}>
-                  {r.roomName || r.title} {r.roomNumber ? `(${r.roomNumber})` : ""}
+                  {r.roomName || r.title} {r.roomNumber ? `(${r.roomNumber})` : ""} — {r.monthlyRent ? `£${Number(r.monthlyRent).toLocaleString("en-GB")}${r.rentPeriod === "WEEKLY" ? " / week" : " / month"}` : "rent not set"}
                 </option>
               ))}
             </select>
           </Field>
+          {selectedRoom && (
+            <p className="-mt-3 text-xs text-gray-500">
+              Rent is taken from this room: <strong className="text-[#0F253B]">
+                {selectedRoom.monthlyRent ? `£${Number(selectedRoom.monthlyRent).toLocaleString("en-GB")}${selectedRoom.rentPeriod === "WEEKLY" ? " / week" : " / month"}` : "not set"}
+              </strong>
+            </p>
+          )}
 
           {/* Tenant Selection */}
           <div className="pt-4 border-t border-gray-100">
@@ -264,25 +270,13 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
 
           {/* Tenancy Details */}
           <div className="pt-4 border-t border-gray-100 space-y-4">
-            <Field label="Rent (£)">
-              <input 
-                name="rent" 
-                type="number" 
-                className={inputCls} 
-                value={form.rent} 
-                onChange={handleInputChange} 
-                placeholder="0.00" 
-              />
-            </Field>
-
-            <Field label="Start Date" required>
+            <Field label="Start Date (optional)">
               <input 
                 name="startDate" 
                 type="date" 
                 className={inputCls} 
                 value={form.startDate} 
                 onChange={handleInputChange} 
-                required 
               />
             </Field>
 
@@ -301,7 +295,7 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
             </Field>
 
             {form.tenancyStatus === "Fixed Term" && (
-              <Field label="Fixed Term End Date">
+              <Field label="Fixed Term End Date (optional)">
                 <input 
                   name="fixedTermEnd" 
                   type="date" 
@@ -313,7 +307,7 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
             )}
 
             {(form.tenancyStatus === "Periodic" || form.tenancyStatus === "Becoming Periodic") && (
-              <Field label="Periodic Start Date">
+              <Field label="Periodic Start Date (optional)">
                 <input 
                   name="periodicStart" 
                   type="date" 

@@ -164,7 +164,7 @@ export default function AdminOccupancy() {
               <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
                 <th className="px-5 py-3">Property &amp; Unit</th>
                 <th className="px-5 py-3">Tenant</th>
-                <th className="px-5 py-3 text-right">Monthly Rent</th>
+                <th className="px-5 py-3 text-right">Room Rent</th>
                 <th className="px-5 py-3">Start</th>
                 <th className="px-5 py-3">Term End / Periodic</th>
                 <th className="px-5 py-3">Availability</th>
@@ -188,7 +188,7 @@ export default function AdminOccupancy() {
                       {o.tenant}
                       {!o.onboarded && <span className="ml-2 text-[10px] font-bold text-amber-600 bg-amber-50 rounded-full px-2 py-0.5">Onboarding</span>}
                     </td>
-                    <td className="px-5 py-3 text-right font-bold text-[#0F253B]">{money(o.rent)}</td>
+                    <td className="px-5 py-3 text-right font-bold text-[#0F253B]">{money(o.rent)} <span className="text-[10px] font-medium text-gray-400">/{o.rentPeriod === "WEEKLY" ? "week" : "month"}</span></td>
                     <td className="px-5 py-3 text-gray-500">{fmtDate(o.startDate)}</td>
                     <td className="px-5 py-3 text-gray-500">{o.fixedTermEnd ? fmtDate(o.fixedTermEnd) : `Periodic from ${fmtDate(o.periodicStart)}`}</td>
                     <td className="px-5 py-3">
@@ -220,7 +220,7 @@ export default function AdminOccupancy() {
 
             <div className="rounded-2xl bg-gray-50 p-4 flex items-center justify-between mb-4">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Monthly Rent</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Room Rent / {view.rentPeriod === "WEEKLY" ? "Week" : "Month"}</p>
                 <p className="text-2xl font-bold text-[#0F253B]">{money(view.rent)}</p>
               </div>
               <Badge tone={TENANCY_STATUS_TONE[view.status]}>{view.status}</Badge>

@@ -15,6 +15,7 @@ import { resolveAssignee } from "../utils/staff.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { sweepEmailFollowUps } from "../cranjob/emailFollowUp.js";
 import { syncInbox, inboxStatus } from "../cranjob/emailInbox.js";
+import EmailMailbox from "../models/EmailMailbox.js";
 
 const text = (v) => String(v ?? "").trim();
 const pick = (v, allowed, fallback) => (allowed.includes(v) ? v : fallback);
@@ -162,7 +163,7 @@ const buildMessage = ({ body, files = [], chain = [] }) => {
 // Emails one message and writes the outcome onto `target` (the record or a
 // thread entry). Never throws: a failed send is stored as "Failed" with the
 // reason, so the message is still in the history and can be resent.
-const deliver = async (target, { to, subject, body, files, replyTo, chain = [] }) => {
+const deliver = async (target, { to, subject, body, files, replyTo, chain = [] }, organizationId = target.organizationId) => {
   const addresses = parseAddresses(to);
   if (!addresses) {
     target.emailStatus = "Failed";
@@ -176,6 +177,10 @@ const deliver = async (target, { to, subject, body, files, replyTo, chain = [] }
     // one is what this message answers.
     const references = chain.map((m) => m.messageId).filter(Boolean);
     const info = await sendEmail({
+      // Thread entries are Mongoose subdocuments and do not have the parent
+      // record's organizationId. Always use the parent organization explicitly
+      // so replies go through its connected Gmail mailbox.
+      organizationId,
       email: addresses,
       subject: subject || "(no subject)",
       html,
@@ -377,7 +382,7 @@ const applyDerived = (row, previous = {}) => {
 
   if (row.replyReceived && !row.replyDate) row.replyDate = now;
 
-  if (row.status === "Completed" && previous.status !== "Completed") row.resolvedAt = now;
+  if (DONE_STATUSES.includes(row.status) && !DONE_STATUSES.includes(previous.status)) row.resolvedAt = now;
   if (!DONE_STATUSES.includes(row.status)) {
     row.resolvedAt = null;
     row.closedAt = null;
@@ -414,18 +419,22 @@ const notifyAssignee = async (row, actor) => {
 
 // @desc    The fixed option lists the form and filters are built from
 // @route   GET /api/v1/email-records/options
-export const getEmailRecordOptions = (_req, res) =>
-  res.status(200).json({
+export const getEmailRecordOptions = async (req, res) => {
+  const mailbox = await EmailMailbox.findOne({ organizationId: req.user.organizationId }).select("email").lean();
+  return res.status(200).json({
     success: true,
     data: {
-      accounts: EMAIL_ACCOUNTS,
+      accounts: mailbox?.email
+        ? [{ email: mailbox.email, purpose: "This organization’s Gmail mailbox" }, ...EMAIL_ACCOUNTS.filter((account) => account.email !== mailbox.email)]
+        : EMAIL_ACCOUNTS,
       statuses: EMAIL_STATUSES,
-      doneStatuses: DONE_STATUSES,
+      doneStatuses: EMAIL_STATUSES.filter((status) => DONE_STATUSES.includes(status)),
       categories: EMAIL_CATEGORIES,
       priorities: EMAIL_PRIORITIES,
       channels: CHANNELS,
     },
   });
+};
 
 // @desc    List email records, newest first, with optional filters
 // @route   GET /api/v1/email-records
@@ -438,7 +447,7 @@ export const getEmailRecords = async (req, res) => {
     const q = req.query;
     const filter = orgFilter(req);
     if (q.propertyId) filter.propertyId = q.propertyId;
-    if (q.status) filter.status = q.status;
+    if (q.status && EMAIL_STATUSES.includes(q.status)) filter.status = q.status;
     if (q.category) filter.category = q.category;
     if (q.priority) filter.priority = q.priority;
     if (q.assignedTo) filter.assignedTo = q.assignedTo;
@@ -505,7 +514,14 @@ export const createEmailRecord = async (req, res) => {
     }
 
     const sendNow = Boolean(req.body.sendNow);
-    if (sendNow) {
+    const scheduledSendAt = req.body.scheduledSendAt ? new Date(req.body.scheduledSendAt) : null;
+    if (scheduledSendAt) {
+      if (Number.isNaN(scheduledSendAt.getTime()) || scheduledSendAt <= new Date()) {
+        return res.status(400).json({ success: false, message: "Choose a future UK send time." });
+      }
+      if (sendNow) return res.status(400).json({ success: false, message: "Choose send now or schedule, not both." });
+    }
+    if (sendNow || scheduledSendAt) {
       if ((payload.channel || "Email") !== "Email") {
         return res.status(400).json({ success: false, message: "Only an Email record can be sent." });
       }
@@ -525,6 +541,7 @@ export const createEmailRecord = async (req, res) => {
 
     const row = new EmailRecord({
       ...payload,
+      ...(sendNow || scheduledSendAt ? { direction: "Outgoing" } : {}),
       organizationId: req.user.organizationId,
       createdBy: req.user._id,
       createdByEmail: req.user.email || "",
@@ -538,6 +555,10 @@ export const createEmailRecord = async (req, res) => {
     applyDerived(row);
     // The replies are already in the thread — autoLog only needs to note the rest.
     autoLog(row, added ? { replyReceived: true, replySummary: row.replySummary } : {}, req.user);
+    if (scheduledSendAt) {
+      row.scheduledSendAt = scheduledSendAt;
+      row.emailStatus = "Scheduled";
+    }
     // Validated before sending, so a bad record never emails anyone.
     await row.validate();
     if (sendNow) await deliver(row, recordMail(row));
@@ -547,7 +568,7 @@ export const createEmailRecord = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: sendNow ? sentMessage(row, "Email record") : "Email record added.",
+      message: sendNow ? sentMessage(row, "Email record") : scheduledSendAt ? "Email scheduled." : "Email record added.",
       emailStatus: row.emailStatus,
       data: row,
     });
@@ -606,6 +627,18 @@ export const updateEmailRecord = async (req, res) => {
     }
 
     Object.assign(row, payload);
+    if (req.body.scheduledSendAt !== undefined && row.emailStatus === "Scheduled") {
+      if (!req.body.scheduledSendAt) {
+        row.emailStatus = "";
+        row.scheduledSendAt = null;
+      } else {
+        const nextSendAt = new Date(req.body.scheduledSendAt);
+        if (Number.isNaN(nextSendAt.getTime()) || nextSendAt <= new Date()) {
+          return res.status(400).json({ success: false, message: "Choose a future UK send time." });
+        }
+        row.scheduledSendAt = nextSendAt;
+      }
+    }
     let added;
     try {
       added = addFormReplies(row, req.body.newReplies, req.user);
@@ -735,7 +768,7 @@ export const addHistoryEntry = async (req, res) => {
     autoLog(row, { status: statusBefore, replyReceived: true, replySummary: row.replySummary }, req.user);
 
     await row.validate();
-    if (sendNow) await deliver(entry, entryMail(row, entry, text(b.subject)));
+    if (sendNow) await deliver(entry, entryMail(row, entry, text(b.subject)), row.organizationId);
     const updated = await row.save();
 
     return res.status(201).json({
@@ -783,7 +816,7 @@ export const resendEmail = async (req, res) => {
       mail = recordMail(row);
     }
 
-    const ok = await deliver(target, mail);
+    const ok = await deliver(target, mail, row.organizationId);
     const updated = await row.save();
 
     return res.status(ok ? 200 : 502).json({
@@ -838,8 +871,8 @@ export const fetchInbox = async (req, res) => {
     if (!isAdmin(req)) {
       return res.status(403).json({ success: false, message: "Only an owner or admin can check the inbox." });
     }
-    const result = await syncInbox();
-    const status = await inboxStatus();
+    const result = await syncInbox({ organizationId: req.user.organizationId });
+    const status = await inboxStatus(req.user.organizationId);
     return res.status(200).json({ success: true, data: { ...result, status } });
   } catch (error) {
     console.error("Fetch Inbox Error:", error);
@@ -849,9 +882,9 @@ export const fetchInbox = async (req, res) => {
 
 // @desc    When the inbox was last read, and whether it worked
 // @route   GET /api/v1/email-records/inbox-status
-export const getInboxStatus = async (_req, res) => {
+export const getInboxStatus = async (req, res) => {
   try {
-    return res.status(200).json({ success: true, data: await inboxStatus() });
+    return res.status(200).json({ success: true, data: await inboxStatus(req.user.organizationId) });
   } catch (error) {
     console.error("Inbox Status Error:", error);
     return res.status(500).json({ success: false, message: "Failed to read the inbox status." });

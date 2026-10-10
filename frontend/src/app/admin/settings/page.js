@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Save, Check, Loader2, Upload, X, KeyRound, Eye, EyeOff } from "lucide-react";
+import { Save, Check, Loader2, Upload, X, KeyRound, Eye, EyeOff, Mail, RefreshCw, Unplug } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
 import api from "@/app/api/api";
 import { useAuth } from "@/app/Context/AuthContext";
@@ -333,10 +333,193 @@ export default function AdminSettings() {
         </button>
       </form>
 
+      <EmailMailboxCard inputClass={inputClass} labelClass={labelClass} />
+
       <InvoiceSettingsForm inputClass={inputClass} labelClass={labelClass} />
 
       <ChangePasswordCard inputClass={inputClass} labelClass={labelClass} />
     </div>
+  );
+}
+
+function EmailMailboxCard({ inputClass, labelClass }) {
+  const [email, setEmail] = useState("");
+  const [appPassword, setAppPassword] = useState("");
+  const [mailbox, setMailbox] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const loadMailbox = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get("/email-records/mailbox");
+      const data = res.data?.data || {};
+      setMailbox(data);
+      setEmail(data.email || "");
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not load mailbox settings.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadMailbox(); }, []);
+
+  const testConnection = async () => {
+    setWorking(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await api.post("/email-records/mailbox/test", { email, appPassword });
+      setNotice(res.data?.message || "Gmail connection verified.");
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not connect to Gmail.");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const connectMailbox = async (e) => {
+    e.preventDefault();
+    setWorking(true);
+    setError("");
+    setNotice("");
+    try {
+      await api.put("/email-records/mailbox", { email, appPassword });
+      setAppPassword("");
+      const sync = await api.post("/email-records/fetch-inbox");
+      await loadMailbox();
+      const result = sync.data?.data || {};
+      setNotice(result.errors?.length
+        ? `Mailbox connected. Initial sync reported: ${result.errors[0].error}`
+        : `Mailbox connected. Initial sync filed ${result.newConversations || 0} new messages and ${result.replies || 0} replies.`);
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not connect and sync this Gmail account.");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const checkInbox = async () => {
+    setWorking(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await api.post("/email-records/fetch-inbox");
+      await loadMailbox();
+      const result = res.data?.data || {};
+      setNotice(result.errors?.length
+        ? `Sync completed with an error: ${result.errors[0].error}`
+        : `Sync complete. ${result.newConversations || 0} new messages and ${result.replies || 0} replies filed.`);
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not sync the mailbox.");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const disconnectMailbox = async () => {
+    if (!window.confirm("Disconnect this Gmail account from PMS?")) return;
+    setWorking(true);
+    setError("");
+    setNotice("");
+    try {
+      await api.delete("/email-records/mailbox");
+      setMailbox(null);
+      setEmail("");
+      setAppPassword("");
+      setNotice("Gmail account disconnected.");
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not disconnect the mailbox.");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const connected = Boolean(mailbox?.configured);
+  const passwordRequired = !connected || email.trim().toLowerCase() !== String(mailbox?.email || "").toLowerCase();
+
+  return (
+    <section className="bg-white border border-gray-100 rounded-2xl p-6 space-y-5">
+      <div className="flex items-center gap-3">
+        <span className="p-2 rounded-xl bg-orange-50 text-[#F47C3C]"><Mail size={18} /></span>
+        <div>
+          <h2 className="text-base font-bold text-[#0F253B]">Organization Gmail</h2>
+          <p className="text-xs text-gray-400">Receive and send organization email through PMS.</p>
+        </div>
+      </div>
+
+      {error && <div className="p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-xs font-bold rounded">{error}</div>}
+      {notice && <div className="p-3 bg-emerald-50 border-l-4 border-emerald-500 text-emerald-700 text-xs font-bold rounded">{notice}</div>}
+
+      {loading ? (
+        <p className="text-sm text-gray-400 flex items-center gap-2"><Loader2 size={15} className="animate-spin" /> Loading mailbox…</p>
+      ) : (
+        <>
+          {connected && (
+            <div className="rounded-xl bg-gray-50 border border-gray-100 p-4 text-sm">
+              <p className="font-bold text-[#0F253B]">Connected: {mailbox.email}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {mailbox.status?.lastSuccessAt
+                  ? `Last successful sync: ${new Date(mailbox.status.lastSuccessAt).toLocaleString()}`
+                  : "Mailbox is connected; the first inbox sync is pending."}
+              </p>
+              {mailbox.status?.lastError && <p className="text-xs text-red-600 mt-1">Last sync error: {mailbox.status.lastError}</p>}
+            </div>
+          )}
+
+          <form onSubmit={connectMailbox} className="space-y-4">
+            <div>
+              <label className={labelClass}>Gmail address</label>
+              <input
+                type="email"
+                className={inputClass}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="pmssystem6@gmail.com"
+                required
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Google App Password</label>
+              <input
+                type="password"
+                className={inputClass}
+                value={appPassword}
+                onChange={(e) => setAppPassword(e.target.value)}
+                placeholder={connected ? "Leave blank to keep the current password" : "Paste the 16-character app password"}
+                autoComplete="new-password"
+                required={passwordRequired}
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Use a Google App Password, not your normal Google password. Google requires 2-Step Verification to create one. PMS checks Gmail IMAP and SMTP before saving.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={testConnection} disabled={working || !email || !appPassword} className="px-4 py-2 border border-gray-200 rounded-xl text-sm font-bold text-[#0F253B] hover:bg-gray-50 disabled:opacity-50">
+                {working ? <Loader2 size={15} className="inline animate-spin mr-1" /> : null} Test connection
+              </button>
+              <button type="submit" disabled={working || !email || (passwordRequired && !appPassword)} className="px-4 py-2 bg-[#F47C3C] hover:bg-[#e06d30] rounded-xl text-sm font-bold text-white disabled:opacity-50">
+                {working ? <Loader2 size={15} className="inline animate-spin mr-1" /> : <Check size={15} className="inline mr-1" />}
+                {connected ? "Save Gmail connection" : "Connect Gmail and sync"}
+              </button>
+              {connected && (
+                <>
+                  <button type="button" onClick={checkInbox} disabled={working} className="px-4 py-2 border border-gray-200 rounded-xl text-sm font-bold text-[#0F253B] hover:bg-gray-50 disabled:opacity-50">
+                    <RefreshCw size={14} className="inline mr-1" /> Check inbox
+                  </button>
+                  <button type="button" onClick={disconnectMailbox} disabled={working} className="px-4 py-2 border border-red-100 rounded-xl text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">
+                    <Unplug size={14} className="inline mr-1" /> Disconnect
+                  </button>
+                </>
+              )}
+            </div>
+          </form>
+        </>
+      )}
+    </section>
   );
 }
 

@@ -56,6 +56,7 @@ const tenancySchema = new mongoose.Schema(
     // Tenancy terms
     // ============================
     rent: { type: Number, default: 0 },
+    rentPeriod: { type: String, enum: ["MONTHLY", "WEEKLY"], default: "MONTHLY" },
 
     // When this tenant FIRST moved in with us, which is not the same thing as
     // when the tenancy below started. A renewal is a new tenancy record with a

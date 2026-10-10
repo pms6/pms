@@ -83,6 +83,7 @@ const env = {
     user: process.env.MAIL_USER || "",
     password: process.env.MAIL_PASSWORD || "",
     from: process.env.MAIL_FROM || "PMS <no-reply@example.com>",
+    credentialEncryptionKey: process.env.MAIL_CREDENTIAL_ENCRYPTION_KEY || "",
   },
 
   // The inbox Email Records reads tenant replies from (cranjob/emailInbox.js).
@@ -97,9 +98,6 @@ const env = {
     user: process.env.IMAP_USER || process.env.MAIL_USER || "",
     password: process.env.IMAP_PASSWORD || process.env.MAIL_PASSWORD || "",
     mailbox: process.env.IMAP_MAILBOX || "INBOX",
-    // How far back the very first check looks, so switching this on does not
-    // import years of old mail.
-    initialDays: Number(process.env.IMAP_INITIAL_DAYS || 7),
   },
 };
 

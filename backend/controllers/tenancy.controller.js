@@ -33,7 +33,6 @@ const EDITABLE_KEYS = [
   "unit",
   "tenant",
   "tenantEmail",
-  "rent",
   "firstMoveInDate",
   "startDate",
   "fixedTermEnd",
@@ -470,6 +469,11 @@ export const createTenancy = async (req, res) => {
 
     if (!property) return res.status(404).json({ success: false, message: "Property not found." });
     if (!room) return res.status(404).json({ success: false, message: "Room not found." });
+
+    // Room pricing is the source of truth; never accept a separately typed
+    // occupancy rent that can drift from the room's configured rent.
+    payload.rent = Number(room.monthlyRent) || 0;
+    payload.rentPeriod = room.rentPeriod === "WEEKLY" ? "WEEKLY" : "MONTHLY";
 
     // The room must actually be free. Verifying the room *exists* is not enough
     // — without this two tenancies can sit on the same room at the same time.

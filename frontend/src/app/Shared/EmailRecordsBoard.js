@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import Link from "next/link";
 import {
   Plus,
   X,
@@ -31,6 +32,7 @@ import api from "@/app/api/api";
 import { fmtDate } from "@/app/utils/cleaningSheet";
 import {
   DEFAULT_OPTIONS,
+  normalizeEmailRow,
   STATUS_TONE,
   PRIORITY_TONE,
   isDone,
@@ -214,6 +216,8 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [sendNow, setSendNow] = useState(false);
+  const [scheduleSend, setScheduleSend] = useState(false);
+  const [scheduledSendAt, setScheduledSendAt] = useState("");
 
   // Replies already on the record, oldest first. Records from before the
   // thread existed may only carry the single reply summary.
@@ -247,8 +251,12 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
     if (!form.date) { setError("Date is required"); return; }
     if (!form.issue.trim()) { setError("Issue is required"); return; }
     if (uploadingCount) { setError("Wait for the uploads to finish"); return; }
-    if (canSend && sendNow && !EMAIL_RE.test(form.emailTo.trim())) {
+    if (canSend && (sendNow || scheduleSend) && !EMAIL_RE.test(form.emailTo.trim())) {
       setError("Enter a valid 'Email to' address to send");
+      return;
+    }
+    if (canSend && scheduleSend && (!scheduledSendAt || new Date(scheduledSendAt) <= new Date())) {
+      setError("Choose a future date and time to schedule this email");
       return;
     }
 
@@ -257,6 +265,7 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
     try {
       await onSave({
         sendNow: canSend && sendNow,
+        scheduledSendAt: canSend && scheduleSend ? new Date(scheduledSendAt).toISOString() : null,
         ...form,
         propertyId: form.propertyId || null,
         tenancyId: form.tenancyId || null,
@@ -490,7 +499,7 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
             <input
               type="checkbox"
               checked={sendNow}
-              onChange={(e) => setSendNow(e.target.checked)}
+              onChange={(e) => { setSendNow(e.target.checked); if (e.target.checked) setScheduleSend(false); }}
               className="accent-[#F47C3C] w-4 h-4 mt-0.5"
             />
             <span>
@@ -502,13 +511,40 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
           </label>
         )}
 
-        {canSend && sendNow ? (
+        {canSend && (
+          <div className="rounded-2xl border border-gray-100 p-4 space-y-3">
+            <label className="flex items-center gap-2 text-sm font-bold text-[#0F253B] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={scheduleSend}
+                onChange={(e) => { setScheduleSend(e.target.checked); if (e.target.checked) setSendNow(false); }}
+                className="accent-[#F47C3C] w-4 h-4"
+              />
+              <span>Schedule this email</span>
+            </label>
+            {scheduleSend && (
+              <div>
+                <label className={LABEL}>Send date and time</label>
+                <input
+                  type="datetime-local"
+                  className={FIELD}
+                  value={scheduledSendAt}
+                  onChange={(e) => setScheduledSendAt(e.target.value)}
+                  required
+                />
+                <p className="text-[11px] text-gray-400 mt-1">Uses your device&apos;s local time.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {canSend && (sendNow || scheduleSend) ? (
           <button
             type="submit"
             disabled={saving}
             className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 text-white font-bold rounded-xl transition-all"
           >
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} {saving ? "Sending…" : "Save & Send Email"}
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} {saving ? (scheduleSend ? "Scheduling…" : "Sending…") : scheduleSend ? "Schedule Email" : "Save & Send Email"}
           </button>
         ) : (
           <SubmitButton saving={saving} isEdit={isEdit} />
@@ -1040,6 +1076,7 @@ export default function EmailRecordsBoard({
   const [tenantThreadKey, setTenantThreadKey] = useState(null);
   const [runningReminders, setRunningReminders] = useState(false);
   const [checkingInbox, setCheckingInbox] = useState(false);
+  const [updatingStatusId, setUpdatingStatusId] = useState("");
   const [inbox, setInbox] = useState(null);
   const openedFromUrl = useRef(false);
 
@@ -1053,7 +1090,7 @@ export default function EmailRecordsBoard({
         api.get("/email-records"),
         api.get("/properties", { params: { limit: 200 } }),
       ]);
-      setRows(listRes.data.data || []);
+      setRows((listRes.data.data || []).map(normalizeEmailRow));
       setProperties(propsRes.data.data || []);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load email records");
@@ -1099,9 +1136,17 @@ export default function EmailRecordsBoard({
 
   const needle = q.trim().toLowerCase();
   const f = filters;
+  const folderRows = useMemo(() => {
+    if (view !== "inbox" && view !== "sent") return rows;
+    const wanted = view === "inbox" ? "Incoming" : "Outgoing";
+    return rows.filter((row) =>
+      (row.channel === "Email" && row.direction === wanted) ||
+      (row.history || []).some((entry) => entry.channel === "Email" && entry.direction === wanted)
+    );
+  }, [rows, view]);
 
   const visible = useMemo(() => {
-    return rows.filter((r) => {
+    return folderRows.filter((r) => {
       if (f.propertyKey) {
         const key = r.propertyId ? `id:${r.propertyId}` : `txt:${r.property.trim().toLowerCase()}`;
         if (key !== f.propertyKey) return false;
@@ -1124,7 +1169,7 @@ export default function EmailRecordsBoard({
       if (needle && !matchesSearch(r, needle)) return false;
       return true;
     });
-  }, [rows, f, needle]);
+  }, [folderRows, f, needle]);
 
   const statusSections = useMemo(() => {
     const statuses = DEFAULT_OPTIONS.statuses.slice(0, 9);
@@ -1149,22 +1194,21 @@ export default function EmailRecordsBoard({
   // Dashboard — over every record, not just the filtered view. Each card
   // applies its own filter when clicked.
   const statCards = [
-    { key: "open", label: "Open emails", value: rows.filter((r) => !isDone(r)).length },
-    { key: "awaiting", label: "Awaiting reply", value: rows.filter((r) => !r.replyReceived && !isDone(r)).length },
-    { key: "overdue", label: "Overdue follow-ups", value: rows.filter(isOverdue).length, alert: true },
-    { key: "urgent", label: "Urgent issues", value: rows.filter((r) => r.priority === "Urgent" && !isDone(r)).length, alert: true },
-    { key: "escalated", label: "Escalated", value: rows.filter((r) => r.escalated).length, alert: true },
+    { key: "open", label: "Open emails", value: folderRows.filter((r) => !isDone(r)).length },
+    { key: "awaiting", label: "Awaiting reply", value: folderRows.filter((r) => !r.replyReceived && !isDone(r)).length },
+    { key: "overdue", label: "Overdue follow-ups", value: folderRows.filter(isOverdue).length, alert: true },
+    { key: "urgent", label: "Urgent issues", value: folderRows.filter((r) => r.priority === "Urgent" && !isDone(r)).length, alert: true },
+    { key: "escalated", label: "Escalated", value: folderRows.filter((r) => r.escalated).length, alert: true },
     {
       key: "recentResolved",
-      label: "Completed (7 days)",
-      value: rows.filter((r) => resolvedRecently(r)).length,
+      label: "Closed (7 days)",
+      value: folderRows.filter((r) => resolvedRecently(r)).length,
     },
   ];
-  // The sum of every card after it, as the office asked for. One email can
-  // count in several cards (open and awaiting reply, say), so this can be
-  // more than the number of records. Clicking it clears the card filter.
+  // Total is the actual number of records in this view. The other cards are
+  // overlapping status counts and must not be added together.
   const cards = [
-    { key: "", label: "Total", value: statCards.reduce((sum, c) => sum + c.value, 0) },
+    { key: "", label: "Total", value: folderRows.length },
     ...statCards,
   ];
 
@@ -1176,7 +1220,7 @@ export default function EmailRecordsBoard({
     await load();
     // The record is saved either way; a failed send is reported, and can be
     // retried from the record.
-    if (payload.sendNow) alert(res.data.message);
+    if (payload.sendNow || payload.scheduledSendAt) alert(res.data.message);
   };
 
   // Recomputed from the live rows, so a message added while the thread is
@@ -1189,7 +1233,21 @@ export default function EmailRecordsBoard({
     if (g) setTenantThreadKey(g.key);
   };
 
-  const replaceRow = (updated) => setRows((prev) => prev.map((r) => (r._id === updated._id ? updated : r)));
+  const replaceRow = (updated) => setRows((prev) => prev.map((r) => (r._id === updated._id ? normalizeEmailRow(updated) : r)));
+
+  const updateStatusInline = async (row, status) => {
+    if (!status || status === row.status || updatingStatusId) return;
+    setUpdatingStatusId(row._id);
+    try {
+      const res = await api.put(`/email-records/${row._id}`, { status });
+      if (res.data?.data) replaceRow(res.data.data);
+      else await load();
+    } catch (err) {
+      alert(err.response?.data?.message || "Could not update the email status.");
+    } finally {
+      setUpdatingStatusId("");
+    }
+  };
 
   const remove = async (row) => {
     if (!confirm(`Delete the ${fmtDate(row.date)} record for "${row.property}"?`)) return;
@@ -1218,8 +1276,8 @@ export default function EmailRecordsBoard({
     }
   };
 
-  // Replies are read from the inbox every five minutes on the server; this
-  // reads it now.
+  // Inbox and Sent are synced every five minutes on the server; this reads
+  // both folders now.
   const checkInbox = async () => {
     setCheckingInbox(true);
     try {
@@ -1227,8 +1285,8 @@ export default function EmailRecordsBoard({
       const d = res.data.data || {};
       setInbox(d.status || null);
       if (d.skipped) alert(d.skipped);
-      else if (d.errors?.length && !d.replies && !d.newConversations) alert(`Could not read the inbox: ${d.errors[0].error}`);
-      else alert(`Replies filed: ${d.replies || 0}. New tenant conversations: ${d.newConversations || 0}.`);
+      else if (d.errors?.length && !d.replies && !d.newConversations && !d.sent) alert(`Could not read the mailbox: ${d.errors[0].error}`);
+      else alert(`New incoming emails: ${d.newConversations || 0}. Replies added to existing conversations: ${d.replies || 0}. Sent emails imported: ${d.sent || 0}. Already imported/ignored: ${d.ignored || 0}.`);
       await load();
     } catch (err) {
       alert(err.response?.data?.message || "Failed to check the inbox");
@@ -1286,10 +1344,10 @@ export default function EmailRecordsBoard({
         <p className={`flex items-center gap-2 text-xs font-medium ${inbox.lastError ? "text-red-600" : "text-gray-400"}`}>
           <Inbox size={13} />
           {!inbox.configured
-            ? "Tenant replies are not being fetched — no inbox is configured on the server."
+            ? <><span>Email is not syncing —</span> <Link href="/admin/settings" className="font-bold text-[#F47C3C] hover:underline">connect Gmail in Settings</Link></>
             : inbox.lastError
               ? `Could not read ${inbox.mailbox}: ${inbox.lastError}`
-              : `Tenant replies are fetched automatically from ${inbox.mailbox} every 5 minutes${
+              : `Inbox and sent email sync automatically from ${inbox.mailbox} every 5 minutes${
                   inbox.lastSuccessAt ? ` · last checked ${fmtDateTime(inbox.lastSuccessAt)}` : ""
                 }`}
         </p>
@@ -1299,6 +1357,8 @@ export default function EmailRecordsBoard({
         <div className="inline-flex rounded-xl bg-white border border-gray-100 p-1">
           {[
             { key: "records", label: "Email Log", Icon: Mail },
+            { key: "inbox", label: "Inbox", Icon: Inbox },
+            { key: "sent", label: "Sent", Icon: Send },
             { key: "tenants", label: "Tenant Conversations", Icon: Users },
           ].map(({ key, label, Icon }) => (
             <button
@@ -1421,7 +1481,7 @@ export default function EmailRecordsBoard({
           <option value="awaiting">Awaiting reply</option>
           <option value="urgent">Urgent (open)</option>
           <option value="escalated">Escalated</option>
-          <option value="recentResolved">Resolved in last 7 days</option>
+          <option value="recentResolved">Closed in last 7 days</option>
         </select>
         {anyFilter && (
           <button
@@ -1449,9 +1509,10 @@ export default function EmailRecordsBoard({
       <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/70 flex items-center justify-between">
           <p className="text-sm font-bold text-[#0F253B] flex items-center gap-2">
-            <Mail size={15} className="text-[#F47C3C]" /> Email Communication Log
+            {view === "inbox" ? <Inbox size={15} className="text-[#F47C3C]" /> : view === "sent" ? <Send size={15} className="text-[#F47C3C]" /> : <Mail size={15} className="text-[#F47C3C]" />}
+            {view === "inbox" ? "Inbox" : view === "sent" ? "Sent Email" : "Email Communication Log"}
           </p>
-          <p className="text-xs font-medium text-gray-400">{visible.length} of {rows.length}</p>
+          <p className="text-xs font-medium text-gray-400">{visible.length} of {folderRows.length}</p>
         </div>
 
         <div className="overflow-x-auto">
@@ -1528,7 +1589,17 @@ export default function EmailRecordsBoard({
                       </td>
                       <td className="px-4 py-3"><Badge tone={PRIORITY_TONE[r.priority]}>{r.priority}</Badge></td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge>
+                        <select
+                          aria-label={`Change status for ${r.property} email`}
+                          title="Change status"
+                          value={r.status}
+                          disabled={updatingStatusId === r._id || Boolean(updatingStatusId)}
+                          onChange={(event) => updateStatusInline(r, event.target.value)}
+                          className="max-w-[12rem] rounded-full border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-bold text-[#0F253B] outline-none focus:border-[#F47C3C] focus:ring-2 focus:ring-orange-100 disabled:opacity-60"
+                        >
+                          {!options.statuses.includes(r.status) && <option value={r.status}>{r.status}</option>}
+                          {options.statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                        </select>
                         {r.escalated && (
                           <span className="ml-1.5 inline-flex items-center gap-1 text-[10px] font-bold uppercase text-red-600">
                             <AlertTriangle size={11} /> Escalated

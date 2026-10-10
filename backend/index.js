@@ -15,7 +15,8 @@ import { sendCouncilTaxReminders } from "./cranjob/councilTaxReminder.js";
 import { sendAllLocationDigests } from "./cranjob/locationDigest.js";
 import { generateAllSchedules } from "./cranjob/cleaningSchedule.js";
 import { sweepEmailFollowUps } from "./cranjob/emailFollowUp.js";
-import { syncInbox } from "./cranjob/emailInbox.js";
+import { syncAllConfiguredInboxes } from "./cranjob/emailInbox.js";
+import { sendScheduledEmails } from "./cranjob/scheduledEmail.js";
 import { purgeExpiredCaptures, closeAbandonedSessions } from "./controllers/screenMonitor.controller.js";
 import CleaningSchedule from "./models/CleaningSchedule.js";
 
@@ -110,14 +111,26 @@ cron.schedule("0 8 * * *", async () => {
   );
 });
 
-// Every 5 minutes, file tenant replies (and new tenant emails) from the
-// company inbox into Email Records.
+// Every 5 minutes, sync incoming and sent messages from each configured
+// organization mailbox into Email Records.
 cron.schedule("*/5 * * * *", async () => {
-  const r = await syncInbox();
-  if (r.replies || r.newConversations || r.errors.length) {
+  const r = await syncAllConfiguredInboxes();
+  if (r.replies || r.newConversations || r.sent || r.errors.length) {
     console.log(
-      `Inbox: ${r.replies} replies filed, ${r.newConversations} new tenant conversations, Errors: ${r.errors.length}`
+      `Email sync: ${r.replies} replies, ${r.newConversations} incoming, ${r.sent} sent, Errors: ${r.errors.length}`
     );
+  }
+});
+
+// Send queued Email Records shortly after their scheduled time.
+cron.schedule("* * * * *", async () => {
+  try {
+    const result = await sendScheduledEmails();
+    if (result.sent || result.failed) {
+      console.log(`Scheduled emails: ${result.sent} sent, ${result.failed} failed`);
+    }
+  } catch (error) {
+    console.error("Scheduled email job failed:", error.message);
   }
 });
 
