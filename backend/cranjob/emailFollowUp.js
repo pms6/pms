@@ -143,7 +143,7 @@ export const sweepEmailFollowUps = async ({ organizationId } = {}) => {
 
         await EmailRecord.updateOne(
           { _id: row._id },
-          { $set: { reminderSentFor: row.followUpDate, status: row.status === "Open" ? "Follow-Up Required" : row.status } }
+          { $set: { reminderSentFor: row.followUpDate, status: ["Action Required", "Open"].includes(row.status) ? "Follow-Up Required" : row.status } }
         );
         result.reminders++;
       }

@@ -18,15 +18,23 @@ export const EMAIL_ACCOUNTS = [
 ];
 
 export const EMAIL_STATUSES = [
-  "Open",
+  "Action Required",
+  "Reply Required",
   "Awaiting Reply",
   "Follow-Up Required",
+  "Pending Approval",
+  "In Progress",
+  "Completed",
+  "For Information",
+  "On Hold",
+  // Retained so older records remain valid and editable.
+  "Open",
   "Resolved",
   "Closed",
 ];
 
-// Statuses that end the chase — no reminders or escalation once here.
-export const DONE_STATUSES = ["Resolved", "Closed"];
+// Completed records no longer need reminders or escalation.
+export const DONE_STATUSES = ["Completed"];
 
 export const EMAIL_CATEGORIES = [
   "Maintenance",
@@ -143,7 +151,7 @@ const emailRecordSchema = new mongoose.Schema(
     issue: { type: String, trim: true, required: true },
     category: { type: String, enum: EMAIL_CATEGORIES, default: "General", index: true },
     priority: { type: String, enum: EMAIL_PRIORITIES, default: "Medium", index: true },
-    status: { type: String, enum: EMAIL_STATUSES, default: "Open", index: true },
+    status: { type: String, enum: EMAIL_STATUSES, default: "Action Required", index: true },
 
     // "Reply" on the sheet.
     replyReceived: { type: Boolean, default: false },

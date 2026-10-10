@@ -224,11 +224,11 @@ const addReply = async (row, { parsed, fromAddr, messageId, date }) => {
       channel: "Note",
       direction: "Internal",
       date: new Date(),
-      summary: `Status changed from ${row.status} to Open — reply received by email.`,
+      summary: `Status changed from ${row.status} to Action Required — reply received by email.`,
       auto: true,
       createdByEmail: "Inbox",
     });
-    row.status = "Open";
+    row.status = "Action Required";
     row.resolvedAt = null;
     row.closedAt = null;
   }
@@ -260,7 +260,7 @@ const createFromTenant = async (tenancy, { parsed, fromAddr, messageId, date }) 
     subject,
     issue: body || subject || "(no text)",
     category: "Tenant Issue",
-    status: "Open",
+    status: "Action Required",
     files,
     emailMessageId: messageId,
   });

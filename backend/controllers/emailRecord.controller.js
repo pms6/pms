@@ -45,7 +45,7 @@ const pickPayload = (body) => {
   if (body.issue !== undefined) payload.issue = text(body.issue);
   if (body.category !== undefined) payload.category = pick(body.category, EMAIL_CATEGORIES, "General");
   if (body.priority !== undefined) payload.priority = pick(body.priority, EMAIL_PRIORITIES, "Medium");
-  if (body.status !== undefined) payload.status = pick(body.status, EMAIL_STATUSES, "Open");
+  if (body.status !== undefined) payload.status = pick(body.status, EMAIL_STATUSES, "Action Required");
   if (body.replyReceived !== undefined) payload.replyReceived = Boolean(body.replyReceived);
   // An emptied date picker sends "" — that means "no date", not an invalid one.
   if (body.replyDate !== undefined) payload.replyDate = body.replyDate || null;
@@ -365,7 +365,7 @@ const addFormReplies = (row, list, actor) => {
     row.replySummary = latest.summary;
   }
   row.replyReceived = true;
-  if (row.status === "Awaiting Reply") row.status = "Open";
+  if (row.status === "Awaiting Reply") row.status = "Action Required";
   return replies.length;
 };
 
@@ -377,8 +377,7 @@ const applyDerived = (row, previous = {}) => {
 
   if (row.replyReceived && !row.replyDate) row.replyDate = now;
 
-  if (row.status === "Resolved" && previous.status !== "Resolved") row.resolvedAt = now;
-  if (row.status === "Closed" && previous.status !== "Closed") row.closedAt = now;
+  if (row.status === "Completed" && previous.status !== "Completed") row.resolvedAt = now;
   if (!DONE_STATUSES.includes(row.status)) {
     row.resolvedAt = null;
     row.closedAt = null;
@@ -723,7 +722,7 @@ export const addHistoryEntry = async (req, res) => {
       row.replyReceived = true;
       row.replyDate = date;
       row.replySummary = summary;
-      if (row.status === "Awaiting Reply") row.status = "Open";
+      if (row.status === "Awaiting Reply") row.status = "Action Required";
     }
     if (isFollowUp) row.lastFollowUpAt = date;
     // Chasing something usually sets when it next needs looking at.

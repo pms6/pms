@@ -16,17 +16,28 @@ export const DEFAULT_OPTIONS = {
     { email: "tmhours@gmail.com", purpose: "TM Hours / general correspondence" },
     { email: "maintenancetmh@gmail.com", purpose: "Maintenance and repair correspondence" },
   ],
-  statuses: ["Open", "Awaiting Reply", "Follow-Up Required", "Resolved", "Closed"],
-  doneStatuses: ["Resolved", "Closed"],
+  statuses: [
+    "Action Required", "Reply Required", "Awaiting Reply", "Follow-Up Required",
+    "Pending Approval", "In Progress", "Completed", "For Information", "On Hold",
+    "Open", "Resolved", "Closed",
+  ],
+  doneStatuses: ["Completed"],
   categories: ["Maintenance", "Tenant Issue", "Inspection", "Compliance", "Contractor", "Payment", "Notice", "General"],
   priorities: ["Low", "Medium", "High", "Urgent"],
   channels: ["Email", "Call", "Text", "WhatsApp", "Note", "Meeting", "Other"],
 };
 
 export const STATUS_TONE = {
-  Open: "blue",
+  "Action Required": "red",
+  "Reply Required": "red",
   "Awaiting Reply": "amber",
   "Follow-Up Required": "orange",
+  "Pending Approval": "blue",
+  "In Progress": "orange",
+  Completed: "green",
+  "For Information": "gray",
+  "On Hold": "blue",
+  Open: "blue",
   Resolved: "green",
   Closed: "gray",
 };

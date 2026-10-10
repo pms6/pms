@@ -202,7 +202,7 @@ function RecordModal({ initial, properties, members, tenancies, options, onClose
     issue: initial?.issue || "",
     category: initial?.category || "General",
     priority: initial?.priority || "Medium",
-    status: initial?.status || "Open",
+    status: initial?.status || "Action Required",
     assignedTo: initial?.assignedTo ? String(initial.assignedTo) : "",
     followUpDate: toInputDate(initial?.followUpDate),
     followUpNotes: initial?.followUpNotes || "",
@@ -1126,6 +1126,23 @@ export default function EmailRecordsBoard({
     });
   }, [rows, f, needle]);
 
+  const statusSections = useMemo(() => {
+    const statuses = DEFAULT_OPTIONS.statuses.slice(0, 9);
+    const groups = new Map(statuses.map((status) => [status, []]));
+    const other = [];
+    visible.forEach((row, index) => {
+      const entry = { row, srNo: index + 1 };
+      (groups.get(row.status) || other).push(entry);
+    });
+    const sections = statuses.map((status) => ({ status, entries: groups.get(status) }));
+    if (other.length || (filters.status && !groups.has(filters.status))) {
+      sections.push({ status: "Other", entries: other });
+    }
+    return filters.status
+      ? sections.filter((section) => section.status === filters.status || (section.status === "Other" && !groups.has(filters.status)))
+      : sections;
+  }, [visible, filters.status]);
+
   const setFilter = (k) => (e) => setFilters((prev) => ({ ...prev, [k]: e.target.value }));
   const anyFilter = needle || Object.values(filters).some(Boolean);
 
@@ -1139,7 +1156,7 @@ export default function EmailRecordsBoard({
     { key: "escalated", label: "Escalated", value: rows.filter((r) => r.escalated).length, alert: true },
     {
       key: "recentResolved",
-      label: "Resolved (7 days)",
+      label: "Completed (7 days)",
       value: rows.filter((r) => resolvedRecently(r)).length,
     },
   ];
@@ -1416,6 +1433,19 @@ export default function EmailRecordsBoard({
         )}
       </div>
 
+      <div className="flex gap-2 flex-wrap" aria-label="Filter email records by status">
+        {[{ value: "", label: "All statuses" }, ...DEFAULT_OPTIONS.statuses.slice(0, 9).map((status) => ({ value: status, label: status }))].map((item) => (
+          <button
+            key={item.value || "all-statuses"}
+            type="button"
+            onClick={() => setFilters((prev) => ({ ...prev, status: item.value }))}
+            className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all ${filters.status === item.value ? "bg-[#0F253B] text-white border-[#0F253B]" : "bg-white text-gray-500 border-gray-100 hover:bg-gray-50"}`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
       <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 bg-gray-50/70 flex items-center justify-between">
           <p className="text-sm font-bold text-[#0F253B] flex items-center gap-2">
@@ -1443,17 +1473,32 @@ export default function EmailRecordsBoard({
                 <th className={`${thClass} w-32 text-right`}>Actions</th>
               </tr>
             </thead>
-            <tbody>
-              {visible.length === 0 ? (
+            {visible.length === 0 ? (
+              <tbody>
                 <EmptyRow colSpan={13} loading={loading} anyRows={rows.length > 0} emptyText="No email records yet" />
-              ) : (
-                visible.map((r, i) => {
+              </tbody>
+            ) : statusSections.map((section) => (
+              <tbody key={section.status}>
+                <tr className="bg-gray-50/80 border-b border-gray-100">
+                  <td colSpan={13} className="px-5 py-3">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-sm font-bold text-[#0F253B]">{section.status}</h2>
+                      <span className="rounded-full px-3 py-1 text-xs font-bold bg-white text-gray-600 border border-gray-100">
+                        {section.entries.length} {section.entries.length === 1 ? "Email" : "Emails"}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+                {section.entries.length === 0 ? (
+                  <tr><td colSpan={13} className="px-5 py-7 text-center text-sm text-gray-400">No {section.status.toLowerCase()} records match these filters</td></tr>
+                ) : (
+                section.entries.map(({ row: r, srNo }) => {
                   const overdue = isOverdue(r);
                   const dueToday = isDueToday(r);
                   const Icon = CHANNEL_ICON[r.channel] || Mail;
                   return (
                     <tr key={r._id} className={`border-b border-gray-50 hover:bg-gray-50/50 align-top ${r.escalated ? "bg-red-50/40" : ""}`}>
-                      <td className="px-4 py-3 text-gray-400 font-medium">{i + 1}</td>
+                      <td className="px-4 py-3 text-gray-400 font-medium">{srNo}</td>
                       <td className="px-4 py-3 font-semibold text-[#0F253B] min-w-[10rem]">
                         <button onClick={() => setPropertyHistory(r)} className="text-left hover:text-[#F47C3C]" title="Communication history for this property">
                           {r.property}
@@ -1516,8 +1561,9 @@ export default function EmailRecordsBoard({
                     </tr>
                   );
                 })
-              )}
-            </tbody>
+                )}
+              </tbody>
+            ))}
           </table>
         </div>
       </div>
