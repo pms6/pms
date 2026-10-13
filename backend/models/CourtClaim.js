@@ -20,6 +20,16 @@ const paymentSchema = new mongoose.Schema({
   proof: { type: [attachmentSchema], default: [] },
 }, { timestamps: true });
 
+// A progress note on a claim: when it was logged, what happens next, when that
+// is due, and any paperwork for it. A claim can carry many, each maintained
+// separately so the office can track upcoming actions and deadlines over time.
+const claimUpdateSchema = new mongoose.Schema({
+  updateDate: { type: Date, required: true },
+  nextStep: { type: String, trim: true, default: "" },
+  dueDate: { type: Date, default: null },
+  attachments: { type: [attachmentSchema], default: [] },
+}, { timestamps: true });
+
 const courtClaimSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -44,6 +54,10 @@ const courtClaimSchema = new mongoose.Schema(
       index: true,
     },
     property: { type: String, trim: true, required: true },
+
+    // The court's own reference for the claim ("Claim #"). Free text, since the
+    // format varies by court and a claim may be logged before a number is issued.
+    claimNumber: { type: String, trim: true, default: "" },
 
     // "Claim Date" on the sheet.
     claimDate: { type: Date, required: true, index: true },
@@ -80,6 +94,10 @@ const courtClaimSchema = new mongoose.Schema(
     // Payments and costs recorded against this claim, each with its own date
     // and proof. Total cost paid to date is derived from these entries.
     payments: { type: [paymentSchema], default: [] },
+
+    // Progress updates logged against this claim over time — each with its own
+    // next step, due date and attachment.
+    updates: { type: [claimUpdateSchema], default: [] },
 
     // Court papers, letters, photos, video — whatever backs the claim.
     files: { type: [attachmentSchema], default: [] },

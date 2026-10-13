@@ -1,4 +1,5 @@
 import DepositProtection, { DEPOSIT_PROTECTION_STATUSES } from "../models/DepositProtection.js";
+import { cleanAttachments } from "../utils/attachments.js";
 
 const scope = (req) => ({ organizationId: req.user.organizationId });
 
@@ -17,6 +18,7 @@ export const createDepositProtection = async (req, res) => {
     if (!DEPOSIT_PROTECTION_STATUSES.includes(status)) return res.status(400).json({ success: false, message: "Invalid status." });
     const body = { ...req.body, tenant, status };
     ["propertyId", "roomId"].forEach((key) => { if (body[key] === "") body[key] = null; });
+    if (body.contracts !== undefined) body.contracts = cleanAttachments(body.contracts);
     const row = await DepositProtection.create({ ...body, ...scope(req), createdBy: req.user._id });
     res.status(201).json({ success: true, data: row });
   } catch (error) { res.status(400).json({ success: false, message: error.message }); }
@@ -26,6 +28,7 @@ export const updateDepositProtection = async (req, res) => {
   try {
     const body = { ...req.body };
     ["propertyId", "roomId"].forEach((key) => { if (body[key] === "") body[key] = null; });
+    if (body.contracts !== undefined) body.contracts = cleanAttachments(body.contracts);
     if (body.tenant !== undefined) body.tenant = String(body.tenant).trim();
     if (body.status !== undefined && !DEPOSIT_PROTECTION_STATUSES.includes(body.status)) return res.status(400).json({ success: false, message: "Invalid status." });
     if (body.tenant === "") return res.status(400).json({ success: false, message: "Tenant name is required." });

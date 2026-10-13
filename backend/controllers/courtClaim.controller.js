@@ -16,6 +16,7 @@ const pickPayload = (body) => {
 
   if (body.propertyId !== undefined) payload.propertyId = body.propertyId || null;
   if (body.property !== undefined) payload.property = text(body.property);
+  if (body.claimNumber !== undefined) payload.claimNumber = text(body.claimNumber);
   if (body.claimDate !== undefined) payload.claimDate = body.claimDate;
   if (body.claimBy !== undefined) payload.claimBy = text(body.claimBy);
   if (body.claimTo !== undefined) payload.claimTo = text(body.claimTo);
@@ -50,6 +51,16 @@ const pickPayload = (body) => {
             proof: cleanAttachments(payment?.proof),
           };
         })
+      : [];
+  }
+  if (body.updates !== undefined) {
+    payload.updates = Array.isArray(body.updates)
+      ? body.updates.map((update) => ({
+          updateDate: update?.updateDate || null,
+          nextStep: text(update?.nextStep),
+          dueDate: update?.dueDate || null,
+          attachments: cleanAttachments(update?.attachments),
+        }))
       : [];
   }
   if (body.files !== undefined) payload.files = cleanAttachments(body.files);

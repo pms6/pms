@@ -48,6 +48,9 @@ const paymentsOf = (payments) => (Array.isArray(payments) ? payments : []);
 const totalPaid = (payments) => paymentsOf(payments).reduce((sum, payment) => sum + Number(payment.amountPaid || 0), 0);
 const newPayment = () => ({ _key: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`, paymentDate: "", amountPaid: "", proof: [] });
 
+const updatesOf = (updates) => (Array.isArray(updates) ? updates : []);
+const newUpdate = () => ({ _key: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`, updateDate: "", nextStep: "", dueDate: "", attachments: [] });
+
 const startOfToday = () => {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -69,7 +72,7 @@ const isUpcoming = (deadline) => {
 };
 
 const matchesSearch = (row, needle) =>
-  [row.property, row.claimBy, row.claimTo, row.claimType, row.claimReason, row.details, row.nextActionRequired].some((v) =>
+  [row.property, row.claimNumber, row.claimBy, row.claimTo, row.claimType, row.claimReason, row.details, row.nextActionRequired].some((v) =>
     String(v || "").toLowerCase().includes(needle)
   );
 
@@ -82,6 +85,7 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
   const [form, setForm] = useState({
     propertyId: initial?.propertyId || "",
     property: initial?.property || "",
+    claimNumber: initial?.claimNumber || "",
     claimDate: toInputDate(initial?.claimDate) || toInputDate(new Date()),
     claimBy: initial?.claimBy || "",
     claimTo: initial?.claimTo || "",
@@ -103,6 +107,14 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
       amountPaid: payment.amountPaid ?? "",
       proof: filesOf(payment.proof),
     })),
+    updates: updatesOf(initial?.updates).map((update) => ({
+      ...update,
+      _key: update._id || newUpdate()._key,
+      updateDate: toInputDate(update.updateDate),
+      nextStep: update.nextStep || "",
+      dueDate: toInputDate(update.dueDate),
+      attachments: filesOf(update.attachments),
+    })),
   });
 
   // Kept out of `form` because the uploader appends to it asynchronously while
@@ -110,6 +122,7 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
   const [files, setFiles] = useState(() => filesOf(initial?.files));
   const [uploadingCount, setUploadingCount] = useState(0);
   const [paymentUploading, setPaymentUploading] = useState({});
+  const [updateUploading, setUpdateUploading] = useState({});
 
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -122,12 +135,20 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
     if (!form.property.trim()) { setError("Property is required"); return; }
     if (!form.claimDate) { setError("Claim date is required"); return; }
     // Saving mid-upload would drop whatever has not landed yet.
-    if (uploadingCount + Object.values(paymentUploading).reduce((sum, count) => sum + count, 0)) {
+    const pendingUploads =
+      uploadingCount +
+      Object.values(paymentUploading).reduce((sum, count) => sum + count, 0) +
+      Object.values(updateUploading).reduce((sum, count) => sum + count, 0);
+    if (pendingUploads) {
       setError("Wait for the uploads to finish"); return;
     }
     const payments = form.payments.filter((payment) => payment.paymentDate || payment.amountPaid !== "" || payment.proof.length);
     if (payments.some((payment) => !payment.paymentDate || payment.amountPaid === "" || !Number.isFinite(Number(payment.amountPaid)) || Number(payment.amountPaid) < 0)) {
       setError("Each payment needs a payment date and a valid amount."); return;
+    }
+    const updates = form.updates.filter((update) => update.updateDate || update.nextStep.trim() || update.dueDate || update.attachments.length);
+    if (updates.some((update) => !update.updateDate)) {
+      setError("Each update needs an update date."); return;
     }
 
     setSaving(true);
@@ -136,6 +157,7 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
       await onSave({
         propertyId: form.propertyId || null,
         property: form.property.trim(),
+        claimNumber: form.claimNumber.trim(),
         claimDate: form.claimDate,
         claimBy: form.claimBy.trim(),
         claimTo: form.claimTo.trim(),
@@ -151,6 +173,7 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
         details: form.details.trim(),
         nextActionRequired: form.nextActionRequired.trim(),
         payments: payments.map(({ paymentDate, amountPaid, proof }) => ({ paymentDate, amountPaid: Number(amountPaid), proof })),
+        updates: updates.map(({ updateDate, nextStep, dueDate, attachments }) => ({ updateDate, nextStep: nextStep.trim(), dueDate: dueDate || null, attachments })),
         files,
       });
     } catch (err) {
@@ -170,6 +193,11 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
 
       <form onSubmit={submit} className="space-y-4">
         <PropertyFields form={form} setForm={setForm} properties={properties} />
+
+        <div>
+          <label className={LABEL}>Claim #</label>
+          <input className={FIELD} value={form.claimNumber} onChange={set("claimNumber")} placeholder="Court claim number" />
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -311,6 +339,45 @@ function ClaimModal({ initial, properties, onClose, onSave }) {
           <input className={FIELD} value={form.nextActionRequired} onChange={set("nextActionRequired")} placeholder="Enter the next action required" />
         </div>
 
+        <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-[#0F253B]">Further Updates</p>
+              <p className="text-[11px] font-medium text-gray-400">Log progress, the next step, when it is due, and any paperwork</p>
+            </div>
+            <button type="button" onClick={() => setForm((f) => ({ ...f, updates: [...f.updates, newUpdate()] }))} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs font-bold text-[#F47C3C] hover:bg-orange-50">
+              <Plus size={14} /> Add update
+            </button>
+          </div>
+
+          {form.updates.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-gray-200 bg-white px-3 py-5 text-center text-xs font-medium text-gray-400">No updates recorded yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {form.updates.map((update, index) => (
+                <div key={update._key} className="space-y-3 rounded-xl border border-gray-100 bg-white p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold text-[#0F253B]">Update {index + 1}</p>
+                    <button type="button" disabled={Boolean(updateUploading[update._key])} onClick={() => setForm((f) => ({ ...f, updates: f.updates.filter((u) => u._key !== update._key) }))} title="Remove update" className="rounded-lg p-1.5 text-gray-300 hover:bg-red-50 hover:text-red-500 disabled:opacity-40"><Trash2 size={14}/></button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div><label className={LABEL}>Update date</label><input type="date" className={FIELD} value={update.updateDate} onChange={(e) => setForm((f) => ({ ...f, updates: f.updates.map((u) => u._key === update._key ? { ...u, updateDate: e.target.value } : u) }))}/></div>
+                    <div><label className={LABEL}>Due date</label><input type="date" className={FIELD} value={update.dueDate} onChange={(e) => setForm((f) => ({ ...f, updates: f.updates.map((u) => u._key === update._key ? { ...u, dueDate: e.target.value } : u) }))}/></div>
+                  </div>
+                  <div><label className={LABEL}>Next step</label><textarea rows={2} className={FIELD} value={update.nextStep} onChange={(e) => setForm((f) => ({ ...f, updates: f.updates.map((u) => u._key === update._key ? { ...u, nextStep: e.target.value } : u) }))} placeholder="What needs to happen next"/></div>
+                  <MediaUploader
+                    files={update.attachments}
+                    onChange={(change) => setForm((f) => ({ ...f, updates: f.updates.map((u) => u._key === update._key ? { ...u, attachments: applyFiles(change, u.attachments) } : u) }))}
+                    onUploadingChange={(count) => setUpdateUploading((current) => ({ ...current, [update._key]: count }))}
+                    label="Attachment"
+                    hint="Attach any paperwork for this update"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <MediaUploader
           files={files}
           onChange={setFiles}
@@ -332,6 +399,7 @@ function ViewModal({ row, onClose, onEdit, onOpenFiles }) {
   // A paid claim is finished — its response deadline no longer matters.
   const overdue = statusOf(row) !== "Paid" && isOverdue(row.deadlineToRespond);
   const payments = paymentsOf(row.payments);
+  const updates = updatesOf(row.updates);
 
   return (
     <div
@@ -355,6 +423,7 @@ function ViewModal({ row, onClose, onEdit, onOpenFiles }) {
 
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4">
+            <ViewRow label="Claim #">{row.claimNumber}</ViewRow>
             <ViewRow label="Claim date">{fmtDate(row.claimDate)}</ViewRow>
             <ViewRow label="Deadline to respond">
               {row.deadlineToRespond ? (
@@ -394,6 +463,42 @@ function ViewModal({ row, onClose, onEdit, onOpenFiles }) {
               <div className="text-right"><p className={LABEL}>Total Cost Paid to Date</p><p className="text-lg font-bold text-[#0F253B]">{money(totalPaid(payments))}</p></div>
             </div>
             {payments.length === 0 ? <p className="rounded-xl border border-dashed border-gray-200 bg-white px-3 py-5 text-center text-xs font-medium text-gray-400">No payments recorded.</p> : <div className="space-y-3">{payments.map((payment, index) => <div key={payment._id || index} className="rounded-xl border border-gray-100 bg-white p-3"><div className="mb-2 flex items-center justify-between gap-3"><p className="text-xs font-bold text-gray-500">Payment date · {fmtDate(payment.paymentDate)}</p><p className="text-sm font-bold text-[#0F253B]">{money(payment.amountPaid)}</p></div>{filesOf(payment.proof).length > 0 && <div className="space-y-2">{filesOf(payment.proof).map((file, fileIndex) => <AttachmentRow key={file.url || fileIndex} file={file}/>)}</div>}</div>)}</div>}
+          </div>
+
+          <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className={LABEL}>Further Updates</p>
+                <p className="text-[11px] font-medium text-gray-400">{updates.length} update{updates.length === 1 ? "" : "s"} recorded</p>
+              </div>
+            </div>
+            {updates.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-gray-200 bg-white px-3 py-5 text-center text-xs font-medium text-gray-400">No updates recorded.</p>
+            ) : (
+              <div className="space-y-3">
+                {updates.map((update, index) => {
+                  const dueOverdue = statusOf(row) !== "Paid" && isOverdue(update.dueDate);
+                  return (
+                    <div key={update._id || index} className="rounded-xl border border-gray-100 bg-white p-3">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="text-xs font-bold text-gray-500">Update date · {fmtDate(update.updateDate)}</p>
+                        {update.dueDate && (
+                          <p className={`text-xs font-bold ${dueOverdue ? "text-red-600" : "text-[#0F253B]"}`}>
+                            Due · {fmtDate(update.dueDate)}{dueOverdue && " · overdue"}
+                          </p>
+                        )}
+                      </div>
+                      {update.nextStep && <p className="text-sm font-medium text-gray-500 whitespace-pre-line leading-relaxed">{update.nextStep}</p>}
+                      {filesOf(update.attachments).length > 0 && (
+                        <div className="mt-2 space-y-2">
+                          {filesOf(update.attachments).map((file, fileIndex) => <AttachmentRow key={file.url || fileIndex} file={file}/>)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div>
@@ -620,6 +725,7 @@ export default function CourtClaimsBoard({
               <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 border-b border-gray-100">
                 <th className={`${thClass} w-10`}>Sr</th>
                 <th className={thClass}>Property</th>
+                <th className={thClass}>Claim #</th>
                 <th className={thClass}>Claim date</th>
                 <th className={thClass}>Claim by</th>
                 <th className={thClass}>Claim to</th>
@@ -640,7 +746,7 @@ export default function CourtClaimsBoard({
             <tbody>
               {visible.length === 0 ? (
                 <EmptyRow
-                  colSpan={17}
+                  colSpan={18}
                   loading={loading}
                   anyRows={rows.length > 0}
                   emptyText="No court claims recorded yet"
@@ -652,6 +758,7 @@ export default function CourtClaimsBoard({
                     <tr key={r._id} className="border-b border-gray-50 hover:bg-gray-50/50 align-top">
                       <td className="px-4 py-3 text-gray-400 font-medium">{i + 1}</td>
                       <td className="px-4 py-3 font-semibold text-[#0F253B]">{r.property}</td>
+                      <td className="px-4 py-3 text-gray-500 font-medium whitespace-nowrap">{r.claimNumber || "—"}</td>
                       <td className="px-4 py-3 text-gray-500 font-medium whitespace-nowrap">{fmtDate(r.claimDate)}</td>
                       <td className="px-4 py-3 text-[#0F253B] font-medium">{r.claimBy || "—"}</td>
                       <td className="px-4 py-3 text-[#0F253B] font-medium">{r.claimTo || "—"}</td>
