@@ -586,13 +586,16 @@ export default function CourtClaimsBoard({
 
   const needle = q.trim().toLowerCase();
 
-  const visible = useMemo(
+  const matchingRows = useMemo(
     () =>
       rows
         .filter((r) => (month ? monthKey(r.claimDate) === month : true))
-        .filter((r) => (status ? statusOf(r) === status : true))
         .filter((r) => (needle ? matchesSearch(r, needle) : true)),
-    [rows, month, status, needle]
+    [rows, month, needle]
+  );
+  const visible = useMemo(
+    () => matchingRows.filter((r) => (status ? statusOf(r) === status : true)),
+    [matchingRows, status]
   );
 
   // Paid / In Progress is flipped straight from the row, like the Done tick on
@@ -700,16 +703,28 @@ export default function CourtClaimsBoard({
           ))}
         </select>
 
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="px-3 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]"
-        >
-          <option value="">All statuses</option>
-          {CLAIM_STATUSES.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Filter court claims by status">
+        {[{ value: "", label: "All statuses" }, ...CLAIM_STATUSES.map((s) => ({ value: s, label: s }))].map((tab) => {
+          const count = tab.value
+            ? matchingRows.filter((r) => statusOf(r) === tab.value).length
+            : matchingRows.length;
+          const selected = status === tab.value;
+          return (
+            <button
+              key={tab.value || "all"}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setStatus(tab.value)}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition-colors ${selected ? "border-[#F47C3C] bg-orange-50 text-[#C6531D]" : "border-gray-100 bg-white text-gray-500 hover:border-orange-200 hover:text-[#0F253B]"}`}
+            >
+              {tab.label}
+              <span className={`rounded-full px-2 py-0.5 text-[11px] ${selected ? "bg-white text-[#C6531D]" : "bg-gray-100 text-gray-500"}`}>{count}</span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
