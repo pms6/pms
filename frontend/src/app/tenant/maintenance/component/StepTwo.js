@@ -72,13 +72,13 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
     setFormData((prev) => ({ ...prev, access: { ...(prev.access || {}), ...patch } }));
 
   const handleNext = () => {
-    if (access.permissionToEnter !== true && access.permissionToEnter !== false) {
-      toast.info("Please say whether a contractor may let themselves in.");
+    if (!formData.description || !formData.description.trim()) {
+      toast.error("Issue description is required. Please describe the problem before continuing.");
       return;
     }
 
-    if (!formData.description || !formData.description.trim()) {
-      toast.info("Please describe the problem before continuing.");
+    if (access.permissionToEnter !== true && access.permissionToEnter !== false) {
+      toast.error("Permission to enter is required. Please select Yes or No before continuing.");
       return;
     }
 
@@ -88,7 +88,7 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
     }
 
     if (uploadedEvidence(formData.photos).length === 0) {
-      toast.info("Please add at least one photo or video of the problem before continuing.");
+      toast.error("Photos or videos are required. Please add at least one photo or video of the problem before continuing.");
       return;
     }
 
@@ -303,7 +303,7 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
 
               <div>
                 <label className="text-[10px] font-bold text-[#6B7280] uppercase mb-2 block">
-                  If nobody is home, may the contractor let themselves in?
+                  If nobody is home, may the contractor let themselves in? <span className="text-red-500">*</span>
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   {[
