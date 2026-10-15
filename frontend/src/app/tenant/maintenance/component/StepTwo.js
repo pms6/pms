@@ -42,6 +42,7 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
   /* Removed flex-col and xs: prefixes to force a single row on all screens */
   <div className={`${containerClass} flex flex-row justify-between items-center gap-2`}>
     <button
+      type="button"
       onClick={onBack}
       /* Added flex-1 on mobile for equal width or keep w-auto for natural size */
       className="px-4 py-3 md:px-6 border border-[#E8E4DF] rounded-xl font-bold text-gray-600 bg-white text-[10px] md:text-sm flex items-center justify-center gap-2 hover:bg-gray-50 transition "
@@ -54,9 +55,13 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
     </button>
     
     <button
+      type="button"
       onClick={handleNext}
+      disabled={!canContinue}
+      aria-disabled={!canContinue}
+      title={!canContinue ? `Complete required fields: ${missingRequired.join(", ")}.` : undefined}
       /* Removed w-full to prevent stacking; added md:w-[280px] for desktop consistency */
-      className="px-4 py-3 md:px-10 md:py-4 bg-[#F47C3C] text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 text-[10px] md:text-sm whitespace-nowrap transition hover:bg-[#e85e2f] active:scale-[0.98]"
+      className="px-4 py-3 md:px-10 md:py-4 bg-[#F47C3C] text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 text-[10px] md:text-sm whitespace-nowrap transition hover:bg-[#e85e2f] active:scale-[0.98] disabled:opacity-45 disabled:cursor-not-allowed disabled:shadow-none"
     >
       NEXT: REVIEW & CONFIRM 
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -71,28 +76,14 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
   const setAccess = (patch) =>
     setFormData((prev) => ({ ...prev, access: { ...(prev.access || {}), ...patch } }));
 
+  const missingRequired = [
+    !formData.description?.trim() && "issue description",
+    access.permissionToEnter !== true && access.permissionToEnter !== false && "contractor entry permission",
+    uploadedEvidence(formData.photos).length === 0 && "at least one photo or video",
+  ].filter(Boolean);
+  const canContinue = missingRequired.length === 0 && !uploading;
   const handleNext = () => {
-    if (!formData.description || !formData.description.trim()) {
-      toast.error("Issue description is required. Please describe the problem before continuing.");
-      return;
-    }
-
-    if (access.permissionToEnter !== true && access.permissionToEnter !== false) {
-      toast.error("Permission to enter is required. Please select Yes or No before continuing.");
-      return;
-    }
-
-    if (uploading) {
-      toast.info("Please wait for your photos or videos to finish uploading.");
-      return;
-    }
-
-    if (uploadedEvidence(formData.photos).length === 0) {
-      toast.error("Photos or videos are required. Please add at least one photo or video of the problem before continuing.");
-      return;
-    }
-
-    onNext();
+    if (canContinue) onNext();
   };
 
   const uploadFiles = async (picked) => {
@@ -472,6 +463,16 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
           </div>
 
           {/* MOBILE FOOTER (Inside white box, hidden on desktop) */}
+          {missingRequired.length > 0 && (
+            <p role="status" className="mt-4 text-center text-xs font-semibold text-red-600">
+              Complete required fields to continue: {missingRequired.join(", ")}.
+            </p>
+          )}
+          {uploading && (
+            <p role="status" className="mt-4 text-center text-xs font-semibold text-gray-500">
+              Please wait for your photos or videos to finish uploading.
+            </p>
+          )}
           <FooterButtons containerClass="md:hidden mt-8" />
         </div>
 
@@ -480,6 +481,16 @@ export default function StepTwo({ formData, setFormData, onNext, onBack }) {
       </div>
       <div className="hidden md:block border-t border-[#E8E4DF] mt-14">
         {/* Desktop Footer (outside white box) */}
+        {missingRequired.length > 0 && (
+          <p role="status" className="mt-4 text-center text-xs font-semibold text-red-600">
+            Complete required fields to continue: {missingRequired.join(", ")}.
+          </p>
+        )}
+        {uploading && (
+          <p role="status" className="mt-4 text-center text-xs font-semibold text-gray-500">
+            Please wait for your photos or videos to finish uploading.
+          </p>
+        )}
         <FooterButtons containerClass="flex mt-8" />
       </div>
     </div>
