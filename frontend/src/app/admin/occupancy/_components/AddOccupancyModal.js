@@ -18,7 +18,7 @@ export function toOccupancyPayload(f) {
     periodicStart: f.periodicStart || null,
     status: f.tenancyStatus || "Fixed Term",
     availability: f.availability || "Occupied",
-    onboarded: false,
+    onboarded: Boolean(f.onboarded),
   };
 }
 
@@ -138,9 +138,12 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
           periodicStart: form.periodicStart,
           tenancyStatus: form.tenancyStatus,
           availability: form.availability,
+          onboarded: tenantMode === "existing",
         }),
         // Emails the tenant: new user → login credentials, existing user → confirmation.
-        createAccount: form.createAccount && !!tenantEmail,
+        // Existing tenants already have their portal login. Occupancy should
+        // attach the record without sending a second confirmation/invite.
+        createAccount: tenantMode === "new" && form.createAccount && !!tenantEmail,
       };
 
       const res = await api.post("/tenancies", payload);
@@ -232,18 +235,21 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
             </div>
 
             {tenantMode === "existing" ? (
-              <select 
-                className={inputCls} 
-                value={selectedTenantId} 
-                onChange={e => setSelectedTenantId(e.target.value)}
-              >
-                <option value="">Select Existing Tenant</option>
-                {tenants.map(t => (
-                  <option key={t._id} value={t._id}>
-                    {t.firstName} {t.lastName}
-                  </option>
-                ))}
-              </select>
+              <div>
+                <select
+                  className={inputCls}
+                  value={selectedTenantId}
+                  onChange={e => setSelectedTenantId(e.target.value)}
+                >
+                  <option value="">Select Existing Tenant</option>
+                  {tenants.map(t => (
+                    <option key={t._id} value={t._id}>
+                      {t.firstName} {t.lastName} {t.email ? `(${t.email})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs text-gray-400">The existing tenant’s portal account will be linked. No email or occupancy invite will be sent.</p>
+              </div>
             ) : (
               <div className="space-y-4">
                 <Field label="Full Name" required>
@@ -328,7 +334,7 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
               />
             </Field>
 
-            <label className="flex items-start gap-2.5 cursor-pointer rounded-xl bg-gray-50 p-3">
+            {tenantMode === "new" && <label className="flex items-start gap-2.5 cursor-pointer rounded-xl bg-gray-50 p-3">
               <input
                 type="checkbox"
                 name="createAccount"
@@ -343,7 +349,7 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
                   tenancy confirmation. Requires an email address.
                 </span>
               </span>
-            </label>
+            </label>}
           </div>
 
           <button

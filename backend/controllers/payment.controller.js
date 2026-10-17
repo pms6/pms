@@ -2,9 +2,37 @@
 import RentCharge from "../models/RentCharge.js";
 import Tenancy from "../models/Tenancy.js";
 import Onboarding from "../models/Onboarding.js";
+import { cleanAttachments } from "../utils/attachments.js";
 
 const monthKey = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+const isPaidLate = (charge) => {
+  if (charge.status !== "paid" || !charge.paidDate || !charge.dueDate) return false;
+  const due = new Date(charge.dueDate);
+  const paid = new Date(charge.paidDate);
+  if (Number.isNaN(due.getTime()) || Number.isNaN(paid.getTime())) return false;
+  const dateKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return dateKey(paid) > dateKey(due);
+};
+
+// RentCharge.tenantEmail is a denormalized convenience field and can be blank
+// or stale on older rows. The tenancy relation is the ownership source of
+// truth for a tenant payment action.
+const findTenantCharge = async (req, id) => {
+  const email = String(req.user?.email || "").toLowerCase();
+  if (!email) return null;
+  const charge = await RentCharge.findById(id);
+  if (!charge) return null;
+  if (req.user?.organizationId && String(charge.organizationId) !== String(req.user.organizationId)) return null;
+  const tenancy = await Tenancy.findOne({
+    _id: charge.tenancyId,
+    organizationId: charge.organizationId,
+    tenantEmail: email,
+    isDeleted: false,
+  }).select("_id").lean();
+  return tenancy ? charge : null;
+};
 
 // Same year + month?
 const sameMonth = (a, b) =>
@@ -14,6 +42,7 @@ const sameMonth = (a, b) =>
 // awaiting an operator's confirmation must not be dragged back to due/overdue
 // underneath them.
 function computeStatus(charge, today) {
+  if (charge.status === "cancelled") return "cancelled";
   if (charge.status === "paid") return "paid";
   if (charge.status === "awaiting_confirmation") return "awaiting_confirmation";
   const due = new Date(charge.dueDate);
@@ -22,8 +51,8 @@ function computeStatus(charge, today) {
   return "overdue";
 }
 
-// Lazily create any monthly charges that don't exist yet for this tenancy, from
-// the tenancy start month through NEXT month (so there's always an upcoming one).
+// Lazily create monthly charges through the next month. A later month is only
+// eligible once the previous month's charge has been paid (or reported).
 async function ensureCharges(tenancy) {
   const rent = Number(tenancy.rent) || 0;
   const start = tenancy.startDate ? new Date(tenancy.startDate) : null;
@@ -66,12 +95,20 @@ async function ensureCharges(tenancy) {
   }
 
   const existing = await RentCharge.find({ tenancyId: tenancy._id })
-    .select("periodKey")
+    .select("periodKey status dueDate")
     .lean();
   const have = new Set(existing.map((c) => c.periodKey));
+  const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+
+  // Do not generate a later future period while an earlier future charge is
+  // still unpaid. This keeps the tenant's schedule one month at a time.
+  const firstUnpaidFuture = existing
+    .filter((c) => c.status !== "paid" && c.status !== "cancelled" && new Date(c.dueDate) >= nextMonthStart)
+    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))[0];
 
   const toCreate = periods
     .filter((p) => !have.has(p.key))
+    .filter((p) => !firstUnpaidFuture || p.due <= new Date(firstUnpaidFuture.dueDate))
     .map((p) => ({
       organizationId: tenancy.organizationId,
       tenancyId: tenancy._id,
@@ -108,7 +145,9 @@ export const getMyPayments = async (req, res) => {
     };
     if (!email) return res.status(200).json(empty);
 
-    const tenancy = await Tenancy.findOne({ tenantEmail: email, isDeleted: false })
+    const tenancyFilter = { tenantEmail: email, isDeleted: false };
+    if (req.user?.organizationId) tenancyFilter.organizationId = req.user.organizationId;
+    const tenancy = await Tenancy.findOne(tenancyFilter)
       .sort({ startDate: -1, createdAt: -1 })
       .lean();
 
@@ -117,7 +156,7 @@ export const getMyPayments = async (req, res) => {
     await ensureCharges(tenancy);
 
     const today = new Date();
-    const charges = await RentCharge.find({ tenancyId: tenancy._id })
+    let charges = await RentCharge.find({ tenancyId: tenancy._id, organizationId: tenancy.organizationId })
       .sort({ dueDate: -1 })
       .lean();
 
@@ -135,26 +174,109 @@ export const getMyPayments = async (req, res) => {
     }
     if (updates.length) await RentCharge.bulkWrite(updates);
 
+    // Older versions could have generated several future months up front.
+    // Hide those until the earliest future rent has been paid or reported.
+    const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    const firstUnpaidFuture = charges
+      .filter((c) => c.status !== "paid" && c.status !== "cancelled" && new Date(c.dueDate) >= nextMonthStart)
+      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))[0];
+    if (firstUnpaidFuture) {
+      charges = charges.filter((c) =>
+        new Date(c.dueDate) < nextMonthStart ||
+        c._id.toString() === firstUnpaidFuture._id.toString()
+      );
+    }
+
+    // The current calendar month's rent is handled outside the tenant panel.
+    // Keep its ledger row stored, but omit it from the tenant-facing list and
+    // balance; show the next month's charge instead.
+    const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    charges = charges.filter((charge) => {
+      const due = new Date(charge.dueDate);
+      return due < thisMonthStart || due >= nextMonthStart;
+    });
+
     // Summary cards.
     const unpaid = charges.filter((c) => c.status !== "paid");
     const balance = charges
       .filter((c) => c.status === "due" || c.status === "overdue")
       .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
 
-    // Next due = soonest unpaid charge on/after today, else the earliest unpaid.
-    const futureUnpaid = unpaid
+    // Once a tenant has reported a payment, move the next-due card to the next
+    // collectible period while leaving the reported charge itself in
+    // awaiting_confirmation until staff verify the proof.
+    const nextDueCharges = unpaid.filter((c) => c.status !== "awaiting_confirmation");
+    const futureUnpaid = nextDueCharges
       .filter((c) => new Date(c.dueDate) >= today)
       .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-    const anyUnpaid = [...unpaid].sort(
+    const anyUnpaid = [...nextDueCharges].sort(
       (a, b) => new Date(a.dueDate) - new Date(b.dueDate)
     );
-    const nextDueDate =
-      futureUnpaid[0]?.dueDate || anyUnpaid[0]?.dueDate || null;
+    let nextDueDate = futureUnpaid[0]?.dueDate || anyUnpaid[0]?.dueDate || null;
+
+    // If all generated charges have been paid or reported and no future
+    // charge exists yet, keep the tenant's next rent date visible from the
+    // tenancy anniversary (e.g. paid 2 Oct -> next due 2 Nov).
+    if (!nextDueDate && charges.length && tenancy.startDate &&
+        !charges.some((charge) => charge.status === "awaiting_confirmation")) {
+      const anchor = new Date(tenancy.startDate);
+      const latestChargeDate = [...charges]
+        .map((charge) => new Date(charge.dueDate))
+        .filter((date) => !Number.isNaN(date.getTime()))
+        .sort((a, b) => b - a)[0];
+      if (!Number.isNaN(anchor.getTime()) && latestChargeDate) {
+        const reference = new Date(Math.max(today.getTime(), latestChargeDate.getTime()));
+        let year = reference.getFullYear();
+        let month = reference.getMonth();
+        const dueOn = (y, m) => new Date(y, m, Math.min(anchor.getDate(), new Date(y, m + 1, 0).getDate()));
+        let next = dueOn(year, month);
+        if (next <= reference) {
+          month += 1;
+          if (month > 11) { month = 0; year += 1; }
+          next = dueOn(year, month);
+        }
+        nextDueDate = next;
+      }
+    }
+
+    // Keep the upcoming date card and the charge table in sync. When all
+    // generated periods are already paid/reported, the anniversary fallback
+    // above may identify a next due date that ensureCharges did not create
+    // (for example, a fixed term boundary). Materialize that entry so the
+    // tenant can see the upcoming rent row in their payment history.
+    if (nextDueDate) {
+      const nextDue = new Date(nextDueDate);
+      const periodKey = monthKey(nextDue);
+      const hasPeriod = charges.some((charge) => charge.periodKey === periodKey);
+      if (!hasPeriod) {
+        const upcoming = await RentCharge.findOneAndUpdate(
+          { tenancyId: tenancy._id, periodKey },
+          {
+            $setOnInsert: {
+              organizationId: tenancy.organizationId,
+              tenancyId: tenancy._id,
+              tenantEmail: email,
+              property: tenancy.property || "",
+              room: tenancy.unit && tenancy.unit !== "—" ? tenancy.unit : "",
+              amount: Number(tenancy.rent) || 0,
+              periodKey,
+              dueDate: nextDue,
+              status: nextDue > today ? "upcoming" : "due",
+              method: "",
+              paidDate: null,
+            },
+          },
+          { new: true, upsert: true, setDefaultsOnInsert: true }
+        ).lean();
+        if (upcoming) charges.push(upcoming);
+        charges.sort((a, b) => new Date(b.dueDate) - new Date(a.dueDate));
+      }
+    }
 
     return res.status(200).json({
       success: true,
       data: {
-        charges,
+        charges: charges.map((charge) => ({ ...charge, paidLate: isPaidLate(charge) })),
         summary: {
           monthlyRent: Number(tenancy.rent) || 0,
           nextDueDate,
@@ -175,10 +297,8 @@ export const getMyPayments = async (req, res) => {
 // @access  Private (Tenant)
 export const payCharge = async (req, res) => {
   try {
-    const email = (req.user?.email || "").toLowerCase();
-
-    const charge = await RentCharge.findById(req.params.id);
-    if (!charge || charge.tenantEmail !== email) {
+    const charge = await findTenantCharge(req, req.params.id);
+    if (!charge) {
       return res.status(404).json({ success: false, message: "Charge not found." });
     }
 
@@ -194,12 +314,18 @@ export const payCharge = async (req, res) => {
       });
     }
 
+    const proof = cleanAttachments(req.body?.proof);
+    if (!proof.length) {
+      return res.status(400).json({ success: false, message: "Attach a screenshot or payment receipt before submitting." });
+    }
+
     // This records the tenant's CLAIM, not a payment. No money moves here and
     // nothing verifies it, so marking the charge "paid" would let a tenant
     // clear their own balance. An operator confirms it below.
     charge.status = "awaiting_confirmation";
     charge.claimedAt = new Date();
     charge.claimedMethod = req.body?.method || "Bank Transfer";
+    charge.claimedProof = proof;
     await charge.save();
 
     return res.status(200).json({
@@ -210,6 +336,33 @@ export const payCharge = async (req, res) => {
   } catch (error) {
     console.error("Pay Charge Error:", error);
     return res.status(500).json({ success: false, message: "Failed to report payment." });
+  }
+};
+
+// @desc Update proof/method on an unreviewed tenant payment claim
+// @route PUT /api/v1/payments/:id/proof
+// @access Private (the tenant who owns the charge)
+export const updatePaymentProof = async (req, res) => {
+  try {
+    const charge = await findTenantCharge(req, req.params.id);
+    if (!charge) {
+      return res.status(404).json({ success: false, message: "Charge not found." });
+    }
+    if (charge.status !== "awaiting_confirmation") {
+      return res.status(409).json({ success: false, message: "This payment proof can only be edited while awaiting confirmation." });
+    }
+    const proof = cleanAttachments(req.body?.proof);
+    if (!proof.length) {
+      return res.status(400).json({ success: false, message: "Keep at least one screenshot or payment receipt attached." });
+    }
+    charge.claimedProof = proof;
+    if (req.body?.method) charge.claimedMethod = String(req.body.method).trim();
+    charge.claimedAt = new Date();
+    await charge.save();
+    return res.status(200).json({ success: true, message: "Payment proof updated for admin review.", data: charge });
+  } catch (error) {
+    console.error("Update Payment Proof Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update payment proof." });
   }
 };
 
@@ -294,9 +447,10 @@ export const getCharges = async (req, res) => {
 
     // Generate any missing months first, so the ledger is current rather than
     // only filling in when an individual tenant happens to open their page.
-    const tenancies = await Tenancy.find({ organizationId, isDeleted: false }).lean();
-    for (const t of tenancies) {
-      await ensureCharges(t);
+    const tenancies = await Tenancy.find({ organizationId }).lean();
+    const tenancyById = new Map(tenancies.map((tenancy) => [String(tenancy._id), tenancy]));
+    for (const tenancy of tenancies) {
+      if (!tenancy.isDeleted) await ensureCharges(tenancy);
     }
 
     const today = new Date();
@@ -306,6 +460,19 @@ export const getCharges = async (req, res) => {
     // does, so the stored ledger stays accurate as time passes.
     const updates = [];
     for (const c of charges) {
+      const tenancy = tenancyById.get(String(c.tenancyId));
+      if (tenancy?.isDeleted && ["upcoming", "due", "overdue"].includes(c.status)) {
+        c.status = "cancelled";
+        c.cancelledAt = tenancy.deletedAt || today;
+        c.cancellationReason = "Occupancy deleted";
+        updates.push({
+          updateOne: {
+            filter: { _id: c._id },
+            update: { $set: { status: "cancelled", cancelledAt: c.cancelledAt, cancellationReason: c.cancellationReason } },
+          },
+        });
+        continue;
+      }
       const next = computeStatus(c, today);
       if (next !== c.status) {
         c.status = next;
@@ -318,18 +485,27 @@ export const getCharges = async (req, res) => {
 
     const summary = charges.reduce(
       (acc, c) => {
+        if (c.status === "cancelled") return acc;
         acc.total++;
         acc.byStatus[c.status] = (acc.byStatus[c.status] || 0) + 1;
         const amt = Number(c.amount) || 0;
         acc.billed += amt;
-        if (c.status === "paid") acc.collected += amt;
+        if (c.status === "paid") {
+          acc.collected += amt;
+          if (isPaidLate(c)) {
+            acc.paidLateCount++;
+            acc.paidLateAmount += amt;
+          }
+        }
         else acc.outstanding += amt;
         if (c.status === "overdue") acc.overdue += amt;
         if (c.status === "awaiting_confirmation") acc.awaiting += amt;
         return acc;
       },
-      { total: 0, billed: 0, collected: 0, outstanding: 0, overdue: 0, awaiting: 0, byStatus: {} }
+      { total: 0, billed: 0, collected: 0, outstanding: 0, overdue: 0, awaiting: 0, paidLateCount: 0, paidLateAmount: 0, byStatus: {} }
     );
+    summary.receivedCount = summary.byStatus.paid || 0;
+    summary.pendingCount = summary.total - summary.receivedCount;
     summary.collectionRate = summary.billed
       ? Math.round((summary.collected / summary.billed) * 100)
       : 0;
@@ -337,6 +513,7 @@ export const getCharges = async (req, res) => {
     // Money in per calendar month, for the revenue chart.
     const byMonth = {};
     for (const c of charges) {
+      if (c.status === "cancelled") continue;
       const key = c.periodKey || "";
       if (!key) continue;
       if (!byMonth[key]) byMonth[key] = { periodKey: key, billed: 0, collected: 0 };
@@ -344,9 +521,14 @@ export const getCharges = async (req, res) => {
       if (c.status === "paid") byMonth[key].collected += Number(c.amount) || 0;
     }
 
-    let data = charges;
+    let data = charges.map((charge) => ({
+      ...charge,
+      paidLate: isPaidLate(charge),
+      tenantName: tenancyById.get(String(charge.tenancyId))?.tenant || "",
+    }));
     const { status, search } = req.query;
     if (status) data = data.filter((c) => c.status === status);
+    else data = data.filter((c) => c.status !== "cancelled");
     if (search) {
       const needle = String(search).toLowerCase();
       data = data.filter(

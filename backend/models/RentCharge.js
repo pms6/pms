@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { attachmentSchema } from "../utils/attachments.js";
 
 // A single rent charge (one billing period) for a tenancy. Charges are generated
 // month-by-month from the tenancy's rent + start date, and move to "paid" when
@@ -12,6 +13,7 @@ export const RENT_CHARGE_STATUS = [
   "overdue",
   "awaiting_confirmation",
   "paid",
+  "cancelled",
 ];
 
 const rentChargeSchema = new mongoose.Schema(
@@ -55,6 +57,7 @@ const rentChargeSchema = new mongoose.Schema(
     // The tenant's unverified claim that they have paid.
     claimedAt: { type: Date, default: null },
     claimedMethod: { type: String, trim: true, default: "" },
+    claimedProof: { type: [attachmentSchema], default: [] },
 
     // Who confirmed it, once an operator did.
     confirmedBy: {
@@ -63,6 +66,8 @@ const rentChargeSchema = new mongoose.Schema(
       default: null,
     },
     confirmedAt: { type: Date, default: null },
+    cancelledAt: { type: Date, default: null },
+    cancellationReason: { type: String, trim: true, default: "" },
   },
   { timestamps: true }
 );

@@ -3,6 +3,7 @@ import express from "express";
 import {
   getMyPayments,
   payCharge,
+  updatePaymentProof,
   confirmCharge,
   getCharges,
   getDeposits,
@@ -24,6 +25,7 @@ router.get("/", getCharges);
 // Tenant reports a payment against one of their own charges. This records a
 // claim awaiting confirmation — it does NOT mark the charge paid.
 router.post("/:id/pay", payCharge);
+router.put("/:id/proof", updatePaymentProof);
 
 // Operator confirms or rejects that claim. Confirming is what marks it paid.
 router.patch("/:id/confirm", confirmCharge);

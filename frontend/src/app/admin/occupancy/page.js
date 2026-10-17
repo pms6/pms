@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { DoorOpen, Users, UserPlus, Repeat, RefreshCw, Download, Send, Eye, X, Plus, FileSpreadsheet } from "lucide-react";
+import { DoorOpen, Users, Mail, Repeat, RefreshCw, Download, Send, Eye, X, Plus, FileSpreadsheet, Pencil, Trash2, KeyRound } from "lucide-react";
 import { PageHeader, Badge } from "../../Shared/ui";
 import { TENANCY_STATUS, TENANCY_STATUS_TONE, money } from "../_data/dummy";
 import api from "../../api/api";
 import AddOccupancyModal from "./_components/AddOccupancyModal";
 import ImportExcelModal from "./_components/ImportExcelModal";
+import { guardModalClose } from "@/app/Shared/modalGuard";
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-GB") : "—");
 
@@ -20,9 +21,12 @@ export default function AdminOccupancy() {
   const [propF, setPropF] = useState("");
   const [statusF, setStatusF] = useState("");
   const [view, setView] = useState(null);
-  const [inviting, setInviting] = useState(false);
+  const [sendingWelcome, setSendingWelcome] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [revealedCredentials, setRevealedCredentials] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,14 +49,14 @@ export default function AdminOccupancy() {
 
   useEffect(() => { load(); }, [load]);
 
-  const pendingOnboarding = items.filter((o) => !o.onboarded).length;
+  const emailAttention = items.filter((o) => o.accountExists && o.welcomeEmailStatus !== "Sent").length;
 
   const list = items.filter((o) => (!propF || o.property === propF) && (!statusF || o.status === statusF));
 
   const overview = [
     { icon: DoorOpen, label: "Units", value: stats.units },
     { icon: Users, label: "Occupants", value: stats.occupants },
-    { icon: UserPlus, label: "Onboardings", value: pendingOnboarding },
+    { icon: Mail, label: "Welcome Emails To Send", value: emailAttention },
     { icon: Repeat, label: "Tenancy Changes", value: stats.tenancyChanges },
     { icon: RefreshCw, label: "Renewals", value: stats.renewals },
   ];
@@ -62,35 +66,59 @@ export default function AdminOccupancy() {
     ...TENANCY_STATUS.map((s) => ({ key: s, label: s, count: items.filter((o) => o.status === s).length, tone: TENANCY_STATUS_TONE[s] })),
   ];
 
-  const inviteAll = async () => {
-    if (pendingOnboarding === 0) return;
-    if (!confirm(`Invite ${pendingOnboarding} tenant(s) to onboard?`)) return;
-    setInviting(true);
+  const saveEdit = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    const form = new FormData(event.currentTarget);
+    const payload = Object.fromEntries(form.entries());
+    for (const key of ["startDate", "fixedTermEnd", "periodicStart"]) payload[key] = payload[key] || null;
     try {
-      const res = await api.post("/tenancies/invite-all");
-      alert(res.data?.message || "Invites sent.");
-      // Refetch rather than assume every pending tenant was invited — the
-      // server only stamps invitedAt on the ones whose email actually sent.
-      await load();
-    } catch (err) {
-      alert(err.response?.data?.message || "Failed to send invites");
-    } finally {
-      setInviting(false);
-    }
+      const res = await api.put(`/tenancies/${view._id}`, payload);
+      setItems((xs) => xs.map((x) => x._id === view._id ? { ...x, ...res.data.data } : x));
+      setView((v) => ({ ...v, ...res.data.data }));
+      setEditing(false);
+    } catch (err) { alert(err.response?.data?.message || "Failed to update occupancy"); }
+    finally { setSaving(false); }
   };
 
-  const inviteOne = async (tenancy) => {
+  const deleteOccupancy = async (tenancy) => {
+    if (!confirm(`Delete the occupancy record for ${tenancy.tenant}? This hides it from the active register while preserving its history.`)) return;
     try {
-      const res = await api.patch(`/tenancies/${tenancy._id}/invite`);
-      alert(res.data?.message || "Invite sent.");
+      await api.delete(`/tenancies/${tenancy._id}`);
+      setView(null);
+      await load();
+    } catch (err) { alert(err.response?.data?.message || "Failed to delete occupancy"); }
+  };
+
+  const resetPassword = async (tenancy) => {
+    if (!confirm(`Reset ${tenancy.tenant}'s portal password to London@1234?`)) return;
+    try {
+      const res = await api.patch(`/tenancies/${tenancy._id}/reset-password`);
+      setRevealedCredentials({ tenancyId: tenancy._id, email: tenancy.tenantEmail, password: "London@1234" });
+      alert(res.data?.message || "Password reset.");
+    } catch (err) { alert(err.response?.data?.message || "Failed to reset password"); }
+  };
+
+  const sendWelcome = async (tenancy) => {
+    const alreadySent = tenancy.welcomeEmailStatus === "Sent";
+    if (!confirm(`${alreadySent ? "Resend" : "Send"} the portal welcome email to ${tenancy.tenantEmail}? The password will be set to London@1234 so the email contains a working login.`)) return;
+    setSendingWelcome(true);
+    try {
+      const res = await api.patch(`/tenancies/${tenancy._id}/welcome-email`);
       const updated = res.data?.data;
-      if (updated) {
-        setItems((xs) => xs.map((x) => (x._id === updated._id ? updated : x)));
-        setView((v) => (v && v._id === updated._id ? updated : v));
-      }
+      setItems((xs) => xs.map((x) => x._id === tenancy._id ? { ...x, ...(updated || {}), accountExists: true, welcomeEmailStatus: "Sent", welcomeEmailSentAt: updated?.welcomeEmailSentAt || new Date().toISOString() } : x));
+      setView((v) => v && v._id === tenancy._id ? { ...v, ...(updated || {}), accountExists: true, welcomeEmailStatus: "Sent", welcomeEmailSentAt: updated?.welcomeEmailSentAt || new Date().toISOString() } : v);
+      setRevealedCredentials({ tenancyId: tenancy._id, email: tenancy.tenantEmail, password: "London@1234" });
+      alert(res.data?.message || "Welcome email sent.");
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to send invite");
+      if (err.response?.status === 502) {
+        setRevealedCredentials({ tenancyId: tenancy._id, email: tenancy.tenantEmail, password: "London@1234" });
+        setItems((xs) => xs.map((x) => x._id === tenancy._id ? { ...x, accountExists: true, welcomeEmailStatus: "Failed" } : x));
+        setView((v) => v && v._id === tenancy._id ? { ...v, accountExists: true, welcomeEmailStatus: "Failed" } : v);
+      }
+      alert(err.response?.data?.message || "Failed to send welcome email");
     }
+    finally { setSendingWelcome(false); }
   };
 
   const exportBtn = (label) => (
@@ -98,6 +126,13 @@ export default function AdminOccupancy() {
       <Download size={15} /> {label}
     </button>
   );
+
+  const closeOccupancyDetails = () => {
+    setEditing(false);
+    setView(null);
+  };
+  const requestCloseDetails = guardModalClose(closeOccupancyDetails);
+  const requestCancelEdit = guardModalClose(() => setEditing(false));
 
   return (
     <div className="space-y-6">
@@ -111,9 +146,6 @@ export default function AdminOccupancy() {
             </button>
             <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-4 py-2.5 bg-[#0F253B] hover:bg-[#1c3853] text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
               <Plus size={18} /> Add Occupancy
-            </button>
-            <button onClick={inviteAll} disabled={inviting || pendingOnboarding === 0} className="flex items-center gap-2 px-4 py-2.5 bg-[#F47C3C] hover:bg-[#e06d30] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl transition-all active:scale-[0.98]">
-              <Send size={18} /> Invite All Tenants
             </button>
           </div>
         }
@@ -186,7 +218,6 @@ export default function AdminOccupancy() {
                     </td>
                     <td className="px-5 py-3 text-gray-500">
                       {o.tenant}
-                      {!o.onboarded && <span className="ml-2 text-[10px] font-bold text-amber-600 bg-amber-50 rounded-full px-2 py-0.5">Onboarding</span>}
                     </td>
                     <td className="px-5 py-3 text-right font-bold text-[#0F253B]">{money(o.rent)} <span className="text-[10px] font-medium text-gray-400">/{o.rentPeriod === "WEEKLY" ? "week" : "month"}</span></td>
                     <td className="px-5 py-3 text-gray-500">{fmtDate(o.startDate)}</td>
@@ -208,14 +239,14 @@ export default function AdminOccupancy() {
 
       {/* Detail modal */}
       {view && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setView(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={requestCloseDetails}>
           <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-7" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-5">
               <div>
                 <h3 className="text-xl font-bold text-[#0F253B]">{view.tenant}</h3>
                 <p className="text-xs text-gray-400 font-medium">{view.property} · {view.unit}</p>
               </div>
-              <button onClick={() => setView(null)} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
+              <button type="button" onClick={requestCloseDetails} aria-label="Close occupancy details" className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
             </div>
 
             <div className="rounded-2xl bg-gray-50 p-4 flex items-center justify-between mb-4">
@@ -232,18 +263,37 @@ export default function AdminOccupancy() {
                 ["Fixed Term End", view.fixedTermEnd ? fmtDate(view.fixedTermEnd) : "—"],
                 ["Periodic Start", view.periodicStart ? fmtDate(view.periodicStart) : "—"],
                 ["Availability", view.availability],
-                ["Onboarding", view.onboarded ? "Complete" : view.invitedAt ? `Invited ${fmtDate(view.invitedAt)}` : "Pending invite"],
+                ["Tenant login", view.accountExists ? `Account active (${view.tenantEmail || "email on file"})` : "No portal account"],
+                ["Welcome email", view.welcomeEmailStatus === "Sent" ? `Sent ${fmtDate(view.welcomeEmailSentAt)}` : view.welcomeEmailStatus === "Failed" ? `Failed${view.welcomeEmailError ? `: ${view.welcomeEmailError}` : ""}` : "Not sent"],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-3"><dt className="text-gray-400 font-medium">{k}</dt><dd className="font-bold text-[#0F253B] text-right">{v}</dd></div>
               ))}
             </dl>
 
-            {!view.onboarded && (
-              <button onClick={() => inviteOne(view)} className="w-full mt-5 flex items-center justify-center gap-2 py-3 bg-[#F47C3C] hover:bg-[#e06d30] text-white font-bold rounded-xl transition-all">
-                <Send size={16} /> Send Onboarding Invite
-              </button>
+            {view.accountExists && <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm">
+              <p className="font-bold text-[#0F253B]">Login details</p>
+              <p className="mt-1 text-gray-600">Email: <span className="font-semibold">{view.tenantEmail}</span></p>
+              {revealedCredentials?.tenancyId === view._id
+                ? <p className="mt-1 text-gray-600">Password (set by your latest reset): <span className="font-mono font-bold">{revealedCredentials.password}</span></p>
+                : <p className="mt-1 text-gray-400">Password is hidden for security. Reset it to set and view a known password.</p>}
+            </div>}
+
+            {editing && (
+              <form onSubmit={saveEdit} className="mt-5 space-y-3">
+                {[["tenant", "Tenant name", view.tenant], ["tenantEmail", "Email", view.tenantEmail], ["availability", "Availability", view.availability]].map(([name, label, value]) => <label key={name} className="block text-xs font-bold text-gray-500">{label}<input name={name} defaultValue={value || ""} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-normal" /></label>)}
+                <label className="block text-xs font-bold text-gray-500">Status<select name="status" defaultValue={view.status} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-normal">{TENANCY_STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
+                {[ ["startDate", "Start date"], ["fixedTermEnd", "Fixed term end"], ["periodicStart", "Periodic start"] ].map(([name, label]) => <label key={name} className="block text-xs font-bold text-gray-500">{label}<input type="date" name={name} defaultValue={view[name] ? new Date(view[name]).toISOString().slice(0, 10) : ""} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-normal" /></label>)}
+                <div className="flex gap-2"><button disabled={saving} className="flex-1 rounded-xl bg-[#0F253B] py-2.5 text-sm font-bold text-white">{saving ? "Saving…" : "Save changes"}</button><button type="button" onClick={requestCancelEdit} disabled={saving} className="px-4 text-sm font-bold text-gray-400 disabled:opacity-40">Cancel</button></div>
+              </form>
             )}
-            <button onClick={() => setView(null)} className="w-full mt-3 py-2.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]">Close</button>
+
+            {!editing && <div className="mt-5 grid grid-cols-2 gap-2">
+              <button onClick={() => setEditing(true)} className="flex items-center justify-center gap-2 rounded-xl border border-gray-200 py-2.5 text-sm font-bold text-[#0F253B]"><Pencil size={15}/> Edit</button>
+              <button onClick={() => resetPassword(view)} disabled={!view.accountExists} className="flex items-center justify-center gap-2 rounded-xl border border-gray-200 py-2.5 text-sm font-bold text-[#0F253B] disabled:opacity-40"><KeyRound size={15}/> Reset password</button>
+              <button onClick={() => sendWelcome(view)} disabled={!view.tenantEmail || sendingWelcome} className="col-span-2 flex items-center justify-center gap-2 rounded-xl border border-orange-200 bg-orange-50 py-2.5 text-sm font-bold text-[#c65d27] disabled:opacity-40"><Send size={15}/>{sendingWelcome ? "Sending…" : view.welcomeEmailStatus === "Sent" ? "Send welcome email again" : "Send welcome email"}</button>
+              <button onClick={() => deleteOccupancy(view)} className="col-span-2 flex items-center justify-center gap-2 rounded-xl border border-red-100 py-2.5 text-sm font-bold text-red-600"><Trash2 size={15}/> Delete occupancy</button>
+            </div>}
+            <button type="button" onClick={requestCloseDetails} className="w-full mt-3 py-2.5 text-sm font-bold text-gray-400 hover:text-[#0F253B]">Close</button>
           </div>
         </div>
       )}

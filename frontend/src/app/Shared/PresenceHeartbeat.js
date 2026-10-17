@@ -22,6 +22,7 @@ export default function PresenceHeartbeat({ portal }) {
   const timerRef = useRef(null);
 
   useEffect(() => {
+    if (!["admin", "manager", "agent", "finance", "operation"].includes(portal)) return undefined;
     let cancelled = false;
 
     const beat = async () => {

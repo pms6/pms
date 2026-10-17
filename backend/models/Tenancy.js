@@ -84,6 +84,9 @@ const tenancySchema = new mongoose.Schema(
     // send an onboarding invite.
     onboarded: { type: Boolean, default: false },
     invitedAt: { type: Date, default: null },
+    welcomeEmailSentAt: { type: Date, default: null },
+    welcomeEmailStatus: { type: String, enum: ["Pending", "Sent", "Failed"], default: "Pending" },
+    welcomeEmailError: { type: String, trim: true, default: "" },
 
     // ============================
     // Soft delete

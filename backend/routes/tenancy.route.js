@@ -8,6 +8,8 @@ import {
   createTenancy,
   updateTenancy,
   deleteTenancy,
+  resetTenantPassword,
+  sendWelcomeEmail,
   inviteTenant,
   inviteAllTenants,
 } from "../controllers/tenancy.controller.js";
@@ -48,6 +50,8 @@ router.get("/", getTenancies);
 router.post("/", createTenancy);
 router.put("/:id", updateTenancy);
 router.delete("/:id", deleteTenancy);
+router.patch("/:id/reset-password", resetTenantPassword);
+router.patch("/:id/welcome-email", sendWelcomeEmail);
 
 // One tenant's whole history across every record — the Tenants page timeline.
 router.get("/:id/timeline", getTenantTimeline);

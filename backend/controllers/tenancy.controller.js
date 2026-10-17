@@ -6,6 +6,7 @@ import Organization from "../models/Organization.js";
 import Onboarding from "../models/Onboarding.js";
 import Property from "../models/Property.js";
 import Room from "../models/room.js";
+import RentCharge from "../models/RentCharge.js";
 import mongoose from "mongoose";
 import { stayDuration } from "../utils/duration.js";
 
@@ -115,8 +116,15 @@ export const getTenancies = async (req, res) => {
     if (status) filter.status = status;
 
     const tenancies = await Tenancy.find(filter).sort({ startDate: -1, createdAt: -1 });
+    const emails = [...new Set(tenancies.map((t) => String(t.tenantEmail || "").toLowerCase()).filter(Boolean))];
+    const accounts = emails.length ? await User.find({ email: { $in: emails } }).select("email role isVerified").lean() : [];
+    const accountByEmail = new Map(accounts.map((u) => [u.email, u]));
+    const data = tenancies.map((t) => {
+      const account = accountByEmail.get(String(t.tenantEmail || "").toLowerCase());
+      return { ...t.toObject(), accountExists: Boolean(account), accountRole: account?.role || "", accountVerified: Boolean(account?.isVerified) };
+    });
 
-    return res.status(200).json({ success: true, data: tenancies });
+    return res.status(200).json({ success: true, data });
   } catch (error) {
     console.error("Get Tenancies Error:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch tenancies." });
@@ -449,6 +457,7 @@ export const createTenancy = async (req, res) => {
     const createdBy = req.user._id;
 
     const payload = pickPayload(req.body);
+
     const createAccount = req.body.createAccount === true;
 
     if (!payload.propertyId || !mongoose.isValidObjectId(payload.propertyId)) {
@@ -536,6 +545,10 @@ export const createTenancy = async (req, res) => {
         await Room.updateOne({ _id: payload.roomId }, { $set: { currentTenant: notifyResult.tenantId, status: "OCCUPIED" } });
       }
     }
+    tenancy.welcomeEmailStatus = notifyResult.emailSent ? "Sent" : createAccount && payload.tenantEmail ? "Failed" : "Pending";
+    tenancy.welcomeEmailSentAt = notifyResult.emailSent ? new Date() : null;
+    tenancy.welcomeEmailError = tenancy.welcomeEmailStatus === "Failed" ? "Email delivery failed" : "";
+    await tenancy.save();
 
     let message = "Tenancy created successfully.";
     if (notifyResult.emailSent) {
@@ -581,6 +594,28 @@ export const updateTenancy = async (req, res) => {
 
     const payload = pickPayload(req.body);
 
+    if (payload.tenantEmail !== undefined) {
+      const nextEmail = String(payload.tenantEmail || "").trim().toLowerCase();
+      const previousEmail = String(tenancy.tenantEmail || "").toLowerCase();
+      if (!nextEmail && tenancy.tenantId) {
+        return res.status(400).json({ success: false, message: "A tenant with a portal account must keep an email address." });
+      }
+      if (nextEmail && nextEmail !== previousEmail) {
+        const [conflict, account] = await Promise.all([
+          User.findOne({ email: nextEmail }),
+          User.findOne({ email: previousEmail, role: "Tenant" }),
+        ]);
+        if (conflict && (!account || String(conflict._id) !== String(account._id))) {
+          return res.status(409).json({ success: false, message: "That email is already used by another login account." });
+        }
+        if (tenancy.tenantId) {
+          if (account) { account.email = nextEmail; await account.save(); }
+          await Tenant.updateOne({ _id: tenancy.tenantId }, { $set: { email: nextEmail } });
+        }
+      }
+      payload.tenantEmail = nextEmail;
+    }
+
     // A stay cannot start in the future — that reads as a negative number of
     // days on the board, which is worse than an empty cell.
     if (payload.firstMoveInDate && new Date(payload.firstMoveInDate) > new Date()) {
@@ -620,14 +655,46 @@ export const deleteTenancy = async (req, res) => {
       return res.status(404).json({ success: false, message: "Tenancy not found." });
     }
 
+    const deletedAt = new Date();
     tenancy.isDeleted = true;
-    tenancy.deletedAt = new Date();
+    tenancy.deletedAt = deletedAt;
     await tenancy.save();
+
+    // Keep the ledger intact, but stop future generated rent from appearing as
+    // upcoming after this occupancy has ended.
+    await RentCharge.updateMany(
+      { tenancyId: tenancy._id, organizationId, status: { $in: ["upcoming", "due", "overdue"] } },
+      { $set: { status: "cancelled", cancelledAt: deletedAt, cancellationReason: "Occupancy deleted" } }
+    );
+
+    if (tenancy.roomId) {
+      const stillOccupied = await findRoomOccupant({ roomId: tenancy.roomId, organizationId });
+      if (!stillOccupied) {
+        await Room.updateOne({ _id: tenancy.roomId, organizationId }, { $set: { status: "AVAILABLE" }, $unset: { currentTenant: 1 } });
+      }
+    }
 
     return res.status(200).json({ success: true, message: "Tenancy deleted." });
   } catch (error) {
     console.error("Delete Tenancy Error:", error);
     return res.status(500).json({ success: false, message: "Failed to delete tenancy." });
+  }
+};
+
+// @desc Reset a tenant portal password to the administrator's requested default
+// @route PATCH /api/v1/tenancies/:id/reset-password
+export const resetTenantPassword = async (req, res) => {
+  try {
+    const tenancy = await Tenancy.findOne({ _id: req.params.id, organizationId: req.user.organizationId, isDeleted: false });
+    if (!tenancy) return res.status(404).json({ success: false, message: "Tenancy not found." });
+    const user = await User.findOne({ email: String(tenancy.tenantEmail || "").toLowerCase().trim(), role: "Tenant" });
+    if (!user) return res.status(404).json({ success: false, message: "No tenant login account exists for this email." });
+    user.password = await bcrypt.hash("London@1234", await bcrypt.genSalt(10));
+    await user.save();
+    return res.status(200).json({ success: true, message: "Tenant password reset to the default password." });
+  } catch (error) {
+    console.error("Reset Tenant Password Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to reset tenant password." });
   }
 };
 
@@ -667,6 +734,9 @@ export const inviteTenant = async (req, res) => {
     }
 
     tenancy.invitedAt = new Date();
+    tenancy.welcomeEmailStatus = "Sent";
+    tenancy.welcomeEmailSentAt = tenancy.invitedAt;
+    tenancy.welcomeEmailError = "";
     await tenancy.save();
 
     return res.status(200).json({
@@ -677,6 +747,51 @@ export const inviteTenant = async (req, res) => {
   } catch (error) {
     console.error("Invite Tenant Error:", error);
     return res.status(500).json({ success: false, message: "Failed to send invite." });
+  }
+};
+
+// @desc Send or resend the tenant portal welcome email with a known password
+// @route PATCH /api/v1/tenancies/:id/welcome-email
+export const sendWelcomeEmail = async (req, res) => {
+  try {
+    const tenancy = await Tenancy.findOne({ _id: req.params.id, organizationId: req.user.organizationId, isDeleted: false });
+    if (!tenancy) return res.status(404).json({ success: false, message: "Occupancy not found." });
+    const email = String(tenancy.tenantEmail || "").trim().toLowerCase();
+    if (!email) return res.status(400).json({ success: false, message: "Add a tenant email address before sending the welcome email." });
+    const user = await User.findOne({ email });
+    if (user && user.role !== "Tenant") {
+      return res.status(409).json({ success: false, message: "This email belongs to a non-tenant login account." });
+    }
+
+    // Passwords are one-way hashed, so an old password cannot be recovered for
+    // a resend. Set a known password and email that credential to the tenant.
+    const hash = await bcrypt.hash("London@1234", await bcrypt.genSalt(10));
+    const portalUser = user || await User.create({ email, password: hash, role: "Tenant", isVerified: true });
+    if (user) { portalUser.password = hash; await portalUser.save(); }
+    if (tenancy.tenantId) await Tenant.updateOne({ _id: tenancy.tenantId }, { $set: { userId: portalUser._id, email } });
+
+    try {
+      const orgName = await getOrgName(req.user.organizationId);
+      const where = [tenancy.property, tenancy.unit].filter(Boolean).join(" · ") || "your home";
+      await sendEmail({
+        email,
+        subject: `${orgName} - Your login details for ${where}`,
+        html: buildCredentialsEmail({ name: tenancy.tenant, orgName, where, cleanEmail: email, tempPassword: "London@1234" }),
+      });
+      tenancy.welcomeEmailStatus = "Sent";
+      tenancy.welcomeEmailSentAt = new Date();
+      tenancy.welcomeEmailError = "";
+      await tenancy.save();
+      return res.status(200).json({ success: true, message: `Welcome email sent to ${email}.`, data: tenancy });
+    } catch (mailError) {
+      tenancy.welcomeEmailStatus = "Failed";
+      tenancy.welcomeEmailError = mailError.message || "Email delivery failed";
+      await tenancy.save();
+      return res.status(502).json({ success: false, message: `Password was reset, but the welcome email could not be sent: ${tenancy.welcomeEmailError}` });
+    }
+  } catch (error) {
+    console.error("Send Welcome Email Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to send the welcome email." });
   }
 };
 
@@ -732,7 +847,7 @@ export const inviteAllTenants = async (req, res) => {
     if (sentIds.length) {
       await Tenancy.updateMany(
         { _id: { $in: sentIds } },
-        { $set: { invitedAt: new Date() } }
+        { $set: { invitedAt: new Date(), welcomeEmailStatus: "Sent", welcomeEmailSentAt: new Date(), welcomeEmailError: "" } }
       );
     }
 

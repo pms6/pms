@@ -43,10 +43,12 @@ export default function RoleShell({
   const handleLogout = async () => {
     // Signing out is the one moment we KNOW someone has left, so clear presence
     // rather than leaving them showing online until the heartbeat goes stale.
-    try {
-      await api.post("/presence/offline");
-    } catch {
-      /* the heartbeat going quiet handles it anyway */
+    if (role !== "tenant") {
+      try {
+        await api.post("/presence/offline");
+      } catch {
+        /* the heartbeat going quiet handles it anyway */
+      }
     }
     await logout();
     router.replace("/");
@@ -131,7 +133,7 @@ export default function RoleShell({
       {/* Renders nothing — checks in once a minute so the team board can show
           who is actually at their desk. Lives here rather than on a page so it
           keeps beating wherever in the portal the person happens to be. */}
-      <PresenceHeartbeat portal={role === "organization" ? "admin" : role} />
+      {role !== "tenant" && <PresenceHeartbeat portal={role === "organization" ? "admin" : role} />}
 
       {/* Mobile menu button */}
       <button

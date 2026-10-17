@@ -1,27 +1,33 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Fragment, useState, useEffect, useCallback } from "react";
 import {
   PoundSterling, AlertCircle, Wallet, CheckCircle2, Clock, Search,
   Download, Loader2, Building2, DoorOpen,
+  ChevronDown, ChevronRight,
 } from "lucide-react";
 import { PageHeader } from "../../Shared/ui";
 import api from "../../api/api";
+import { AttachmentRow } from "../../Shared/MediaAttachments";
 
 const STATUS_TONE = {
   paid: "bg-emerald-100 text-emerald-700",
+  paid_late: "bg-orange-100 text-orange-700",
   due: "bg-amber-100 text-amber-700",
   overdue: "bg-red-100 text-red-700",
   upcoming: "bg-slate-100 text-slate-600",
   awaiting_confirmation: "bg-blue-100 text-blue-700",
+  cancelled: "bg-slate-200 text-slate-500",
 };
 
 const STATUS_LABEL = {
   paid: "Paid",
+  paid_late: "Paid late",
   due: "Due",
   overdue: "Overdue",
   upcoming: "Upcoming",
   awaiting_confirmation: "Awaiting confirmation",
+  cancelled: "Cancelled",
 };
 
 const money = (n) =>
@@ -73,6 +79,7 @@ export default function FinancePayments() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [expandedGroups, setExpandedGroups] = useState({});
 
   const loadData = useCallback(async () => {
     try {
@@ -130,6 +137,28 @@ export default function FinancePayments() {
   };
 
   const maxMonth = Math.max(1, ...byMonth.map((m) => m.billed));
+  const groups = Object.values(rows.reduce((acc, charge) => {
+    const key = String(charge.tenantEmail || charge.tenancyId || `${charge.property}-${charge.room}`).trim().toLowerCase();
+    if (!acc[key]) acc[key] = { id: key, charges: [] };
+    acc[key].charges.push(charge);
+    return acc;
+  }, {})).map((group) => {
+    group.charges.sort((a, b) => new Date(b.dueDate) - new Date(a.dueDate));
+    const first = group.charges[0];
+    const dueCharges = group.charges.filter((c) => ["due", "overdue", "upcoming"].includes(c.status));
+    const nextDue = dueCharges.slice().sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))[0];
+    const statuses = [...new Set(group.charges.map((c) => c.status === "paid" && c.paidLate ? "paid_late" : c.status))];
+    return {
+      ...group,
+      tenantName: first.tenantName,
+      tenantEmail: first.tenantEmail,
+      property: [...new Set(group.charges.map((c) => c.property).filter(Boolean))].join(", "),
+      room: [...new Set(group.charges.map((c) => c.room).filter(Boolean))].join(", "),
+      nextDue,
+      statuses,
+      total: group.charges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0),
+    };
+  });
 
   return (
     <div className="space-y-5">
@@ -147,12 +176,12 @@ export default function FinancePayments() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Kpi
           icon={PoundSterling}
-          label="Collected"
+          label="Rent received"
           value={loading ? "—" : money(summary?.collected)}
-          sub={loading ? "" : `${summary?.collectionRate ?? 0}% of ${money(summary?.billed)} billed`}
+          sub={loading ? "" : `${summary?.receivedCount ?? 0} charges received · ${summary?.paidLateCount ?? 0} paid late (${money(summary?.paidLateAmount)}) · ${summary?.collectionRate ?? 0}% of ${money(summary?.billed)} billed`}
           tone="navy"
         />
-        <Kpi icon={Wallet} label="Outstanding" value={loading ? "—" : money(summary?.outstanding)} />
+        <Kpi icon={Wallet} label="Pending rent" value={loading ? "—" : money(summary?.outstanding)} sub={loading ? "" : `${summary?.pendingCount ?? 0} charges pending`} />
         <Kpi
           icon={AlertCircle}
           label="Overdue"
@@ -245,20 +274,47 @@ export default function FinancePayments() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50/50">
-                  <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Period</th>
+                  <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Occupancy / history</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Tenant</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Property</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Due</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">Amount</th>
                   <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Status</th>
+                  <th className="p-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Payment proof</th>
                   <th className="p-4" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-sm font-medium text-[#0F253B]">
-                {rows.map((r) => (
-                  <tr key={r._id} className="hover:bg-gray-50/70 transition-colors">
+                {groups.map((group) => (
+                  <Fragment key={group.id}>
+                  <tr className="bg-white hover:bg-gray-50/70 transition-colors">
+                    <td className="p-4 text-xs">
+                      <button onClick={() => setExpandedGroups((old) => ({ ...old, [group.id]: !old[group.id] }))} className="flex items-center gap-2 text-left">
+                        {expandedGroups[group.id] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span className="font-bold">{group.charges.length} rent {group.charges.length === 1 ? "record" : "records"}</span>
+                      </button>
+                    </td>
+                    <td className="p-4 text-xs text-gray-500 max-w-[14rem]">
+                      <span className="block truncate font-bold text-[#0F253B]">{group.tenantName || group.tenantEmail || "—"}</span>
+                      {group.tenantName && <span className="block truncate text-[10px] text-gray-400">{group.tenantEmail}</span>}
+                    </td>
+                    <td className="p-4 text-xs text-gray-500">
+                      <span className="flex items-center gap-1.5"><Building2 size={12} className="text-gray-300 shrink-0" />{group.property || "—"}</span>
+                      {group.room && <span className="flex items-center gap-1.5 text-[10px] text-gray-400 mt-0.5"><DoorOpen size={11} className="shrink-0" />{group.room}</span>}
+                    </td>
+                    <td className="p-4 text-xs">{group.nextDue ? <><span className="text-gray-500">Next due</span><span className="block font-bold">{fmtDate(group.nextDue.dueDate)}</span></> : <span className="text-gray-400">—</span>}</td>
+                    <td className="p-4 text-right font-bold">{money(group.total)}</td>
+                    <td className="p-4"><div className="flex flex-wrap gap-1">{group.statuses.map((status) => <span key={status} className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${STATUS_TONE[status] || "bg-gray-100 text-gray-600"}`}>{STATUS_LABEL[status] || status}</span>)}</div></td>
+                    <td className="p-4 text-xs text-gray-400">Expand to view</td>
+                    <td />
+                  </tr>
+                  {expandedGroups[group.id] && group.charges.map((r) => (
+                  <tr key={r._id} className="bg-gray-50/60 hover:bg-gray-50 transition-colors">
                     <td className="p-4 text-xs font-bold">{fmtPeriod(r.periodKey)}</td>
-                    <td className="p-4 text-xs text-gray-500 truncate max-w-[14rem]">{r.tenantEmail || "—"}</td>
+                    <td className="p-4 text-xs text-gray-500 max-w-[14rem]">
+                      <span className="block truncate font-bold text-[#0F253B]">{r.tenantName || r.tenantEmail || "—"}</span>
+                      {r.tenantName && <span className="block truncate text-[10px] text-gray-400">{r.tenantEmail}</span>}
+                    </td>
                     <td className="p-4 text-xs text-gray-500">
                       <span className="flex items-center gap-1.5">
                         <Building2 size={12} className="text-gray-300 shrink-0" />
@@ -282,9 +338,12 @@ export default function FinancePayments() {
                     </td>
                     <td className="p-4 text-right font-bold">{money(r.amount)}</td>
                     <td className="p-4">
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${STATUS_TONE[r.status] || "bg-gray-100 text-gray-600"}`}>
-                        {STATUS_LABEL[r.status] || r.status}
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${STATUS_TONE[r.status === "paid" && r.paidLate ? "paid_late" : r.status] || "bg-gray-100 text-gray-600"}`}>
+                        {r.status === "paid" && r.paidLate ? "Paid late" : STATUS_LABEL[r.status] || r.status}
                       </span>
+                    </td>
+                    <td className="p-4">
+                      {r.claimedProof?.length ? <div className="max-w-[15rem] space-y-1">{r.claimedProof.map((file, index) => <AttachmentRow key={file.url || index} file={file} />)}</div> : <span className="text-xs text-gray-300">—</span>}
                     </td>
                     <td className="p-4 text-right">
                       {r.status === "awaiting_confirmation" && (
@@ -296,7 +355,7 @@ export default function FinancePayments() {
                             title="Confirm this payment"
                           >
                             {busyId === r._id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-                            Confirm
+                            Mark received
                           </button>
                           <button
                             onClick={() => resolveClaim(r, false)}
@@ -310,6 +369,8 @@ export default function FinancePayments() {
                       )}
                     </td>
                   </tr>
+                  ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
