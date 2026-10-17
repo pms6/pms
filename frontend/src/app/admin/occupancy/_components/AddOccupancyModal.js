@@ -66,7 +66,7 @@ export default function AddOccupancyModal({ onClose, onCreated }) {
     const loadData = async () => {
       try {
         const [propRes, tenantRes] = await Promise.all([
-          api.get("/properties"),
+          api.get("/properties", { params: { limit: 100 } }),
           api.get("/tenants")
         ]);
         setProperties(propRes.data?.data || []);
