@@ -34,7 +34,7 @@ const emptyForm = {
   phone: "",
   gender: "",
   nationality: "",
-  isExTenant: false,
+  exTenantName: "",
   roomType: "",
   rent: "",
   deposit: "",
@@ -241,15 +241,15 @@ export default function CheckInFormModal({ initial, properties, onClose, onSave 
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-xs font-bold text-[#0F253B]">
+          <div>
+            <label className={LABEL}>Ex-Tenant Name</label>
             <input
-              type="checkbox"
-              checked={form.isExTenant}
-              onChange={(e) => setForm((f) => ({ ...f, isExTenant: e.target.checked }))}
-              className="w-4 h-4 rounded accent-[#F47C3C]"
+              className={FIELD}
+              value={form.exTenantName || ""}
+              onChange={set("exTenantName")}
+              placeholder="Previous tenant of this room"
             />
-            Ex-Tenant (previously lived with us)
-          </label>
+          </div>
 
           {/* Money */}
           <div className="grid sm:grid-cols-3 gap-3">

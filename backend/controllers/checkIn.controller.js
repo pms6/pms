@@ -27,6 +27,7 @@ const EDITABLE_KEYS = [
   "gender",
   "nationality",
   "isExTenant",
+  "exTenantName",
   "roomType",
   "rent",
   "deposit",

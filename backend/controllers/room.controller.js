@@ -54,23 +54,14 @@ const roomSizeLabel = (room) => {
 
 const gbp = (n) => `£${Number(n || 0).toLocaleString("en-GB", { maximumFractionDigits: 2 })}`;
 
-// The Available Rooms "Price" cell, one line per price:
-//   one price            -> ["Single: £650"] / ["Double Ensuite: £900"]
-//   single + couple      -> ["Single occupancy: £970", "Double/Couple: £1,050"]
+// The Available Rooms "Price" cell: rent amounts only. Room size and
+// occupancy are separate fields on the row.
 const roomPriceLines = (room) => {
-  const ensuite = room.roomType === "ENSUITE" || room.bathroomType === "private";
   const per = room.rentPeriod === "WEEKLY" ? " pw" : "";
-  const rent = room.monthlyRent || 0;
   const coupleRent = room.doubleOccupancyRent > 0 ? room.doubleOccupancyRent : null;
-  const suffix = ensuite ? " (Ensuite)" : "";
-
-  if (coupleRent) {
-    return [
-      `Single occupancy${suffix}: ${gbp(rent)}${per}`,
-      `Double/Couple${suffix}: ${gbp(coupleRent)}${per}`,
-    ];
-  }
-  return [`${roomSizeLabel(room)}${ensuite ? " Ensuite" : ""}: ${gbp(rent)}${per}`];
+  const lines = [`${gbp(room.monthlyRent || 0)}${per}`];
+  if (coupleRent) lines.push(`${gbp(coupleRent)}${per}`);
+  return lines;
 };
 
 export const createRoom = async (req, res) => {
@@ -909,20 +900,9 @@ export const getAvailableRooms = async (req, res) => {
           )
         : [];
 
-      if (tenancy?.tenantId) {
-        exTenantName =
-          `${tenancy.tenantId.firstName || ""} ${tenancy.tenantId.lastName || ""}`.trim() ||
-          tenancy.tenant ||
-          "—";
-      } else if (room.currentTenant) {
-        exTenantName =
-          `${room.currentTenant.firstName || ""} ${room.currentTenant.lastName || ""}`.trim() ||
-          "—";
-      } else if (tenancy?.tenant) {
-        exTenantName = tenancy.tenant;
-      } else if (exTenantsHistory.length) {
-        // No tenancy record — use the most recent ex-tenant entered on the
-        // room itself (latest end date; undated entries count as oldest).
+      // Ex-tenant comes only from the room's own list (Properties -> room),
+      // never from Occupancy/tenancy records.
+      if (exTenantsHistory.length) {
         const latest = exTenantsHistory[0];
         exTenantName = latest.name || latest.email || "—";
         exTenantDetail = {
@@ -967,6 +947,7 @@ export const getAvailableRooms = async (req, res) => {
           joinDate: t.joinDate || null,
           endDate: t.endDate || null,
         })),
+        roomSize: roomSizeLabel(room),
         occupancy:
           coupleRent || room.occupancy === "DOUBLE" || room.occupancy === "TWIN"
             ? "Single/Double"

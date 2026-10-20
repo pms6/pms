@@ -66,7 +66,8 @@ const checkInSchema = new mongoose.Schema(
 
     // Whether this tenant previously lived with us before (re-checking in),
     // as opposed to a brand-new tenant. Requested for the check-in form.
-    isExTenant: { type: Boolean, default: false },
+    isExTenant: { type: Boolean, default: false }, // legacy, no longer set by the form
+    exTenantName: { type: String, trim: true, default: "" },
 
     // "Room Status" on the Database sheet is really the room TYPE
     // ("Double Room", "Single Room", "GA Double Room"). Free text, because the

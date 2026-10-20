@@ -94,6 +94,7 @@ export default function AvailableRoomsPage() {
             <th className="px-5 py-3.5">Company Name</th>
             <th className="px-5 py-3.5">Area</th>
             <th className="px-5 py-3.5">Zone</th>
+            <th className="px-5 py-3.5">Room Size</th>
             <th className="px-5 py-3.5">Price</th>
             <th className="px-5 py-3.5">Deposit</th>
             <th className="px-5 py-3.5">Ex-Tenant</th>
@@ -106,7 +107,7 @@ export default function AvailableRoomsPage() {
           {rows.length === 0 ? (
             <tr>
               <td
-                colSpan={11}
+                colSpan={12}
                 className="px-5 py-16 text-center text-sm text-gray-400"
               >
                 {emptyMessage}
@@ -125,6 +126,7 @@ export default function AvailableRoomsPage() {
                 <td className="px-5 py-4 text-gray-600">{row.companyName || "—"}</td>
                 <td className="px-5 py-4 text-gray-600">{row.area}</td>
                 <td className="px-5 py-4 text-gray-600">{row.zone || "—"}</td>
+                <td className="px-5 py-4 text-gray-600">{row.roomSize || "—"}</td>
                 <td className="px-5 py-4 font-medium text-gray-900 whitespace-nowrap">
                   {(row.priceLines?.length ? row.priceLines : [row.price]).map((line) => (
                     <p key={line}>{line}</p>
