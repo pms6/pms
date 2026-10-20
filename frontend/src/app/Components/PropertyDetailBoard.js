@@ -188,7 +188,11 @@ function RoomDetail({ room, property, onEdit, onManage }) {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <Info label="Security Deposit" value={room.securityDeposit ? money(room.securityDeposit) : "Not set"} />
             <Info label="Room Type" value={room.roomType || "Standard"} />
-            <Info label="Occupancy" value={room.occupancy || "Single"} />
+            <Info label="Size of room" value={room.occupancy || "Single"} />
+            <Info
+              label="Manual Occupancy"
+              value={{ SINGLE: "Single Occupancy", DOUBLE: "Double Occupancy", SINGLE_DOUBLE: "Single and Double Occupancy" }[room.manualOccupancy] || "Single Occupancy"}
+            />
             <Info label="Available From" value={room.availableFrom || "Not set"} />
             <Info label="Floor" value={room.floor || "Not set"} />
             <Info label="Furnished" value={room.furnished ? "Yes" : "No"} />
@@ -339,6 +343,7 @@ export default function PropertyDetailBoard({ basePath = "/admin/properties" }) 
           images: room.images || [],
           roomType: room.roomType,
           occupancy: room.occupancy,
+          manualOccupancy: room.manualOccupancy,
           securityDeposit: room.securityDeposit,
           holdingDeposit: room.holdingDeposit,
           roomNumber: room.roomNumber,

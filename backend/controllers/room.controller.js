@@ -78,6 +78,7 @@ export const createRoom = async (req, res) => {
       description,
       roomType,
       occupancy,
+      manualOccupancy,
       furnished,
       floor,
       roomSize,
@@ -153,6 +154,7 @@ export const createRoom = async (req, res) => {
       description,
       roomType,
       occupancy,
+      manualOccupancy,
       furnished,
       floor,
       roomSize,
@@ -248,6 +250,7 @@ export const getRooms = async (req, res) => {
       status,
       roomType,
       occupancy,
+      manualOccupancy,
       furnished,
       minPrice,
       maxPrice,
@@ -262,6 +265,7 @@ export const getRooms = async (req, res) => {
     if (status) filter.status = status;
     if (roomType) filter.roomType = roomType;
     if (occupancy) filter.occupancy = occupancy;
+    if (manualOccupancy) filter.manualOccupancy = manualOccupancy;
     if (furnished !== undefined) filter.furnished = furnished === "true";
     if (featured !== undefined) filter.featured = featured === "true";
     if (isPublished !== undefined) filter.isPublished = isPublished === "true";
@@ -430,6 +434,7 @@ export const updateRoom = async (req, res) => {
       description,
       roomType,
       occupancy,
+      manualOccupancy,
       furnished,
       floor,
       roomSize,
@@ -469,6 +474,7 @@ export const updateRoom = async (req, res) => {
     if (description !== undefined) room.description = description;
     if (roomType) room.roomType = roomType;
     if (occupancy) room.occupancy = occupancy;
+    if (manualOccupancy !== undefined) room.manualOccupancy = manualOccupancy;
     if (furnished !== undefined) room.furnished = furnished;
     if (floor !== undefined) room.floor = floor;
     if (roomSize !== undefined) room.roomSize = roomSize;

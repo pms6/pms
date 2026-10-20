@@ -64,6 +64,7 @@ const ROOM_TYPES = [
 ];
 // "Size of room" — Single/Double lead, Twin/Family kept so existing rooms round-trip.
 const OCCUPANCIES = [["SINGLE", "Single"], ["DOUBLE", "Double"], ["TWIN", "Twin"], ["FAMILY", "Family"]];
+const MANUAL_OCCUPANCIES = [["SINGLE", "Single Occupancy"], ["DOUBLE", "Double Occupancy"], ["SINGLE_DOUBLE", "Single and Double Occupancy"]];
 const STATUSES = [
   ["AVAILABLE", "Available"], ["AVAILABLE_SOON", "Available Soon"], ["RESERVED", "Reserved"],
   ["OCCUPIED", "Occupied"], ["MAINTENANCE", "Maintenance"],
@@ -116,6 +117,7 @@ const EMPTY = {
   holdingDeposit: "",
   roomType: "STANDARD",
   occupancy: "SINGLE",
+  manualOccupancy: "SINGLE",
   ensuite: false,
   status: "AVAILABLE",
   availableFrom: "",
@@ -172,6 +174,7 @@ const fromApi = (room) => ({
   holdingDeposit: room.holdingDeposit ?? "",
   roomType: room.roomType || "STANDARD",
   occupancy: room.occupancy || "SINGLE",
+  manualOccupancy: room.manualOccupancy || "SINGLE",
   ensuite: room.bathroomType === "private",
   status: room.status || "AVAILABLE",
   availableFrom: room.availableFrom ? new Date(room.availableFrom).toISOString().split("T")[0] : "",
@@ -457,6 +460,7 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
         description: form.description.trim() || undefined,
         roomType: form.roomType,
         occupancy: form.occupancy,
+        manualOccupancy: form.manualOccupancy,
         bathroomType: form.ensuite ? "private" : "shared",
         furnished: form.furnished,
         floor: form.floor.trim() || undefined,
@@ -607,6 +611,10 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
 
           <Field label="Size of room">
             <Choice options={OCCUPANCIES} value={form.occupancy} onChange={(v) => setField("occupancy", v)} />
+          </Field>
+
+          <Field label="Manual Occupancy" hint="Set independently from the room type and size.">
+            <Choice options={MANUAL_OCCUPANCIES} value={form.manualOccupancy} onChange={(v) => setField("manualOccupancy", v)} />
           </Field>
 
           <Field label="Furnishings">

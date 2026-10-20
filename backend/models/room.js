@@ -70,6 +70,13 @@ const roomSchema = new mongoose.Schema(
       default: "SINGLE",
     },
 
+    // Manually maintained letting occupancy, independent of room type/size.
+    manualOccupancy: {
+      type: String,
+      enum: ["SINGLE", "DOUBLE", "SINGLE_DOUBLE"],
+      default: "SINGLE",
+    },
+
     furnished: {
       type: Boolean,
       default: true,
