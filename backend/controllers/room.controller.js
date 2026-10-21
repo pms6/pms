@@ -52,6 +52,16 @@ const roomSizeLabel = (room) => {
   return "Single";
 };
 
+// Available Rooms must reflect the letting occupancy selected in Properties.
+// It is independent of physical room size and of whether a second rent was
+// entered. Missing values on older records use the schema's SINGLE default.
+const manualOccupancyLabel = (room) => {
+  const value = room.manualOccupancy || "SINGLE";
+  if (value === "DOUBLE") return "Double";
+  if (value === "SINGLE_DOUBLE") return "Single/Double";
+  return "Single";
+};
+
 const gbp = (n) => `£${Number(n || 0).toLocaleString("en-GB", { maximumFractionDigits: 2 })}`;
 
 // The Available Rooms "Price" cell: rent amounts only. Room size and
@@ -954,10 +964,7 @@ export const getAvailableRooms = async (req, res) => {
           endDate: t.endDate || null,
         })),
         roomSize: roomSizeLabel(room),
-        occupancy:
-          coupleRent || room.occupancy === "DOUBLE" || room.occupancy === "TWIN"
-            ? "Single/Double"
-            : "Single",
+        occupancy: manualOccupancyLabel(room),
         bank: property.bank || null,
         roomType: room.roomType,
         bathroomType: room.bathroomType,

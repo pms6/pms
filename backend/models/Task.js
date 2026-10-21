@@ -181,6 +181,12 @@ const taskSchema = new mongoose.Schema(
     // Optional instructions from the admin, separate from the description.
     adminRemarks: { type: String, trim: true, default: "" },
 
+    // Admin record that required notice has been given for this task.
+    noticeGiven: { type: Boolean, default: false },
+    noticeGivenAt: { type: Date, default: null },
+    noticeGivenBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    noticeReminderDueDate: { type: Date, default: null },
+
     // Append-only history of status changes and remarks.
     progress: { type: [progressSchema], default: [] },
 

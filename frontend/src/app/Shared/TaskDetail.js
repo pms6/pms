@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  X, Paperclip, Send, Loader2, CalendarClock, CalendarDays, UserRound,
+  X, Paperclip, Send, Loader2, CalendarClock, CalendarDays, UserRound, Bell,
   MessageSquare, FileCheck2, History, Lock, ListChecks, Building2,
   RotateCcw, ArrowRight, Hand, Pencil,
 } from "lucide-react";
@@ -111,11 +111,28 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [savingNotice, setSavingNotice] = useState(false);
+  const [noticeError, setNoticeError] = useState("");
   // The attachment lightbox is scoped to whichever list it was opened from
   // (the task's own files, or one history entry's) — arrows page through
   // that list, not every attachment on the task.
   const [lightbox, setLightbox] = useState(null); // { items, index } | null
   const openLightbox = (items, index) => setLightbox({ items, index });
+
+  const toggleNotice = async () => {
+    setSavingNotice(true);
+    setNoticeError("");
+    try {
+      const { data } = await api.patch(`/tasks/${task._id}/notice`, {
+        noticeGiven: !task.noticeGiven,
+      });
+      onChanged?.(data.data);
+    } catch (err) {
+      setNoticeError(err.response?.data?.message || "Failed to update notice status.");
+    } finally {
+      setSavingNotice(false);
+    }
+  };
 
   const commenting = mode === "comment" || !mayUpdate;
 
@@ -280,6 +297,20 @@ export default function TaskDetail({ task, onClose, onChanged, canUpdate = true 
         </div>
 
         <div className="p-7 space-y-6">
+          <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-4 ${task.noticeGiven ? "border-emerald-100 bg-emerald-50" : "border-amber-100 bg-amber-50"}`}>
+            <div className="flex items-center gap-2 text-sm font-bold text-[#0F253B]">
+              <Bell size={16} className={task.noticeGiven ? "text-emerald-600" : "text-amber-600"} />
+              Notice: {task.noticeGiven ? "Done" : "Pending"}
+            </div>
+            {task.canManage && (
+              <button type="button" onClick={toggleNotice} disabled={savingNotice}
+                className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-[#0F253B] shadow-sm disabled:opacity-50">
+                {savingNotice ? "Saving…" : task.noticeGiven ? "Mark pending" : "Mark notice done"}
+              </button>
+            )}
+            {noticeError && <p className="w-full text-xs font-semibold text-red-600">{noticeError}</p>}
+          </div>
+
           {/* Description */}
           <div>
             <p className="text-[11px] font-bold uppercase tracking-widest text-[#F47C3C] mb-2">Description</p>

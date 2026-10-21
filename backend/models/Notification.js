@@ -21,6 +21,7 @@ export const NOTIFICATION_TYPES = [
   "maintenance_awaiting_response",
   // A shared task was passed to this person — their action is required next.
   "task_action_required",
+  "task_notice_reminder",
   // Somebody wrote in the discussion on a maintenance entry.
   "maintenance_comment",
   // Email Records — a record handed to someone, a follow-up that has come

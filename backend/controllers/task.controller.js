@@ -201,6 +201,7 @@ const decorate = (task, req) => {
     canComment: req ? canView(task, req) : false,
     canUpdateStatus: req ? canUpdateStatus(task, req) : false,
     canManage: req ? isAdmin(req) && canView(task, req) : false,
+    noticeGiven: Boolean(task.noticeGiven),
   };
 };
 
@@ -1211,7 +1212,12 @@ export const updateTask = async (req, res) => {
     if (priority !== undefined && TASK_PRIORITIES.includes(priority)) task.priority = priority;
     if (adminRemarks !== undefined) task.adminRemarks = adminRemarks.trim();
     if (startDate !== undefined) task.startDate = toDateOrNull(startDate);
-    if (dueDate !== undefined) task.dueDate = toDateOrNull(dueDate);
+    if (dueDate !== undefined) {
+      const previousDue = task.dueDate ? new Date(task.dueDate).getTime() : null;
+      task.dueDate = toDateOrNull(dueDate);
+      const nextDue = task.dueDate ? new Date(task.dueDate).getTime() : null;
+      if (previousDue !== nextDue) task.noticeReminderDueDate = null;
+    }
 
     if (task.startDate && task.dueDate && task.dueDate < task.startDate) {
       return res.status(400).json({
@@ -1297,7 +1303,12 @@ export const rescheduleTask = async (req, res) => {
     const { startDate, dueDate, remark } = req.body;
 
     if (startDate !== undefined) task.startDate = toDateOrNull(startDate);
-    if (dueDate !== undefined) task.dueDate = toDateOrNull(dueDate);
+    if (dueDate !== undefined) {
+      const previousDue = task.dueDate ? new Date(task.dueDate).getTime() : null;
+      task.dueDate = toDateOrNull(dueDate);
+      const nextDue = task.dueDate ? new Date(task.dueDate).getTime() : null;
+      if (previousDue !== nextDue) task.noticeReminderDueDate = null;
+    }
 
     if (task.startDate && task.dueDate && task.dueDate < task.startDate) {
       return res.status(400).json({
@@ -1339,6 +1350,34 @@ export const rescheduleTask = async (req, res) => {
   } catch (error) {
     console.error("Reschedule Task Error:", error);
     return res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// ADMIN — record whether the required notice has been given.
+export const setTaskNotice = async (req, res) => {
+  try {
+    if (denyNonAdmin(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid task id." });
+    }
+    const task = await Task.findOne({
+      _id: req.params.id,
+      organizationId: req.user.organizationId,
+      isDeleted: false,
+    });
+    if (!task || !canView(task, req)) {
+      return res.status(404).json({ success: false, message: "Task not found." });
+    }
+    const given = Boolean(req.body?.noticeGiven);
+    task.noticeGiven = given;
+    task.noticeGivenAt = given ? new Date() : null;
+    task.noticeGivenBy = given ? req.user._id : null;
+    if (!given) task.noticeReminderDueDate = null;
+    await task.save();
+    return res.status(200).json({ success: true, data: decorate(task.toObject(), req) });
+  } catch (error) {
+    console.error("Set Task Notice Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update notice status." });
   }
 };
 

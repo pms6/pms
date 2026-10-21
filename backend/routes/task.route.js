@@ -12,6 +12,7 @@ import {
   deleteTask,
   addTaskProgress,
   editTaskComment,
+  setTaskNotice,
 } from "../controllers/task.controller.js";
 import { protect, staffOnly } from "../middleware/auth.js";
 
@@ -42,6 +43,7 @@ router.get("/:id", getTaskById); // one task in full, with its whole history
 router.post("/", createTask);
 router.put("/:id", updateTask);
 router.patch("/:id/reschedule", rescheduleTask);
+router.patch("/:id/notice", setTaskNotice);
 router.delete("/:id", deleteTask);
 
 // The only write a non-owner can make: a comment from anyone on the team, or a

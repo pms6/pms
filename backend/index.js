@@ -19,6 +19,7 @@ import { syncAllConfiguredInboxes } from "./cranjob/emailInbox.js";
 import { sendScheduledEmails } from "./cranjob/scheduledEmail.js";
 import { purgeExpiredCaptures, closeAbandonedSessions } from "./controllers/screenMonitor.controller.js";
 import CleaningSchedule from "./models/CleaningSchedule.js";
+import { remindForTaskNotices } from "./cranjob/taskNoticeReminder.js";
 
 const app = express();
 
@@ -131,6 +132,17 @@ cron.schedule("* * * * *", async () => {
     }
   } catch (error) {
     console.error("Scheduled email job failed:", error.message);
+  }
+});
+
+// Alert admins once when an open task without a recorded notice enters its
+// final 24 hours.
+cron.schedule("* * * * *", async () => {
+  try {
+    const result = await remindForTaskNotices();
+    if (result.sent) console.log(`Task notice reminders sent: ${result.sent}`);
+  } catch (error) {
+    console.error("Task notice reminder job failed:", error.message);
   }
 });
 
