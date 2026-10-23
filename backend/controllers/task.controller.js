@@ -749,6 +749,51 @@ export const getAssignableMembers = async (req, res) => {
         role: m.role || "",
       }));
 
+    const excludeTaskId = mongoose.isValidObjectId(req.query.excludeTaskId)
+      ? new mongoose.Types.ObjectId(String(req.query.excludeTaskId))
+      : null;
+    const userIds = data.map((member) => member.userId);
+    const openTasks = userIds.length
+      ? await Task.find({
+          organizationId: req.user.organizationId,
+          "assignees.userId": { $in: userIds },
+          status: { $nin: ["Done", "Cancelled", "Completed"] },
+          isDeleted: false,
+          ...(excludeTaskId ? { _id: { $ne: excludeTaskId } } : {}),
+        })
+          .select("title status priority startDate dueDate property assignees")
+          .lean()
+      : [];
+
+    const byMember = new Map(userIds.map((id) => [String(id), []]));
+    for (const task of openTasks) {
+      for (const assignee of task.assignees || []) {
+        const queue = byMember.get(String(assignee.userId));
+        if (queue) queue.push(task);
+      }
+    }
+
+    for (const member of data) {
+      const queue = (byMember.get(String(member.userId)) || []).sort(bySchedule);
+      member.workload = {
+        openCount: queue.length,
+        dueTodayCount: queue.filter((task) => isDueToday({
+          ...task,
+          effectiveStatus: effectiveStatus(task),
+          daysUntilDue: daysUntilDue(dueAt(task)),
+        })).length,
+        tasks: queue.slice(0, 8).map((task) => ({
+          _id: task._id,
+          title: task.title,
+          status: effectiveStatus(task),
+          priority: task.priority,
+          startDate: task.startDate,
+          dueDate: task.dueDate,
+          property: task.property,
+        })),
+      };
+    }
+
     return res.status(200).json({ success: true, data });
   } catch (error) {
     console.error("Get Assignable Members Error:", error);

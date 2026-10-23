@@ -362,10 +362,16 @@ export default function PropertyCsvImport({ slug, organization }) {
               {result.created} of {result.total} properties added
             </h2>
             <p className="text-sm text-gray-500 font-medium mt-1">
-              They are live on {organization?.name || "the agency"}&apos;s books
-              now. Your details are on each one at{" "}
-              <span className="text-[#0F253B]">{submitter.email}</span> if
-              anything needs checking.
+              {result.created > 0 ? (
+                <>
+                  They are live on {organization?.name || "the agency"}&apos;s
+                  books now. Your details are on each one at{" "}
+                  <span className="text-[#0F253B]">{submitter.email}</span> if
+                  anything needs checking.
+                </>
+              ) : (
+                "Nothing was added. See the reasons below."
+              )}
             </p>
           </div>
         </div>
@@ -461,10 +467,9 @@ export default function PropertyCsvImport({ slug, organization }) {
           columns)
         </a>
         <p className="text-[11px] text-gray-400 font-medium">
-          Four worked properties in one file: an HMO with three rooms, a flat let
-          as a whole, a weekly short let, and a two-unit block — covering every
-          rental type, both ways of laying out a multi-room property, and the
-          full set of columns.
+          Two properties in one file: an HMO with three rooms (using the
+          inventory, second-price and ex-tenant columns) and a house let as a
+          whole — showing both ways to lay out a property.
         </p>
 
         <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-3">

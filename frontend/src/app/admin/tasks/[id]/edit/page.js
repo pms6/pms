@@ -25,7 +25,7 @@ export default function AdminEditTask() {
     try {
       const [taskRes, membersRes, propsRes] = await Promise.all([
         api.get(`/tasks/${id}`),
-        api.get("/tasks/assignable-members"),
+        api.get("/tasks/assignable-members", { params: { excludeTaskId: id } }),
         api.get("/properties", { params: { limit: 200 } }),
       ]);
       setTask(taskRes.data?.data || null);

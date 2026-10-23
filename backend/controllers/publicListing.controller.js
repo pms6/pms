@@ -184,6 +184,8 @@ const cleanRoom = (room = {}) => {
     bathroomType: oneOf(room.bathroomType, BATHROOM_TYPES, "shared"),
 
     monthlyRent: num(room.monthlyRent, null),
+    // Optional second price for two occupants; non-positive means one price only.
+    doubleOccupancyRent: num(room.doubleOccupancyRent, null) > 0 ? num(room.doubleOccupancyRent) : null,
     rentPeriod: oneOf(room.rentPeriod, RENT_PERIODS, "MONTHLY"),
     securityDeposit: num(room.securityDeposit, null),
     holdingDeposit: num(room.holdingDeposit, null),
@@ -234,6 +236,16 @@ const cleanRoom = (room = {}) => {
     inventory: cleanInventory(room.inventory),
 
     notes: str(room.notes, 2000),
+
+    exTenants: (Array.isArray(room.exTenants) ? room.exTenants : [])
+      .slice(0, 50)
+      .map((t) => ({
+        name: str(t?.name, 120),
+        email: str(t?.email, 254).toLowerCase(),
+        joinDate: date(t?.joinDate),
+        endDate: date(t?.endDate),
+      }))
+      .filter((t) => t.name || t.email || t.joinDate || t.endDate),
   };
 };
 

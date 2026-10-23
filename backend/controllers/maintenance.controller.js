@@ -48,6 +48,17 @@ const esc = (v) =>
 
 // What each status means to the tenant who reported the job.
 const TENANT_STATUS_COPY = {
+  request_submitted: { label: "Request submitted", line: "We have received your maintenance request." },
+  under_review: { label: "Under review", line: "Our team is reviewing your request." },
+  request_acknowledged: { label: "Request acknowledged", line: "Your request has been acknowledged." },
+  maintenance_team_assigned: { label: "Maintenance team assigned", line: "A maintenance team has been assigned to your request." },
+  access_confirmation_required: { label: "Access confirmation required", line: "Please confirm the access arrangements so we can book the visit." },
+  appointment_confirmed: { label: "Appointment confirmed", line: "The maintenance appointment has been confirmed." },
+  maintenance_visit_underway: { label: "Maintenance visit underway", line: "The maintenance team is visiting your property." },
+  work_in_progress: { label: "Work in progress", line: "Work on your repair is under way." },
+  work_completed: { label: "Work completed", line: "The maintenance team has completed the work." },
+  resolution_confirmation_required: { label: "Resolution confirmation required", line: "Please confirm whether the repair has resolved the issue." },
+  ticket_closed: { label: "Ticket closed", line: "Your maintenance request has been closed." },
   pending: { label: "Reported", line: "We have your report and will review it shortly." },
   open: { label: "Reported", line: "We have your report and will review it shortly." },
   assigned: { label: "Contractor assigned", line: "A contractor has been assigned and will be in touch to arrange a visit." },
@@ -56,6 +67,36 @@ const TENANT_STATUS_COPY = {
   on_hold: { label: "On hold", line: "Your repair is on hold for now. We will let you know when it moves again." },
   sorted: { label: "Sorted", line: "Your repair has been marked as complete. If the problem isn't fixed, please report it again." },
   closed: { label: "Sorted", line: "Your repair has been marked as complete. If the problem isn't fixed, please report it again." },
+};
+
+// Tenant confirmations are the only status changes tenants can make.
+export const confirmMaintenanceStep = async (req, res) => {
+  try {
+    if (req.user.role !== "Tenant") {
+      return res.status(403).json({ success: false, message: "Tenant confirmation only." });
+    }
+    const transitions = {
+      access: ["access_confirmation_required", "appointment_confirmed"],
+      resolution: ["resolution_confirmation_required", "ticket_closed"],
+    };
+    const transition = transitions[req.body?.confirmation];
+    if (!transition) return res.status(400).json({ success: false, message: "Invalid confirmation." });
+    const request = await Maintenance.findOne({
+      _id: req.params.id, organizationId: req.user.organizationId,
+      createdBy: req.user._id, isDeleted: false, status: transition[0],
+    });
+    if (!request) return res.status(409).json({ success: false, message: "This request is not awaiting that confirmation." });
+    request.status = transition[1];
+    request.statusHistory.push({ status: transition[1], at: new Date() });
+    await request.save();
+    emailTenantStatusChange(request, request.status);
+    const response = request.toObject();
+    delete response.comments;
+    return res.status(200).json({ success: true, data: response });
+  } catch (error) {
+    console.error("Maintenance confirmation Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to confirm the maintenance update." });
+  }
 };
 
 // Email the tenant behind a job that its status has changed. Only jobs tied to
@@ -385,13 +426,15 @@ export const createMaintenance = async (req, res) => {
       nextSrNo(organizationId),
     ]);
 
+    const initialStatus = payload.status || (req.user.role === "Tenant" ? "request_submitted" : "pending");
     const request = await Maintenance.create({
       ...payload,
+      status: initialStatus,
       ref,
       srNo,
       organizationId,
       createdBy,
-      statusHistory: [{ status: payload.status || "pending", at: new Date() }],
+      statusHistory: [{ status: initialStatus, at: new Date() }],
     });
 
     if (request.status === AWAITING_RESPONSE) await notifyAwaitingResponse(request, req.user);

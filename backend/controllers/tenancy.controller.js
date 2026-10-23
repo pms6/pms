@@ -14,6 +14,8 @@ import { stayDuration } from "../utils/duration.js";
 import bcrypt from "bcryptjs"; // or "bcrypt" depending on what you use
 import { sendEmail } from "../utils/sendEmail.js";
 import { findRoomOccupant, roomTakenMessage } from "../utils/roomAvailability.js";
+import { generatePropertyCode, generateRoomCode, uniqueRoomSlug } from "../utils/codes.js";
+import env from "../config/env.js";
 
 // Friendly gender label from the Tenant enum (MALE/FEMALE/OTHER/PREFER_NOT_SAY).
 const GENDER_LABEL = {
@@ -284,7 +286,7 @@ const generatePassword = () => {
   return password;
 };
 
-const loginUrl = () => `${process.env.FRONTEND_URL || "http://localhost:3000"}/login`;
+const loginUrl = () => new URL("/login", env.clientUrl).toString();
 
 const emailShell = (inner) => `
   <div style="font-family: -apple-system, Segoe UI, sans-serif; padding: 20px; max-width: 520px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px;">
@@ -1065,6 +1067,183 @@ export const getTenantDirectory = async (req, res) => {
     console.error("Get Tenant Directory Error:", error);
     return res.status(500).json({ success: false, message: "Failed to load the tenant directory." });
   }
+};
+
+// ---------------------------------------------------------------------------
+// Bulk occupancy import (Occupancy → Import Excel)
+// ---------------------------------------------------------------------------
+
+const BULK_MAX_ROWS = 500;
+const enumOf = (v, allowed, fallback) => {
+  const k = String(v || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+  return allowed.includes(k) ? k : fallback;
+};
+const dateOrNull = (v) => {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Find a record by case-insensitive exact name, or create it. Retries when the
+// generated code collides with a concurrent insert.
+async function findOrCreateProperty(r, organizationId, createdBy) {
+  const name = String(r.propertyName).trim();
+  const found = await Property.findOne({
+    organizationId, isDeleted: false, name: new RegExp(`^${escapeRegex(name)}$`, "i"),
+  });
+  if (found) return found;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await Property.create({
+        organizationId,
+        createdBy,
+        name,
+        propertyCode: await generatePropertyCode(),
+        rentalType: enumOf(r.rentalType, ["HMO", "SINGLE_LET", "SHORT_TERM", "BLOCK"], "HMO"),
+        tenantType: enumOf(r.tenantType, ["ANY", "PROFESSIONAL", "STUDENT", "SOCIAL"], "ANY"),
+        ownerName: r.ownerName || undefined,
+        address: { line1: r.addressLine1 || name, city: r.city || undefined, postcode: r.postcode || undefined },
+      });
+    } catch (err) {
+      if (!(err.code === 11000 && err.keyPattern?.propertyCode) || attempt === 4) throw err;
+    }
+  }
+}
+
+async function findOrCreateRoom(r, property, organizationId, createdBy) {
+  const roomName = String(r.roomName).trim();
+  const found = await Room.findOne({
+    organizationId, propertyId: property._id, isDeleted: false, roomName: new RegExp(`^${escapeRegex(roomName)}$`, "i"),
+  });
+  if (found) return found;
+
+  const monthlyRent = Number(r.monthlyRent || r.rent);
+  if (!Number.isFinite(monthlyRent) || monthlyRent <= 0) {
+    throw new Error(`Room "${roomName}" is new — monthlyRent (or rent) is required to create it.`);
+  }
+  const title = `${property.name} - ${roomName}`;
+  const base = {
+    organizationId,
+    propertyId: property._id,
+    createdBy,
+    title,
+    roomName,
+    roomNumber: r.roomNumber || undefined,
+    roomType: enumOf(r.roomType, ["STANDARD", "ENSUITE", "STUDIO", "MASTER", "DOUBLE", "SINGLE"], "STANDARD"),
+    occupancy: enumOf(r.occupancy, ["SINGLE", "DOUBLE", "TWIN", "FAMILY"], "SINGLE"),
+    monthlyRent,
+    securityDeposit: Number(r.securityDeposit) || undefined,
+    status: "OCCUPIED",
+    slug: await uniqueRoomSlug(title),
+  };
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await Room.create({ ...base, listingCode: await generateRoomCode() });
+    } catch (err) {
+      if (!(err.code === 11000 && err.keyPattern?.listingCode) || attempt === 4) throw err;
+    }
+  }
+}
+
+// @desc    Bulk-create Property + Room + Tenancy from spreadsheet rows.
+//          Existing properties/rooms are matched by name and reused; an already
+//          occupied room fails that row only. Rows are independent.
+// @route   POST /api/v1/tenancies/occupancy/bulk
+export const bulkImportOccupancy = async (req, res) => {
+  const organizationId = req.user.organizationId;
+  const createdBy = req.user._id;
+  const { rows, createAccounts } = req.body || {};
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ success: false, message: "rows must be a non-empty array." });
+  }
+  if (rows.length > BULK_MAX_ROWS) {
+    return res.status(400).json({ success: false, message: `Import at most ${BULK_MAX_ROWS} rows at a time.` });
+  }
+
+  let created = 0;
+  const errors = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || {};
+    const rowNo = i + 2; // spreadsheet row: header is row 1
+    try {
+      if (!r.propertyName || !r.roomName || !r.tenant) {
+        throw new Error("propertyName, roomName and tenant are required.");
+      }
+      // Check the rent a NEW room needs before creating anything, so a bad row
+      // cannot leave a brand-new empty property behind.
+      const existingProperty = await Property.findOne({
+        organizationId, isDeleted: false, name: new RegExp(`^${escapeRegex(String(r.propertyName).trim())}$`, "i"),
+      }).select("_id");
+      const existingRoom = existingProperty && await Room.exists({
+        organizationId, propertyId: existingProperty._id, isDeleted: false,
+        roomName: new RegExp(`^${escapeRegex(String(r.roomName).trim())}$`, "i"),
+      });
+      if (!existingRoom && !(Number(r.monthlyRent || r.rent) > 0)) {
+        throw new Error(`Room "${String(r.roomName).trim()}" is new — monthlyRent (or rent) is required to create it.`);
+      }
+
+      const property = await findOrCreateProperty(r, organizationId, createdBy);
+      const room = await findOrCreateRoom(r, property, organizationId, createdBy);
+
+      const occupant = await findRoomOccupant({ roomId: room._id, organizationId });
+      if (occupant) throw new Error(roomTakenMessage(occupant));
+
+      const email = String(r.tenantEmail || "").trim().toLowerCase();
+      const payload = {
+        propertyId: property._id,
+        roomId: room._id,
+        tenant: String(r.tenant).trim(),
+        tenantEmail: email,
+        startDate: dateOrNull(r.startDate),
+        fixedTermEnd: dateOrNull(r.fixedTermEnd),
+        periodicStart: dateOrNull(r.periodicStart),
+        status: TENANCY_STATUS.includes(r.tenancyStatus) ? r.tenancyStatus : "Fixed Term",
+        availability: r.availability || "Occupied",
+        rent: Number(room.monthlyRent) || 0,
+        rentPeriod: room.rentPeriod === "WEEKLY" ? "WEEKLY" : "MONTHLY",
+      };
+      payload.firstMoveInDate = await resolveFirstMoveIn(payload, organizationId);
+
+      const tenancy = await Tenancy.create({
+        ...payload,
+        organizationId,
+        createdBy,
+        property: property.name,
+        unit: room.roomNumber || room.roomName || room.title || "—",
+      });
+
+      let notify = { tenantId: null, emailSent: false };
+      if (createAccounts === true && email) {
+        notify = await provisionTenantAndNotify({
+          email, name: payload.tenant, organizationId,
+          propertyName: property.name, unit: tenancy.unit, createAccount: true,
+        });
+        if (notify.tenantId) tenancy.tenantId = notify.tenantId;
+        tenancy.welcomeEmailStatus = notify.emailSent ? "Sent" : "Failed";
+        tenancy.welcomeEmailSentAt = notify.emailSent ? new Date() : null;
+        await tenancy.save();
+      }
+      await Room.updateOne(
+        { _id: room._id },
+        { $set: { status: "OCCUPIED", ...(notify.tenantId ? { currentTenant: notify.tenantId } : {}) } }
+      );
+      created++;
+    } catch (err) {
+      const message = err.name === "ValidationError"
+        ? Object.values(err.errors).map((e) => e.message).join(", ")
+        : err.message || "Unknown error.";
+      errors.push({ row: rowNo, message });
+    }
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: { total: rows.length, created, failed: errors.length, errors },
+  });
 };
 
 export const tenancyStatuses = TENANCY_STATUS;

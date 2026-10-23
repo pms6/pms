@@ -13,6 +13,17 @@ export const MAINTENANCE_PRIORITIES = ["urgent", "high", "med", "low"];
 // Moving an entry to "awaiting_response" alerts every admin (see
 // notifyAwaitingResponse in maintenance.controller.js).
 export const MAINTENANCE_STATUSES = [
+  "request_submitted",
+  "under_review",
+  "request_acknowledged",
+  "maintenance_team_assigned",
+  "access_confirmation_required",
+  "appointment_confirmed",
+  "maintenance_visit_underway",
+  "work_in_progress",
+  "work_completed",
+  "resolution_confirmation_required",
+  "ticket_closed",
   "pending",
   "open",
   "assigned",
@@ -25,7 +36,7 @@ export const MAINTENANCE_STATUSES = [
 
 // Anything not in this list still counts as outstanding work. "closed" stays
 // here so a legacy row still reads as resolved.
-export const MAINTENANCE_RESOLVED_STATUSES = ["sorted", "closed"];
+export const MAINTENANCE_RESOLVED_STATUSES = ["ticket_closed", "sorted", "closed"];
 
 // One numbered step of the "Solution" column, e.g.
 // { title: "Property Inspection", detail: "Kamran inspected the property…" }.
@@ -176,7 +187,7 @@ const maintenanceSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: MAINTENANCE_STATUSES,
-      default: "pending",
+      default: "request_submitted",
     },
     // Every status the job has passed through, oldest first — the tenant's
     // progress tracker. Rows saved before this existed have none.

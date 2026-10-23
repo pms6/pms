@@ -22,8 +22,7 @@ const generatePassword = () => {
   return password;
 };
 
-const loginUrl = () =>
-  `${process.env.FRONTEND_URL || "http://localhost:3000"}/login`;
+const loginUrl = () => new URL("/login", env.clientUrl).toString();
 
 /**
  * Ensure the applicant has a login account, then email them their onboarding
@@ -118,8 +117,7 @@ async function setTenantOrganization(email, organizationId) {
   return true;
 }
 
-const tenantPortalUrl = () =>
-  `${process.env.FRONTEND_URL || "http://localhost:3000"}/tenant/onboarding`;
+const tenantPortalUrl = () => new URL("/tenant/onboarding", env.clientUrl).toString();
 
 async function orgDisplayName(organizationId) {
   const org = await Organization.findById(organizationId).select("name").lean();
@@ -1229,7 +1227,7 @@ export const acceptOnboardingRequest = async (req, res) => {
     if (lead.email) {
       const org = await Organization.findById(organizationId).select("name").lean();
       const orgName = org?.name || "the property team";
-      const portalUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/tenant/onboarding`;
+      const portalUrl = new URL("/tenant/onboarding", env.clientUrl).toString();
       try {
         await sendEmail({
           email: lead.email,

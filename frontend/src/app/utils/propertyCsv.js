@@ -23,19 +23,21 @@ export const CSV_COLUMNS = [
   "transportStation", "transportMinutes", "transportMode",
   "livingRoom", "amenities",
   "coverImage", "gallery", "documents",
+  "inventoryCheckedOn", "inventoryCheckedBy", "inventoryItems",
   "contractAgreementType", "contractStartDate", "contractEndDate",
   "contractRentAmount", "contractRentPeriod", "contractNoticeMonths",
   "contractDepositScheme", "contractDepositAmount",
   "contractLandlordName", "contractTenantName", "contractRollsToPeriodic", "contractNotes",
-  "roomName", "roomNumber", "roomType", "occupancy", "bathroomType", "furnished",
+  "roomName", "roomNumber", "roomLabel", "roomType", "occupancy", "bathroomType", "furnished",
   "floor", "roomSize",
-  "monthlyRent", "rentPeriod", "securityDeposit", "holdingDeposit",
+  "monthlyRent", "doubleOccupancyRent", "rentPeriod", "securityDeposit", "holdingDeposit",
   "billsOption", "billsIncluded",
-  "roomStatus", "availableFrom", "minimumTenancy", "maximumTenancy",
+  "roomStatus", "availableFrom", "availableImmediately", "minimumTenancy", "maximumTenancy",
   "shortTermLets", "daysAvailable", "referencesRequired",
   "roomAmenities", "sharedAmenities", "wifiSpeed",
   "prefSmoking", "prefGender", "prefOccupation", "prefPets", "prefCouplesWelcome",
-  "roomImages", "roomDescription", "roomNotes",
+  "prefMinAge", "prefMaxAge", "prefLanguage", "prefVegetarianPreferred",
+  "roomImages", "roomDescription", "roomNotes", "exTenants",
 ];
 
 /** Columns a row cannot be imported without. */
@@ -66,18 +68,23 @@ export const COLUMN_HELP = [
   ["coverImage", "URL of the main photo."],
   ["gallery", "Pipe-separated photo URLs."],
   ["documents", "Pipe-separated items of name::url::type (CONTRACT, INSURANCE, INVENTORY, FLOOR_PLAN, LICENCE, OTHER)."],
-  ["contract*", "Whole-property agreement: AST · COMPANY_LET · LICENCE · LODGER · OTHER, dates as yyyy-mm-dd, MONTHLY/WEEKLY, deposit scheme NONE · DPS · MYDEPOSITS · TDS."],
+  ["inventoryCheckedOn / inventoryCheckedBy", "When the property inventory was checked (yyyy-mm-dd) and by whom."],
+  ["inventoryItems", "Pipe-separated items of item::location::quantity::condition::price::notes. Only item is required; condition is NEW · GOOD · FAIR · POOR."],
+  ["contract*","Whole-property agreement: AST · COMPANY_LET · LICENCE · LODGER · OTHER, dates as yyyy-mm-dd, MONTHLY/WEEKLY, deposit scheme NONE · DPS · MYDEPOSITS · TDS."],
   ["roomName", "Leave every room column blank for a whole-property let. Otherwise required."],
+  ["roomNumber / roomLabel", "Optional door number and a short label shown on the listing."],
   ["roomType", "STANDARD · ENSUITE · STUDIO · MASTER · DOUBLE · SINGLE."],
   ["occupancy", "SINGLE · DOUBLE · TWIN · FAMILY."],
   ["bathroomType", "private · shared (lowercase)."],
   ["furnished", "true / false."],
   ["monthlyRent", "Required when the row has a room. The figure for the rentPeriod given."],
+  ["doubleOccupancyRent", "Optional second price when two people / a couple live in the room. Blank = one price only."],
   ["rentPeriod", "MONTHLY · WEEKLY."],
   ["billsOption", "YES · NO · SOME. YES and NO set every bill one way and ignore billsIncluded; only SOME reads it."],
   ["billsIncluded", "Pipe-separated: electricity | gas | water | wifi | internet | councilTax."],
   ["roomStatus", "AVAILABLE · AVAILABLE_SOON · RESERVED · OCCUPIED · MAINTENANCE."],
   ["availableFrom", "yyyy-mm-dd."],
+  ["availableImmediately", "true / false."],
   ["minimumTenancy / maximumTenancy", "Months. Blank maximum means no maximum."],
   ["shortTermLets", "true / false."],
   ["daysAvailable", "SEVEN_DAYS · WEEKDAYS · WEEKENDS."],
@@ -85,7 +92,9 @@ export const COLUMN_HELP = [
   ["roomAmenities", "Pipe-separated: single_bed | double_bed | desk | chair | wardrobe | tv | balcony | ensuite_bathroom | lockable_room | chest_of_drawers | mirror."],
   ["sharedAmenities", "Pipe-separated: wifi | washing_machine | dryer | dishwasher | shared_kitchen | parking | garden | lift | gym | security | cctv | cleaning_service | bike_storage."],
   ["pref*", "prefSmoking / prefPets: NO_PREFERENCE · YES · NO. prefGender: ANY · MALE · FEMALE. prefOccupation: ALL · STUDENTS_ONLY · NO_STUDENTS. prefCouplesWelcome: true/false."],
+  ["prefMinAge / prefMaxAge / prefLanguage / prefVegetarianPreferred", "Advertised flatmate preferences: ages as numbers, a language name, true/false."],
   ["roomImages", "Pipe-separated photo URLs for this room."],
+  ["exTenants", "Previous occupiers of this room: pipe-separated items of name::email::joinDate::endDate (dates yyyy-mm-dd). Every part is optional."],
 ];
 
 // A spreadsheet header ("Property Name", "property_name") maps to the same
@@ -94,7 +103,7 @@ const norm = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, 
 const CANON = Object.fromEntries(CSV_COLUMNS.map((c) => [norm(c), c]));
 
 /** The only columns that hold a date. See DATE HANDLING below. */
-export const DATE_COLUMNS = ["contractStartDate", "contractEndDate", "availableFrom"];
+export const DATE_COLUMNS = ["contractStartDate", "contractEndDate", "availableFrom", "inventoryCheckedOn"];
 
 // ---------------------------------------------------------------------------
 // DATE HANDLING
@@ -224,6 +233,33 @@ const documentsFrom = (value) =>
     })
     .filter((doc) => /^https?:\/\//i.test(doc.url));
 
+// item::location::quantity::condition::price::notes — only the item is required.
+const inventoryItemsFrom = (value) =>
+  list(value)
+    .map((entry) => {
+      const [item, location, quantity, condition, price, notes] = entry
+        .split("::")
+        .map((p) => (p || "").trim());
+      return {
+        item,
+        location,
+        quantity: number(quantity) ?? 1,
+        condition: enumOr(condition, ["NEW", "GOOD", "FAIR", "POOR"], "GOOD"),
+        price: number(price),
+        notes,
+      };
+    })
+    .filter((i) => i.item);
+
+// name::email::joinDate::endDate — every part optional, the server drops empties.
+const exTenantsFrom = (value) =>
+  list(value)
+    .map((entry) => {
+      const [name, email, joinDate, endDate] = entry.split("::").map((p) => (p || "").trim());
+      return { name, email, joinDate: joinDate || null, endDate: endDate || null };
+    })
+    .filter((t) => t.name || t.email || t.joinDate || t.endDate);
+
 /** The key that decides which rows belong to the same property. */
 export const groupKeyOf = (row) =>
   text(row.propertyRef) ||
@@ -233,6 +269,7 @@ const roomFrom = (row) => ({
   roomName: text(row.roomName),
   title: text(row.roomName),
   roomNumber: text(row.roomNumber),
+  roomLabel: text(row.roomLabel),
   description: text(row.roomDescription),
   roomType: enumOr(
     row.roomType,
@@ -247,6 +284,7 @@ const roomFrom = (row) => ({
     ? text(row.bathroomType).toLowerCase()
     : "shared",
   monthlyRent: number(row.monthlyRent),
+  doubleOccupancyRent: number(row.doubleOccupancyRent),
   rentPeriod: enumOr(row.rentPeriod, ["MONTHLY", "WEEKLY"], "MONTHLY"),
   securityDeposit: number(row.securityDeposit),
   holdingDeposit: number(row.holdingDeposit),
@@ -258,6 +296,7 @@ const roomFrom = (row) => ({
     "AVAILABLE"
   ),
   availableFrom: text(row.availableFrom) || null,
+  availableImmediately: boolOr(row.availableImmediately, false),
   minimumTenancy: number(row.minimumTenancy) ?? 6,
   maximumTenancy: number(row.maximumTenancy),
   shortTermLets: boolOr(row.shortTermLets, false),
@@ -283,8 +322,13 @@ const roomFrom = (row) => ({
     ),
     pets: enumOr(row.prefPets, ["NO_PREFERENCE", "YES", "NO"], "NO"),
     couplesWelcome: boolOr(row.prefCouplesWelcome, false),
+    minAge: number(row.prefMinAge),
+    maxAge: number(row.prefMaxAge),
+    language: text(row.prefLanguage),
+    vegetarianPreferred: boolOr(row.prefVegetarianPreferred, false),
   },
   notes: text(row.roomNotes),
+  exTenants: exTenantsFrom(row.exTenants),
 });
 
 const propertyFrom = (row) => {
@@ -363,6 +407,11 @@ const propertyFrom = (row) => {
       notes: text(row.contractNotes),
     },
     documents: documentsFrom(row.documents),
+    inventory: {
+      checkedOn: text(row.inventoryCheckedOn) || null,
+      checkedBy: text(row.inventoryCheckedBy),
+      items: inventoryItemsFrom(row.inventoryItems),
+    },
     coverImage: cover || gallery[0] || "",
     gallery: cover ? gallery : gallery.slice(1),
   };
@@ -443,7 +492,7 @@ export const rowsToProperties = (rows) => {
     const rent = number(row.monthlyRent);
     if (rent === null) {
       errors.push(
-        `Row ${sheetRow}: "${roomName}" needs a monthlyRent — leave every room column blank if the property is let as a whole.`
+        `Row ${sheetRow}: "${roomName}" needs a monthlyRent, so this room is skipped (the property is still added). Leave every room column blank if the property is let as a whole.`
       );
       return;
     }

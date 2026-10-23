@@ -28,6 +28,12 @@ const sameUkDay = (a, b) => {
   if (!a || !b) return true;
   return toUkPickerParts(a).date === toUkPickerParts(b).date;
 };
+const fmtQueueDate = (value) => value
+  ? new Date(value).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Europe/London" })
+  : "Not scheduled";
+const scheduleOverlaps = (task, start, due) =>
+  Boolean(task.startDate && task.dueDate && start && due &&
+    new Date(task.startDate) < new Date(due) && new Date(task.dueDate) > new Date(start));
 
 export default function TaskForm({ members, properties = [], initial, onCancel, onSave }) {
   const [form, setForm] = useState({
@@ -205,13 +211,37 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
                     >
                       {displayName(m.email).slice(0, 2).toUpperCase()}
                     </span>
-                    <span className="min-w-0">
+                    <span className="min-w-0 flex-1">
                       <span className="block text-xs font-bold text-[#0F253B] truncate">{m.email}</span>
-                      <span className="block text-[10px] font-bold text-gray-400">{m.role}</span>
+                      <span className="block text-[10px] font-bold text-gray-400">{m.role} · {m.workload?.openCount || 0} open {m.workload?.openCount === 1 ? "task" : "tasks"}{m.workload?.dueTodayCount ? ` · ${m.workload.dueTodayCount} due today` : ""}</span>
                     </span>
                   </button>
                 );
               })}
+            </div>
+          )}
+          {form.assignees.length > 0 && (
+            <div className="mt-3 space-y-3">
+              <p className="text-[11px] font-medium text-gray-400">Review current workload, open tasks and scheduled windows before assigning. Existing work is excluded from this count when editing a task.</p>
+              {members.filter((m) => form.assignees.includes(String(m.userId))).map((member) => (
+                <section key={String(member.userId)} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-xs font-bold text-[#0F253B]">{member.email}</h3>
+                    <span className="text-[10px] font-semibold text-gray-500">{member.workload?.openCount || 0} open · {member.workload?.dueTodayCount || 0} due today</span>
+                  </div>
+                  {member.workload?.tasks?.length ? (
+                    <ul className="mt-2 divide-y divide-gray-200">
+                      {member.workload.tasks.map((task) => (
+                        <li key={task._id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2 text-[11px]">
+                          <span className="font-semibold text-[#0F253B]">{task.title}{task.property ? ` · ${task.property}` : ""}</span>
+                          <span className="text-gray-500">{task.status} · {task.priority} · Due {fmtQueueDate(task.dueDate)}{scheduleOverlaps(task, form.startDate, form.dueDate) ? <strong className="ml-2 text-red-600">Schedule overlap</strong> : null}</span>
+                        </li>
+                      ))}
+                      {member.workload.openCount > member.workload.tasks.length && <li className="pt-2 text-[10px] text-gray-400">and {member.workload.openCount - member.workload.tasks.length} more open tasks</li>}
+                    </ul>
+                  ) : <p className="mt-2 text-[11px] text-gray-400">No open tasks currently assigned.</p>}
+                </section>
+              ))}
             </div>
           )}
         </div>

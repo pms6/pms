@@ -7,6 +7,7 @@ import {
   createMaintenance,
   updateMaintenance,
   updateMaintenanceStatus,
+  confirmMaintenanceStep,
   addMaintenanceComment,
   editMaintenanceComment,
   deleteMaintenance,
@@ -25,6 +26,7 @@ router.get("/stats", staffOnly, getMaintenanceStats);
 router.get("/", getMaintenance);
 router.get("/:id", getMaintenanceById);
 router.post("/", createMaintenance);
+router.post("/:id/tenant-confirmation", confirmMaintenanceStep);
 // A tenant may list, read and raise their own requests (the controller scopes
 // those to them). Editing, deleting and progressing a job is the office's
 // work — without staffOnly a tenant could rewrite any request in the org.

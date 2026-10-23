@@ -43,14 +43,25 @@ import { guardModalClose } from "@/app/Shared/modalGuard";
 // covers one stuck on somebody's answer (setting it alerts every admin),
 // "on_hold" covers one paused waiting on something else (parts, access), and
 // "sorted" covers one that is done.
-export const STATUSES = ["pending", "assigned", "in_progress", "awaiting_response", "on_hold", "sorted"];
+export const STATUSES = ["request_submitted", "under_review", "request_acknowledged", "maintenance_team_assigned", "access_confirmation_required", "appointment_confirmed", "maintenance_visit_underway", "work_in_progress", "work_completed", "resolution_confirmation_required", "ticket_closed", "pending", "assigned", "in_progress", "awaiting_response", "on_hold", "sorted"];
 // Still counts a legacy "closed" row as resolved so old data reads correctly.
-export const RESOLVED_STATUSES = ["sorted", "closed"];
+export const RESOLVED_STATUSES = ["ticket_closed", "sorted", "closed"];
 const PRIORITIES = ["urgent", "high", "med", "low"];
 
 // Tones cover the legacy "open" / "closed" values too, so an un-migrated row
 // still gets a coloured badge.
 const STATUS_TONE = {
+  request_submitted: "blue",
+  under_review: "amber",
+  request_acknowledged: "blue",
+  maintenance_team_assigned: "blue",
+  access_confirmation_required: "amber",
+  appointment_confirmed: "blue",
+  maintenance_visit_underway: "orange",
+  work_in_progress: "orange",
+  work_completed: "green",
+  resolution_confirmation_required: "amber",
+  ticket_closed: "green",
   pending: "amber",
   open: "blue",
   assigned: "blue",
