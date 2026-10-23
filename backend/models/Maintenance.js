@@ -171,6 +171,8 @@ const maintenanceSchema = new mongoose.Schema(
     },
 
     reportedBy: { type: String, trim: true, default: "" },
+    // Set by the API when the tenant portal creates this request.
+    tenantReported: { type: Boolean, default: false },
 
     supplierId: {
       type: mongoose.Schema.Types.ObjectId,

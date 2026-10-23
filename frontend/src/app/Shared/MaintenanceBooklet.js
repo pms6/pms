@@ -43,9 +43,15 @@ import { guardModalClose } from "@/app/Shared/modalGuard";
 // covers one stuck on somebody's answer (setting it alerts every admin),
 // "on_hold" covers one paused waiting on something else (parts, access), and
 // "sorted" covers one that is done.
-export const STATUSES = ["request_submitted", "under_review", "request_acknowledged", "maintenance_team_assigned", "access_confirmation_required", "appointment_confirmed", "maintenance_visit_underway", "work_in_progress", "work_completed", "resolution_confirmation_required", "ticket_closed", "pending", "assigned", "in_progress", "awaiting_response", "on_hold", "sorted"];
+export const STATUSES = ["pending", "assigned", "in_progress", "awaiting_response", "on_hold", "sorted"];
+const TENANT_WORKFLOW_STATUSES = [
+  "request_submitted", "under_review", "request_acknowledged",
+  "maintenance_team_assigned", "access_confirmation_required",
+  "appointment_confirmed", "maintenance_visit_underway", "work_in_progress",
+  "work_completed", "resolution_confirmation_required", "ticket_closed",
+];
 // Still counts a legacy "closed" row as resolved so old data reads correctly.
-export const RESOLVED_STATUSES = ["ticket_closed", "sorted", "closed"];
+export const RESOLVED_STATUSES = ["sorted", "closed"];
 const PRIORITIES = ["urgent", "high", "med", "low"];
 
 // Tones cover the legacy "open" / "closed" values too, so an un-migrated row
@@ -72,11 +78,29 @@ const STATUS_TONE = {
   closed: "gray",
 };
 
-// The options for a status <select>, including the row's current value when it
-// is a legacy one no longer offered — so editing such a row still works and the
-// operator can move it onto the new vocabulary.
-const statusOptions = (current) =>
-  current && !STATUSES.includes(current) ? [current, ...STATUSES] : STATUSES;
+const statusOptions = (current, tenantReported = false) => {
+  const options = tenantReported ? [...STATUSES, ...TENANT_WORKFLOW_STATUSES] : STATUSES;
+  return current && !options.includes(current) ? [current, ...options] : options;
+};
+const displayStatus = (status) => {
+  const legacyStatus = {
+    request_submitted: "pending",
+    under_review: "pending",
+    request_acknowledged: "assigned",
+    maintenance_team_assigned: "assigned",
+    access_confirmation_required: "assigned",
+    appointment_confirmed: "assigned",
+    maintenance_visit_underway: "in_progress",
+    work_in_progress: "in_progress",
+    work_completed: "sorted",
+    resolution_confirmation_required: "awaiting_response",
+    ticket_closed: "sorted",
+    open: "pending",
+    closed: "sorted",
+  };
+  if (legacyStatus[status]) return legacyStatus[status];
+  return STATUSES.includes(status) ? status : "pending";
+};
 const PRIORITY_TONE = { urgent: "red", high: "amber", med: "blue", low: "gray" };
 
 const nice = (s) => String(s || "").replace(/_/g, " ");
@@ -1072,8 +1096,13 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
   // fallback for rows written before srNo existed).
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
+    const displayRows = list.map((m) => ({
+      ...m,
+      sourceStatus: m.status,
+      status: displayStatus(m.status),
+    }));
     const done = (m) => (RESOLVED_STATUSES.includes(m.status) ? 1 : 0);
-    return [...list]
+    return displayRows
       .sort(
         (a, b) =>
           done(a) - done(b) ||
@@ -1102,14 +1131,11 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
       );
   }, [list, filter, q, propertyFilter, roomFilter, propertyName, roomName]);
 
-  // The sheet is read one status at a time — a card per stage of the work, in
-  // the order an entry moves through them. A row left on a retired status
-  // ("open" / "closed") lands in a trailing card so it is never hidden; that
-  // card only appears when such a row exists.
+  // The sheet is read one status at a time — every row is normalized into one
+  // of the current status groups, including requests from the tenant portal.
   const sections = useMemo(() => {
     const byStatus = new Map(STATUSES.map((st) => [st, []]));
-    const legacy = [];
-    rows.forEach((m) => (byStatus.get(m.status) || legacy).push(m));
+    rows.forEach((m) => byStatus.get(displayStatus(m.status)).push(m));
 
     const out = STATUSES.map((st) => ({
       key: st,
@@ -1118,9 +1144,6 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
       tone: STATUS_TONE[st],
       empty: `Nothing ${nice(st)}`,
     }));
-    if (legacy.length) {
-      out.push({ key: "__legacy", title: "Other", rows: legacy, tone: "gray", empty: "Nothing here" });
-    }
     // Picking a status above means only that card is wanted — the rest would
     // all be empty by definition.
     return filter ? out.filter((sec) => sec.key === filter) : out;
@@ -1163,9 +1186,9 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
   };
 
   const changeStatus = async (m, status) => {
-    if (status === m.status) return;
+    if (status === (m.sourceStatus || m.status)) return;
     const snapshot = list;
-    setList((prev) => prev.map((x) => (x._id === m._id ? { ...x, status } : x)));
+    setList((prev) => prev.map((x) => (x._id === m._id ? { ...x, status, sourceStatus: status } : x)));
     try {
       await api.patch(`/maintenance/${m._id}/status`, { status });
       const statsRes = await api.get("/maintenance/stats");
@@ -1442,6 +1465,11 @@ function FragmentRow({ m, srNo, open, steps, onToggle, onStatus, onView, onEdit,
           <p className="font-semibold text-[#0F253B]">{m.title}</p>
           <p className="text-[11px] font-medium text-gray-400 flex items-center gap-2">
             {m.category || "General"}
+            {m.tenantReported && (
+              <span className="inline-flex items-center rounded-full bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">
+                Tenant reported
+              </span>
+            )}
             {attachments > 0 && (
               <span className="inline-flex items-center gap-1 text-gray-400"><ImageIcon size={11} />{attachments}</span>
             )}
@@ -1454,11 +1482,11 @@ function FragmentRow({ m, srNo, open, steps, onToggle, onStatus, onView, onEdit,
         </td>
         <td className="px-4 py-3">
           <select
-            value={m.status}
+            value={m.tenantReported ? (m.sourceStatus || m.status) : m.status}
             onChange={(e) => onStatus(e.target.value)}
             className={`w-full px-2.5 py-1.5 rounded-lg text-[11px] font-bold capitalize outline-none focus:ring-2 focus:ring-[#F47C3C] border border-gray-100 bg-gray-50 text-[#0F253B]`}
           >
-            {statusOptions(m.status).map((s) => (
+            {statusOptions(m.tenantReported ? (m.sourceStatus || m.status) : m.status, m.tenantReported).map((s) => (
               <option key={s} value={s}>{nice(s)}</option>
             ))}
           </select>

@@ -393,6 +393,7 @@ export const createMaintenance = async (req, res) => {
     // For a tenant, stamp the request with THEIR property/room and name so the
     // operator sees who reported it and where — the tenant can't set these.
     if (req.user.role === "Tenant") {
+      payload.tenantReported = true;
       // A tenant's report must come with evidence — at least one photo or
       // video of the problem. The portal enforces this too; this stops a
       // report sent straight to the API from skipping it.
