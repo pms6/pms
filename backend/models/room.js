@@ -84,6 +84,9 @@ const roomSchema = new mongoose.Schema(
 
     floor: String,
 
+    // Where the room sits in the property, e.g. "Back of house, next to kitchen".
+    location: String,
+
     roomSize: String,
 
     bathroomType: {

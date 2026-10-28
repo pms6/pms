@@ -127,6 +127,7 @@ const EMPTY = {
   daysAvailable: "SEVEN_DAYS",
   referencesRequired: null,
   floor: "",
+  location: "",
   furnished: true,
   billsOption: "SOME",
   billsIncluded: { gas: false, electricity: false, water: false, internet: false },
@@ -184,6 +185,7 @@ const fromApi = (room) => ({
   daysAvailable: room.daysAvailable || "SEVEN_DAYS",
   referencesRequired: room.referencesRequired ?? null,
   floor: room.floor || "",
+  location: room.location || "",
   furnished: room.furnished !== undefined ? room.furnished : true,
   billsOption: room.billsOption || "SOME",
   billsIncluded: { ...EMPTY.billsIncluded, ...(room.billsIncluded || {}) },
@@ -464,6 +466,7 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
         bathroomType: form.ensuite ? "private" : "shared",
         furnished: form.furnished,
         floor: form.floor.trim() || undefined,
+        location: form.location.trim(),
         monthlyRent: Number(form.monthlyRent),
         // Blank clears it — the room then has one price only.
         doubleOccupancyRent: Number(form.doubleOccupancyRent) > 0 ? Number(form.doubleOccupancyRent) : null,
@@ -606,6 +609,9 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
             </Field>
             <Field label="Floor">
               <input className={FIELD} value={form.floor} onChange={(e) => setField("floor", e.target.value)} placeholder="e.g., First, 2" />
+            </Field>
+            <Field label="Location">
+              <input className={FIELD} value={form.location} onChange={(e) => setField("location", e.target.value)} placeholder="e.g., Back of house, near kitchen" />
             </Field>
           </div>
 

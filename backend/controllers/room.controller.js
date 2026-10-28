@@ -91,6 +91,7 @@ export const createRoom = async (req, res) => {
       manualOccupancy,
       furnished,
       floor,
+      location,
       roomSize,
       bathroomType,
       monthlyRent,
@@ -167,6 +168,7 @@ export const createRoom = async (req, res) => {
       manualOccupancy,
       furnished,
       floor,
+      location,
       roomSize,
       bathroomType,
       monthlyRent,
@@ -447,6 +449,7 @@ export const updateRoom = async (req, res) => {
       manualOccupancy,
       furnished,
       floor,
+      location,
       roomSize,
       bathroomType,
       monthlyRent,
@@ -487,6 +490,7 @@ export const updateRoom = async (req, res) => {
     if (manualOccupancy !== undefined) room.manualOccupancy = manualOccupancy;
     if (furnished !== undefined) room.furnished = furnished;
     if (floor !== undefined) room.floor = floor;
+    if (location !== undefined) room.location = location;
     if (roomSize !== undefined) room.roomSize = roomSize;
     if (bathroomType) room.bathroomType = bathroomType;
     if (monthlyRent) room.monthlyRent = monthlyRent;
