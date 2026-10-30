@@ -9,7 +9,7 @@
 // /admin/tasks/<id>/edit instead of opening it in place.
 
 import { useState } from "react";
-import { X, Loader2, Paperclip, Lock } from "lucide-react";
+import { X, Loader2, Paperclip, Lock, Bell } from "lucide-react";
 import { uploadAnyFileToCloudinary } from "../../utils/uploadToCloudinary";
 import {
   TASK_PRIORITIES,
@@ -55,6 +55,7 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
     dueDate: initial?.dueDate ? new Date(initial.dueDate).toISOString() : "",
     adminRemarks: initial?.adminRemarks || "",
     isPrivate: Boolean(initial?.isPrivate),
+    noticeGiven: Boolean(initial?.noticeGiven),
     // Whose action is required first on a shared task. "" lets the backend
     // fall back to the first assignee.
     actionOwnerId: initial?.actionOwner?.userId ? String(initial.actionOwner.userId) : "",
@@ -286,6 +287,26 @@ export default function TaskForm({ members, properties = [], initial, onCancel, 
               organization owner — unless somebody in Operations is on it, which
               opens it to every role. Tick this to keep an Operations task
               restricted too.
+            </span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-2.5 px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={form.noticeGiven}
+            onChange={(e) => setForm((f) => ({ ...f, noticeGiven: e.target.checked }))}
+            className="accent-[#F47C3C] mt-0.5"
+          />
+          <span>
+            <span className="flex items-center gap-1.5 text-xs font-bold text-[#0F253B]">
+              <Bell size={12} className="text-[#F47C3C]" /> Access notice
+              <span className={form.noticeGiven ? "text-emerald-600" : "text-amber-600"}>
+                · {form.noticeGiven ? "Done" : "Pending"}
+              </span>
+            </span>
+            <span className="block text-[11px] font-medium text-gray-400 mt-0.5">
+              Mark done if the access notice has already been given. You can update this later.
             </span>
           </span>
         </label>

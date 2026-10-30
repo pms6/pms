@@ -1095,6 +1095,7 @@ export const createTask = async (req, res) => {
       adminRemarks,
       propertyId,
       isPrivate,
+      noticeGiven,
       actionOwnerId,
     } = req.body;
 
@@ -1139,6 +1140,10 @@ export const createTask = async (req, res) => {
       dueDate: due,
       attachments: sanitizeAttachments(attachments, req.user),
       adminRemarks: adminRemarks?.trim() || "",
+      noticeGiven: Boolean(noticeGiven),
+      ...(noticeGiven
+        ? { noticeGivenAt: new Date(), noticeGivenBy: req.user._id }
+        : {}),
       ...(normalized === "Done"
         ? { completedAt: new Date(), completedBy: req.user._id }
         : {}),
@@ -1203,6 +1208,7 @@ export const updateTask = async (req, res) => {
       adminRemarks,
       propertyId,
       isPrivate,
+      noticeGiven,
       actionOwnerId,
     } = req.body;
 
@@ -1253,6 +1259,12 @@ export const updateTask = async (req, res) => {
       );
     }
     if (isPrivate !== undefined) task.isPrivate = Boolean(isPrivate);
+    if (noticeGiven !== undefined) {
+      task.noticeGiven = Boolean(noticeGiven);
+      task.noticeGivenAt = task.noticeGiven ? new Date() : null;
+      task.noticeGivenBy = task.noticeGiven ? req.user._id : null;
+      if (!task.noticeGiven) task.noticeReminderDueDate = null;
+    }
 
     if (priority !== undefined && TASK_PRIORITIES.includes(priority)) task.priority = priority;
     if (adminRemarks !== undefined) task.adminRemarks = adminRemarks.trim();
