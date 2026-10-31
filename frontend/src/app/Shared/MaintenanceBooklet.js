@@ -1513,6 +1513,7 @@ function FragmentRow({ m, srNo, open, onToggle, onStatus, onView, onEdit, onDele
               {steps.length > 0 && <span className="text-[10px] font-bold text-gray-400">({steps.length})</span>}
             </button>
           )}
+          {!hasSolution && <span className="text-xs text-gray-400">solution</span>}
         </td>
         <td className="px-4 py-3">
           <div className="flex items-center justify-end gap-1">
