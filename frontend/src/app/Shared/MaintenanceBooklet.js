@@ -8,13 +8,7 @@ import {
   Trash2,
   Loader2,
   Search,
-  ChevronDown,
-  ChevronRight,
   Eye,
-  Wrench,
-  Building2,
-  User,
-  PoundSterling,
   ListOrdered,
   UploadCloud,
   Download,
@@ -715,42 +709,6 @@ function SolutionSteps({ m }) {
 }
 
 /* ------------------------------------------------------------------ *
- * Expanded row — a quick look without leaving the sheet
- * ------------------------------------------------------------------ */
-function SolutionDetail({ m }) {
-  const media = mediaOf(m);
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 px-5 py-4 bg-gray-50/70">
-      <div className="lg:col-span-2">
-        <SolutionSteps m={m} />
-      </div>
-
-      <div className="space-y-2 text-xs text-gray-500 font-medium">
-        <p className="flex items-center gap-1.5"><Building2 size={12} className="text-gray-300" />{m.property || "—"}{m.room ? ` · ${m.room}` : ""}</p>
-        <p className="flex items-center gap-1.5"><User size={12} className="text-gray-300" />Reported by {m.reportedBy || "—"}</p>
-        <p className="flex items-center gap-1.5"><Wrench size={12} className="text-gray-300" />{m.supplier || "Unassigned"} · {m.category || "General"}</p>
-        <p className="flex items-center gap-1.5"><PoundSterling size={12} className="text-gray-300" />{m.cost != null ? money(m.cost) : "No cost"}</p>
-        <p className="flex items-center gap-1.5">
-          <Badge tone={PRIORITY_TONE[m.priority] || "gray"}>{m.priority}</Badge>
-          <span className="text-[10px] font-bold text-gray-300">{m.ref}</span>
-        </p>
-        {m.description && <p className="pt-1 whitespace-pre-line text-gray-500">{m.description}</p>}
-        {media.length > 0 && (
-          <div className="grid grid-cols-2 gap-2 pt-1">
-            {media.slice(0, 4).map((item) => (
-              <MediaTile key={item.url} item={item} className="w-full h-20" />
-            ))}
-            {media.length > 4 && (
-              <p className="col-span-2 text-[11px] font-bold text-gray-400">+{media.length - 4} more — open the entry to see them all</p>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ *
  * View — the whole booklet entry, read-only
  * ------------------------------------------------------------------ */
 function ViewModal({ entry, srNo, onClose, onEdit, onChanged }) {
@@ -1017,7 +975,6 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
   const [q, setQ] = useState("");
   const [modal, setModal] = useState(null); // {} = create, entry = edit
   const [viewing, setViewing] = useState(null); // read-only detail panel
-  const [expanded, setExpanded] = useState(null);
   const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
@@ -1345,8 +1302,6 @@ export default function MaintenanceBooklet({ subtitle = "Repair issues, status a
               rows={sec.rows}
               posOf={posOf}
               emptyMessage={filtered ? `No ${sec.title} entries match this filter` : sec.empty}
-              expanded={expanded}
-              onToggle={setExpanded}
               onStatus={changeStatus}
               onView={setViewing}
               onEdit={setModal}
@@ -1404,8 +1359,6 @@ function BookletSection({
   rows,
   posOf,
   emptyMessage,
-  expanded,
-  onToggle,
   onStatus,
   onView,
   onEdit,
@@ -1438,22 +1391,17 @@ function BookletSection({
             {rows.length === 0 ? (
               <tr><td colSpan={8} className="px-5 py-14 text-center text-sm text-gray-400">{emptyMessage}</td></tr>
             ) : (
-              rows.map((m) => {
-                const open = expanded === m._id;
-                return (
-                  <FragmentRow
-                    key={m._id}
-                    m={m}
-                    srNo={posOf.get(m._id)}
-                    open={open}
-                    onToggle={() => onToggle(open ? null : m._id)}
-                    onStatus={(st) => onStatus(m, st)}
-                    onView={() => onView(m)}
-                    onEdit={() => onEdit(m)}
-                    onDelete={() => onDelete(m)}
-                  />
-                );
-              })
+              rows.map((m) => (
+                <FragmentRow
+                  key={m._id}
+                  m={m}
+                  srNo={posOf.get(m._id)}
+                  onStatus={(st) => onStatus(m, st)}
+                  onView={() => onView(m)}
+                  onEdit={() => onEdit(m)}
+                  onDelete={() => onDelete(m)}
+                />
+              ))
             )}
           </tbody>
         </table>
@@ -1462,8 +1410,8 @@ function BookletSection({
   );
 }
 
-// A booklet line plus its (collapsed) solution panel.
-function FragmentRow({ m, srNo, open, onToggle, onStatus, onView, onEdit, onDelete }) {
+// A booklet line with actions to view, edit, or delete the full entry.
+function FragmentRow({ m, srNo, onStatus, onView, onEdit, onDelete }) {
   const attachments = mediaOf(m).length;
   return (
     <>
@@ -1503,10 +1451,7 @@ function FragmentRow({ m, srNo, open, onToggle, onStatus, onView, onEdit, onDele
         </td>
         <td className="px-4 py-3 text-right font-bold text-[#0F253B] whitespace-nowrap">{m.cost != null ? money(m.cost) : "—"}</td>
         <td className="px-4 py-3">
-          <button onClick={onToggle} className="flex items-center gap-1.5 text-left text-xs font-bold text-[#F47C3C] hover:underline">
-            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <span>Solution</span>
-          </button>
+          <span className="text-xs text-[#F47C3C] hover:underline font-bold">Solution</span>
         </td>
         <td className="px-4 py-3">
           <div className="flex items-center justify-end gap-1">
@@ -1516,11 +1461,6 @@ function FragmentRow({ m, srNo, open, onToggle, onStatus, onView, onEdit, onDele
           </div>
         </td>
       </tr>
-      {open && (
-        <tr className="border-b border-gray-100">
-          <td colSpan={8} className="p-0"><SolutionDetail m={m} /></td>
-        </tr>
-      )}
     </>
   );
 }
