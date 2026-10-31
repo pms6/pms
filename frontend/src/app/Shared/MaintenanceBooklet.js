@@ -677,14 +677,25 @@ function RequestModal({ initial, srNo, properties, suppliers, onClose, onSave })
  * The Solution column, printed the way the booklet prints it: procedure
  * heading, then the numbered steps.
  * ------------------------------------------------------------------ */
+const solutionStepsOf = (m) =>
+  (Array.isArray(m.solutionSteps) ? m.solutionSteps : []).filter(
+    (step) =>
+      (typeof step?.title === "string" && step.title.trim()) ||
+      (typeof step?.detail === "string" && step.detail.trim())
+  );
+const solutionTitleOf = (m) =>
+  typeof m.solutionTitle === "string" ? m.solutionTitle.trim() : "";
+
 function SolutionSteps({ m }) {
-  const steps = m.solutionSteps || [];
+  const steps = solutionStepsOf(m);
+  const title = solutionTitleOf(m);
+
+  if (!title && steps.length === 0) return null;
+
   return (
     <>
-      <p className="text-sm font-bold text-[#0F253B]">{m.solutionTitle || "Solution"}</p>
-      {steps.length === 0 ? (
-        <p className="mt-2 text-sm text-gray-400 font-medium">No solution recorded yet.</p>
-      ) : (
+      <p className="text-sm font-bold text-[#0F253B]">{title || "Solution"}</p>
+      {steps.length > 0 && (
         <ol className="mt-3 space-y-3">
           {steps.map((s, i) => (
             <li key={i} className="flex gap-3">
@@ -692,8 +703,8 @@ function SolutionSteps({ m }) {
                 {i + 1}
               </span>
               <div className="min-w-0">
-                {s.title && <p className="text-sm font-bold text-[#0F253B]">{s.title}</p>}
-                {s.detail && <p className="text-sm text-gray-500 font-medium leading-relaxed">{s.detail}</p>}
+                {s.title?.trim() && <p className="text-sm font-bold text-[#0F253B]">{s.title}</p>}
+                {s.detail?.trim() && <p className="text-sm text-gray-500 font-medium leading-relaxed">{s.detail}</p>}
               </div>
             </li>
           ))}
@@ -1435,7 +1446,6 @@ function BookletSection({
                     m={m}
                     srNo={posOf.get(m._id)}
                     open={open}
-                    steps={m.solutionSteps?.length || 0}
                     onToggle={() => onToggle(open ? null : m._id)}
                     onStatus={(st) => onStatus(m, st)}
                     onView={() => onView(m)}
@@ -1453,8 +1463,11 @@ function BookletSection({
 }
 
 // A booklet line plus its (collapsed) solution panel.
-function FragmentRow({ m, srNo, open, steps, onToggle, onStatus, onView, onEdit, onDelete }) {
+function FragmentRow({ m, srNo, open, onToggle, onStatus, onView, onEdit, onDelete }) {
   const attachments = mediaOf(m).length;
+  const steps = solutionStepsOf(m);
+  const solutionTitle = solutionTitleOf(m);
+  const hasSolution = solutionTitle || steps.length > 0;
   return (
     <>
       <tr className="border-b border-gray-50 hover:bg-gray-50/50 align-top">
@@ -1493,13 +1506,13 @@ function FragmentRow({ m, srNo, open, steps, onToggle, onStatus, onView, onEdit,
         </td>
         <td className="px-4 py-3 text-right font-bold text-[#0F253B] whitespace-nowrap">{m.cost != null ? money(m.cost) : "—"}</td>
         <td className="px-4 py-3">
-          <button onClick={onToggle} className="flex items-center gap-1.5 text-left text-xs font-bold text-[#F47C3C] hover:underline">
-            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <span className="truncate max-w-[220px]">
-              {m.solutionTitle || (steps ? "Solution" : "No solution yet")}
-            </span>
-            {steps > 0 && <span className="text-[10px] font-bold text-gray-400">({steps})</span>}
-          </button>
+          {hasSolution && (
+            <button onClick={onToggle} className="flex items-center gap-1.5 text-left text-xs font-bold text-[#F47C3C] hover:underline">
+              {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <span className="truncate max-w-[220px]">{solutionTitle || "Solution"}</span>
+              {steps.length > 0 && <span className="text-[10px] font-bold text-gray-400">({steps.length})</span>}
+            </button>
+          )}
         </td>
         <td className="px-4 py-3">
           <div className="flex items-center justify-end gap-1">
