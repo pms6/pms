@@ -1465,9 +1465,6 @@ function BookletSection({
 // A booklet line plus its (collapsed) solution panel.
 function FragmentRow({ m, srNo, open, onToggle, onStatus, onView, onEdit, onDelete }) {
   const attachments = mediaOf(m).length;
-  const steps = solutionStepsOf(m);
-  const solutionTitle = solutionTitleOf(m);
-  const hasSolution = solutionTitle || steps.length > 0;
   return (
     <>
       <tr className="border-b border-gray-50 hover:bg-gray-50/50 align-top">
@@ -1506,14 +1503,10 @@ function FragmentRow({ m, srNo, open, onToggle, onStatus, onView, onEdit, onDele
         </td>
         <td className="px-4 py-3 text-right font-bold text-[#0F253B] whitespace-nowrap">{m.cost != null ? money(m.cost) : "—"}</td>
         <td className="px-4 py-3">
-          {hasSolution && (
-            <button onClick={onToggle} className="flex items-center gap-1.5 text-left text-xs font-bold text-[#F47C3C] hover:underline">
-              {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              <span className="truncate max-w-[220px]">{solutionTitle || "Solution"}</span>
-              {steps.length > 0 && <span className="text-[10px] font-bold text-gray-400">({steps.length})</span>}
-            </button>
-          )}
-          {!hasSolution && <span className="text-xs text-gray-400">solution</span>}
+          <button onClick={onToggle} className="flex items-center gap-1.5 text-left text-xs font-bold text-[#F47C3C] hover:underline">
+            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <span>Solution</span>
+          </button>
         </td>
         <td className="px-4 py-3">
           <div className="flex items-center justify-end gap-1">
