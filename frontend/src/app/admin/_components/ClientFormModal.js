@@ -29,6 +29,7 @@ const emptyForm = {
   room: "",
   roomType: "",
   tenant: "",
+  exTenant: "",
   email: "",
   phone: "",
   gender: "",
@@ -241,10 +242,19 @@ export default function ClientFormModal({ initial, properties, onClose, onSave }
           </div>
 
           {/* Who */}
-          <div className="grid sm:grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-3 gap-3">
             <div>
               <label className={LABEL}>Client name *</label>
               <input className={FIELD} value={form.tenant} onChange={set("tenant")} required />
+            </div>
+            <div>
+              <label className={LABEL}>Ex-Tenant name</label>
+              <input
+                className={FIELD}
+                value={form.exTenant}
+                onChange={set("exTenant")}
+                placeholder="Previous tenant"
+              />
             </div>
             <div>
               <label className={LABEL}>Contact number</label>

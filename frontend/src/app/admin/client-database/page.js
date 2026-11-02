@@ -35,6 +35,7 @@ const COLUMNS = [
   { header: "No of Rooms", value: (r) => r.roomCount },
   { header: "Room Status", value: (r) => ROOM_STATUS_LABEL[r.roomStatus] || r.roomStatus || "" },
   { header: "Tenants' Names", value: (r) => r.tenant },
+  { header: "Ex-Tenant", value: (r) => r.exTenant },
   { header: "Gender & Nationality", value: (r) => r.genderNationality },
   { header: "Room Type", value: (r) => r.roomType },
   { header: "Contact #", value: (r) => r.phone },
@@ -176,6 +177,7 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
       title: "Client",
       rows: [
         { label: "Name", value: r.tenant },
+        { label: "Ex-Tenant", value: r.exTenant },
         { label: "Gender & nationality", value: r.genderNationality },
         { label: "Contact", value: r.phone },
         { label: "Email", value: r.email },
@@ -318,7 +320,7 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
           <input
             value={f.search}
             onChange={set("search")}
-            placeholder="Search client, property, room, email, phone or nationality…"
+            placeholder="Search client, ex-tenant, property, room, email, phone or nationality…"
             className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-100 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-[#F47C3C]"
           />
         </div>
@@ -376,6 +378,7 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
                 <th className="px-5 py-3 text-center">Rooms</th>
                 <th className="px-5 py-3">Room status</th>
                 <th className="px-5 py-3">Client</th>
+                <th className="px-5 py-3">Ex-Tenant</th>
                 <th className="px-5 py-3">Gender &amp; Nationality</th>
                 <th className="px-5 py-3">Room type</th>
                 <th className="px-5 py-3">Contact</th>
@@ -391,9 +394,9 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={16} className="px-5 py-10 text-center text-gray-400">Loading the client database…</td></tr>
+                <tr><td colSpan={17} className="px-5 py-10 text-center text-gray-400">Loading the client database…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={16} className="px-5 py-10 text-center text-gray-400">No clients match these filters</td></tr>
+                <tr><td colSpan={17} className="px-5 py-10 text-center text-gray-400">No clients match these filters</td></tr>
               ) : (
                 rows.map((r) => (
                   <tr
@@ -456,6 +459,7 @@ export default function AdminClientDatabase({ basePath = "/admin" }) {
                         {r.room || "—"}{r.email ? ` · ${r.email}` : ""}
                       </p>
                     </td>
+                    <td className="px-5 py-3 text-gray-500">{r.exTenant || "—"}</td>
                     <td className="px-5 py-3 text-gray-500">{r.genderNationality || "—"}</td>
                     <td className="px-5 py-3 text-gray-500">{r.roomType || "—"}</td>
                     <td className="px-5 py-3 text-gray-500">{r.phone || "—"}</td>

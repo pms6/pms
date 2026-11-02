@@ -31,6 +31,7 @@ const EDITABLE_KEYS = [
   "room",
   "roomType",
   "tenant",
+  "exTenant",
   "email",
   "phone",
   "gender",
@@ -264,6 +265,7 @@ export const getClientDatabase = async (req, res) => {
         roomId: c.roomId ? String(c.roomId) : "",
         room: c.room || "",
         tenant: c.tenant,
+        exTenant: c.exTenant || "",
         genderNationality: genderAndNationality(c),
         gender: c.gender || "",
         nationality: c.nationality || "",
@@ -304,7 +306,7 @@ export const getClientDatabase = async (req, res) => {
     if (search) {
       const needle = search.toLowerCase();
       rows = rows.filter((r) =>
-        [r.tenant, r.property, r.room, r.email, r.phone, r.nationality, r.agent, r.bank]
+        [r.tenant, r.exTenant, r.property, r.room, r.email, r.phone, r.nationality, r.agent, r.bank]
           .filter(Boolean)
           .some((field) => String(field).toLowerCase().includes(needle))
       );

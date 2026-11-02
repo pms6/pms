@@ -1,26 +1,5 @@
 import mongoose from "mongoose";
 
-// The client database — "Database Template .xlsx" as a register the office
-// keeps by hand.
-//
-// This used to be a read-only VIEW over CheckIn: every check-in appeared here
-// automatically, and editing a client edited their check-in. That link is gone
-// on purpose. The two registers record different things and are maintained by
-// different people, so a client is now typed into this collection directly and
-// a check-in never creates, updates or deletes one.
-//
-// What that means in practice:
-//   • Adding a check-in does NOT add a client here.
-//   • Deleting a client here does NOT touch any check-in.
-//   • The same person can exist in both, with different details, and neither
-//     register corrects the other.
-//
-// The contract dates are the CURRENT contract's, and firstMoveInDate is the
-// client's original move-in — the two are independent on purpose, so renewing a
-// contract cannot shorten how long the client has been with us. Room rented date
-// and check-in date deliberately have no place here — they belong to the
-// check-in register, which is where they are managed.
-
 export const CLIENT_STATUSES = ["ACTIVE", "PAST"];
 
 // The client's signed contract, as a single file — one PDF (or scanned
@@ -79,6 +58,7 @@ const clientSchema = new mongoose.Schema(
     roomType: { type: String, trim: true, default: "" },
 
     tenant: { type: String, trim: true, required: true },
+    exTenant: { type: String, trim: true, default: "" },
 
     email: { type: String, trim: true, lowercase: true, default: "" },
     phone: { type: String, trim: true, default: "" },
