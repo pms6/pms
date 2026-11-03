@@ -892,8 +892,11 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
         <Panel title="Photos">
           <div>
             <label className={LABEL}>
-              Room Images {uploading && <Loader2 size={14} className="inline animate-spin ml-2" />}
+              Room cover and gallery images {uploading && <Loader2 size={14} className="inline animate-spin ml-2" />}
             </label>
+            <p className="text-xs text-gray-400 font-medium mb-3">
+              The first image is the room cover; the remaining images make up the gallery. Select “Make cover” to change the cover.
+            </p>
             <div
               onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
@@ -931,16 +934,19 @@ export default function RoomForm({ basePath = "/admin/properties" }) {
                       <X size={12} />
                     </button>
                     {i === 0 ? (
-                      <span className="absolute bottom-1 left-1 text-[9px] font-bold bg-[#0F253B] text-white px-1.5 py-0.5 rounded">Cover</span>
+                      <span className="absolute bottom-1 left-1 text-[9px] font-bold bg-[#0F253B] text-white px-1.5 py-0.5 rounded">Cover image</span>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => makeCover(i)}
-                        title="Make cover image"
-                        className="absolute bottom-1 left-1 flex items-center gap-1 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <Star size={9} /> Cover
-                      </button>
+                      <>
+                        <span className="absolute bottom-1 left-1 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 rounded">Gallery</span>
+                        <button
+                          type="button"
+                          onClick={() => makeCover(i)}
+                          title="Make cover image"
+                          className="absolute bottom-1 right-1 flex items-center gap-1 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                        >
+                          <Star size={9} /> Make cover
+                        </button>
+                      </>
                     )}
                   </div>
                 ))}
